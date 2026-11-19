@@ -2,6 +2,7 @@ import {
   actualPaidHeaderBlockBytes,
   HEADER_BLOCK_CEILING_BYTES,
   withCheckoutDetailsHeader,
+  X_CHECKOUT_DETAILS_HEADER,
 } from './checkout-details.js'
 import {
   AgentPaymentNextAction,
@@ -24,7 +25,7 @@ import {
   X402_RETRY_REJECTED_STATUS,
   mcpSettlementFromToolResult,
 } from './mcp-merchant-transport.js'
-import { x402PaymentHeaderNamesSent, x402PaymentHeaderSchemeOf } from './x402.js'
+import { x402PaymentHeaderNamesFor, x402PaymentHeaderNamesSent, x402PaymentHeaderSchemeOf } from './x402.js'
 import { decidePostFundingMerchantAnswer, parseProtocolReceiptHeader } from './merchant-answer.js'
 // #4763: the two receipt parsers live in merchant-answer.ts now — the leaf both
 // sides can import — so this module's export surface is unchanged while the
@@ -317,7 +318,22 @@ export class MerchantCompletion {
     // the payment header; a required field was already checked against the
     // conservative estimate before any money moved.
     if (checkoutDetailsHeader !== undefined) {
-      const fits = actualPaidHeaderBlockBytes(receipt.paymentHeader, checkoutDetailsHeader) <= HEADER_BLOCK_CEILING_BYTES
+      const headers = new Headers(retryInit?.headers)
+      for (const name of x402PaymentHeaderNamesFor(receipt.paymentHeader)) headers.delete(name)
+      headers.delete(X_CHECKOUT_DETAILS_HEADER)
+      const fits =
+        actualPaidHeaderBlockBytes({
+          headers,
+          paymentHeader: receipt.paymentHeader,
+          paymentHeaderNames: x402PaymentHeaderNamesFor(receipt.paymentHeader),
+          answerHeader: checkoutDetailsHeader,
+        }) <= HEADER_BLOCK_CEILING_BYTES
+      if (!fits) {
+        // Names and sizes only, never a value (§6).
+        process.stderr.write(
+          `[haven-sdk] checkout details: outcome=dropped_over_budget bytes=${checkoutDetailsHeader.length} at=paid_request\n`,
+        )
+      }
       retryInit = withCheckoutDetailsHeader(retryInit, fits ? checkoutDetailsHeader : undefined)
     }
 

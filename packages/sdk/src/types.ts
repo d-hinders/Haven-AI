@@ -671,6 +671,16 @@ export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
 
   /** Original or freshly parsed x402 requirements for the merchant retry. */
   paymentRequired: X402PaymentRequired
+
+  /**
+   * @internal #4872: run after the resume's own checks (the status read, the
+   * resumability check and the already-settled check) and BEFORE the payment
+   * header is re-signed. `resumeX402Payment` decides checkout details here,
+   * so a refusal reports a payment that really is funded and resumable, and
+   * leaves the authorization unused. Not called on an in-process cached
+   * receipt.
+   */
+  beforeResign?: () => Promise<void>
 }
 
 export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
@@ -2104,7 +2114,7 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
   [AgentPaymentFailureCode.MerchantNotReady]:
     'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint — except an out-of-gas refusal (reason_code settlement_wallet_out_of_gas), which needs the merchant\'s operator to top up its settlement wallet before any retry can succeed.',
   [AgentPaymentFailureCode.CheckoutDetailsUnavailable]:
-    'The merchant requires a checkout detail (receipt email, billing or shipping address) that this agent cannot share: the owner has not turned sharing on for this agent, has not saved the field, or Haven could not read it. No payment was created and no funds moved. Stop and tell the user which field the merchant needs and that the owner can save it in business details and turn on sharing for this agent.',
+    'The merchant requires a checkout detail (receipt email, billing or shipping address) that this agent cannot share: the owner has not turned sharing on for this agent, has not saved the field, it does not fit, or Haven could not read it. Refused before the payment is authorised, so nothing is paid for this request; on a resume, the funded payment is not delivered and can be resumed again. Stop and tell the user which field the merchant needs and that the owner can save it in business details and turn on sharing for this agent.',
 }
 
 /**
@@ -3146,11 +3156,20 @@ export class MerchantTimeoutError extends HavenApiError {
  * and repeating it unchanged gets the same answer. The body carries the code,
  * the missing field NAMES (never values), the reason and the next action.
  */
+/** #4872: why a checkout detail could not be shared (mirrors `CheckoutDetailsRefusalReason`). */
+export type CheckoutDetailsRefusalReasonName =
+  | 'not_shared'
+  | 'feature_disabled'
+  | 'not_stored'
+  | 'over_budget'
+  | 'unreadable'
+  | 'backend_unsupported'
+
 export class CheckoutDetailsUnavailableError extends HavenApiError {
   readonly checkoutDetailsErrorCode = 'checkout_details_unavailable' as const
   constructor(
     public readonly missingFields: string[],
-    public readonly reason: string,
+    public readonly reason: CheckoutDetailsRefusalReasonName,
     message: string,
   ) {
     super(

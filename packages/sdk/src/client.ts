@@ -1474,7 +1474,9 @@ export class HavenClient {
     const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
     // #4872: decided BEFORE authorisation — a required checkout detail that
     // cannot be shared refuses here, with no payment created.
-    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, quote.paymentRequired, quote.request.url)
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, quote.paymentRequired, quote.request.url, {
+      requestHeaders: requestInitFromSnapshot(quote.request).headers,
+    })
 
     try {
       // #3378: forward every authorization option (taskBudgetId included —
@@ -1628,6 +1630,9 @@ export class HavenClient {
       )
     }
 
+    // #4872: the caller's last word before the re-sign (checkout details).
+    if (input.beforeResign) await input.beforeResign()
+
     // #3888: the resume re-signs the SAME derived nonce the original header
     // carried, so a settled payment's re-signed authorization is refused by
     // the merchant as already used instead of paying twice (#3475).
@@ -1662,17 +1667,31 @@ export class HavenClient {
 
     // #4872: the payment is already funded. A required checkout detail that
     // cannot be shared is reported and the paid request is NOT sent — the
-    // goods would be bought without what the merchant needs. Checked before
-    // the re-sign, so a refused resume leaves the authorization unused and a
-    // later resume (once the owner fixed it) re-signs the same nonce (§5).
+    // goods would be bought without what the merchant needs. Decided AFTER
+    // the resume's own status, resumability and already-settled checks (so a
+    // settled or unresumable payment gets its true answer, never "funded but
+    // not delivered") and BEFORE the re-sign, so a refused resume leaves the
+    // authorization unused and a later resume re-signs the same nonce (§5).
+    // An in-process cached receipt skips the hook; it is decided after.
     const resumeUrl = url ?? paymentRequired.resource.url
-    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, resumeUrl, { funded: true })
+    const decideCheckoutDetails = () =>
+      checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, resumeUrl, {
+        funded: true,
+        requestHeaders: initialInit?.headers,
+      })
+    let checkoutDetailsHeader: string | undefined
+    let checkoutDetailsDecided = false
 
     const receipt = await this.resumeAuthorizedX402({
       paymentId: input.paymentId,
       paymentRequired,
       idempotencyKey: input.idempotencyKey,
+      beforeResign: async () => {
+        checkoutDetailsHeader = await decideCheckoutDetails()
+        checkoutDetailsDecided = true
+      },
     })
+    if (!checkoutDetailsDecided) checkoutDetailsHeader = await decideCheckoutDetails()
 
     return this.merchantCompletion.retryRequest(resumeUrl, initialInit, paymentRequired, receipt, checkoutDetailsHeader)
   }
@@ -1774,7 +1793,9 @@ export class HavenClient {
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
     // #4872: decided BEFORE authorisation; a required checkout detail that
     // cannot be shared refuses here, with no payment created.
-    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, url)
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, url, {
+      requestHeaders: requestInit?.headers,
+    })
     let receipt: X402Receipt
     try {
       receipt = await this.authorizeX402(paymentRequired, options)

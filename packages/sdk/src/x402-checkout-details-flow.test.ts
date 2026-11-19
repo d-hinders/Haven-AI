@@ -1,10 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
+import { MerchantCompletion } from './merchant-completion.js'
+import { X402FundingLeg } from './x402-funding-leg.js'
+import { McpMerchantTransport } from './mcp-merchant-transport.js'
+import { encodeBase64Json } from './base64.js'
+import { X_TAX_DECLARATION_HEADER } from './client-tax-declaration.js'
 import { addressFromKey } from './edge-signing.js'
 import { CHECKOUT_DETAILS_EXTENSION, X_CHECKOUT_DETAILS_HEADER } from './checkout-details.js'
 import { CheckoutDetailsUnavailableError } from './types.js'
 import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
-import type { X402PaymentOption, X402PaymentRequired } from './types.js'
+import type { X402PaymentOption, X402PaymentRequired, X402Receipt } from './types.js'
 
 /**
  * #4872 flow tests, through the REAL client (`fetch`, `payX402Quote`,
@@ -270,14 +275,40 @@ describe('checkout details on the paid request (#4872)', () => {
     it('resumeX402Payment (already funded): reports the refusal, does not re-sign and does not send the paid request', async () => {
       const paymentRequired = challenge(ask({ receipt_email: { required: true } }))
       const { calls } = wire('resumeX402Payment', { [DETAILS_PATH]: { available: false, reason: 'disabled' } }, paymentRequired)
+      const resign = vi.spyOn(X402FundingLeg.prototype, 'createPaymentHeader')
       const err = await pay('resumeX402Payment', paymentRequired).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CheckoutDetailsUnavailableError)
       expect((err as Error).message).toContain('funded but was not delivered')
+      // Refused BEFORE the re-sign: the authorization stays unused.
+      expect(resign).not.toHaveBeenCalled()
       expect(merchantCallsOf(calls)).toEqual([])
-      // Refused BEFORE the re-sign: the resume's status read (the first thing
-      // `resumeAuthorizedX402` does) never happened, and nothing was signed.
-      expect(havenCallsOf(calls).some((c) => c.url.includes('/machine-payments/pay_4872/status'))).toBe(false)
+      // Decided AFTER the resume's status check (so "funded" is true) and
+      // before anything reached the merchant.
+      expect(havenCallsOf(calls).some((c) => c.url.includes('/machine-payments/pay_4872/status'))).toBe(true)
       expect(havenCallsOf(calls).some((c) => c.url.includes('/sign'))).toBe(false)
+    })
+
+    it('resumeX402Payment on a payment that is not resumable: the true conflict answer, never the checkout-details refusal', async () => {
+      const paymentRequired = challenge(ask({ receipt_email: { required: true } }))
+      const settled = {
+        '/machine-payments/pay_4872/status': {
+          ...resumeStatus['/machine-payments/pay_4872/status'],
+          status: 'settled',
+          phase: 'settled',
+          next_action: 'none',
+          message: 'This payment has already settled.',
+        },
+      }
+      const { calls } = stubWire(
+        { ...fundingStubs(), ...settled, [DETAILS_PATH]: { available: false, reason: 'disabled' } },
+        paymentRequired,
+        { paidFromFirstMerchantCall: true },
+      )
+      const err = await pay('resumeX402Payment', paymentRequired).catch((e: unknown) => e)
+      expect(err).not.toBeInstanceOf(CheckoutDetailsUnavailableError)
+      expect((err as Error).message).toContain('already settled')
+      // The details were never read: the resume stopped at its own check.
+      expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
     })
   })
 
@@ -339,6 +370,96 @@ describe('checkout details on the paid request (#4872)', () => {
       expect(typeof out.payment_header).toBe('string')
       expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
     })
+  })
+
+  it("rides beside the tax declaration: an opted-in agent's paid request carries both headers", async () => {
+    const declaration = { version: 'x402-tax-1', jurisdiction: 'DE', taxableStatus: 'TAXABLE_PERSON', taxId: 'DE123456789', validUntil: 1790912400000 }
+    const paymentRequired = challenge(ask({ receipt_email: { required: true } }))
+    const { calls } = wire(
+      'fetch',
+      { [DETAILS_PATH]: STORED, '/agents/agent_4872/tax-declaration': { available: true, declaration } },
+      paymentRequired,
+    )
+    expect((await pay('fetch', paymentRequired)).status).toBe(200)
+    const headers = new Headers(paidRetry(calls)?.init?.headers)
+    expect(headers.has(X_TAX_DECLARATION_HEADER)).toBe(true)
+    expect(answerOf(paidRetry(calls))).toEqual({ version: 1, receipt_email: EMAIL })
+  })
+
+  it("counts the caller's own headers before paying: a required field that would not fit is refused, no payment created", async () => {
+    const paymentRequired = challenge(ask({ receipt_email: { required: true } }))
+    const { calls } = wire('fetch', { [DETAILS_PATH]: STORED }, paymentRequired)
+    const err = await newClient()
+      .fetch(MERCHANT_URL, { method: 'GET', headers: { 'x-big': 'b'.repeat(15000) } })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(CheckoutDetailsUnavailableError)
+    expect((err as CheckoutDetailsUnavailableError).reason).toBe('over_budget')
+    expect(authorizeCalls(calls)).toEqual([])
+  })
+
+  describe('the safety net at the paid request measures the real block (§3)', () => {
+    const receipt: X402Receipt = {
+      success: true,
+      paymentId: 'pay_net',
+      txHash: TX_HASH,
+      token: 'USDC',
+      amount: '0.02',
+      to: DELEGATE_ADDRESS,
+      resourceUrl: MERCHANT_URL,
+      explorerUrl: '',
+      accepted,
+      paymentHeader: encodeBase64Json({ x402Version: 2, accepted, payload: {} }),
+    }
+    const completion = () =>
+      new MerchantCompletion({
+        post: (async () => ({})) as unknown as <T>(path: string, body: Record<string, unknown>) => Promise<T>,
+        merchantTransport: new McpMerchantTransport(),
+        getPaymentStatus: (async () => {
+          throw new Error('not read')
+        }) as never,
+        getAgent: (async () => {
+          throw new Error('not read')
+        }) as never,
+        delegateAddress: DELEGATE_ADDRESS,
+        x402Wallet: undefined,
+      })
+    const delivered = () => vi.mocked(globalThis.fetch).mock.calls.at(-1) as unknown as [string, RequestInit]
+    const ok = () =>
+      vi.spyOn(globalThis, 'fetch').mockImplementation(
+        async () => new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      )
+
+    it('a block that fits: the answer is attached', async () => {
+      ok()
+      await completion().retryRequest(MERCHANT_URL, { method: 'GET' }, challenge(), receipt, 'ANSWER')
+      expect(new Headers(delivered()[1]?.headers).get(X_CHECKOUT_DETAILS_HEADER)).toBe('ANSWER')
+    })
+
+    it("a block the request's own headers push past 16 KB: the answer is dropped (never the payment header), and the drop is logged without a value", async () => {
+      ok()
+      const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
+      await completion().retryRequest(
+        MERCHANT_URL,
+        { method: 'GET', headers: { 'x-big': 'b'.repeat(15500) } },
+        challenge(),
+        receipt,
+        'A'.repeat(1400),
+      )
+      const headers = new Headers(delivered()[1]?.headers)
+      expect(headers.has(X_CHECKOUT_DETAILS_HEADER)).toBe(false)
+      expect(headers.has('payment-signature')).toBe(true)
+      const logged = stderr.mock.calls.map((c) => String(c[0])).join('')
+      expect(logged).toContain('outcome=dropped_over_budget')
+      expect(logged).not.toContain('A'.repeat(50))
+    })
+  })
+
+  it('a challenge with no compatible option keeps its own refusal: no read of the details and no checkout-details refusal', async () => {
+    const erc7710Only = { ...challenge(ask({ receipt_email: { required: true } })), accepts: [{ ...accepted, extra: { assetTransferMethod: 'erc7710' } }] }
+    const { calls } = wire('fetch', { [DETAILS_PATH]: { available: false, reason: 'disabled' } }, erc7710Only)
+    const err = await pay('fetch', erc7710Only).catch((e: unknown) => e)
+    expect(err).not.toBeInstanceOf(CheckoutDetailsUnavailableError)
+    expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
   })
 })
 

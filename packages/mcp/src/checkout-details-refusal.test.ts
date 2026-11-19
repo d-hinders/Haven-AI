@@ -37,6 +37,8 @@ describe('#4872 the local tools answer a checkout-details refusal as a typed ref
   const cases: Array<[string, 'fetch' | 'payX402Quote', unknown]> = [
     ['haven_pay_x402', 'fetch', { url: 'https://merchant.example/paid', max_amount_human: '1' }],
     ['haven_pay_x402_quote', 'payX402Quote', { quote: QUOTE, max_amount_human: '1' }],
+    // haven_pay_mcp_tool reaches the same seam through haven.fetch.
+    ['haven_pay_mcp_tool', 'fetch', { merchant_url: 'https://merchant.example/mcp', tool_name: 'joke', idempotency_key: 'k-4872' }],
   ]
   for (const [tool, method, input] of cases) {
     it(`${tool}: CHECKOUT_DETAILS_UNAVAILABLE with the field names, the reason and stop_and_tell_user`, async () => {

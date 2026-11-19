@@ -1,4 +1,5 @@
 import {
+  CHECKOUT_DETAILS_EXTENSION,
   checkoutDetailsRequestOf,
   decideCheckoutDetails,
   estimatePaidHeaderBlockBytes,
@@ -46,9 +47,16 @@ export async function readCheckoutDetailsAvailability(client: {
   get: <T>(path: string) => Promise<T>
 }): Promise<CheckoutDetailsAvailability> {
   let body: { available?: unknown; reason?: unknown; checkout_details?: unknown } | null
+  let agentId: string
   try {
-    const agent = await client.getAgent()
-    body = await client.get(`/agents/${agent.id}/checkout-details`)
+    agentId = (await client.getAgent()).id
+  } catch {
+    // The agent's own identity read failing says nothing about the backend's
+    // age: unreadable, never `backend_unsupported`.
+    return { available: false, reason: 'unreadable' }
+  }
+  try {
+    body = await client.get(`/agents/${agentId}/checkout-details`)
   } catch (err) {
     if (err instanceof HavenApiError && err.statusCode === 404) return { available: false, reason: 'backend_unsupported' }
     return { available: false, reason: 'unreadable' }
@@ -129,20 +137,33 @@ export function logCheckoutDetailsOutcome(decision: CheckoutDetailsDecision, url
 export async function resolveCheckoutDetails(
   client: { getAgent: () => Promise<{ id: string }>; get: <T>(path: string) => Promise<T> },
   paymentRequired: X402PaymentRequired,
+  /** The paid request's own headers, counted in the block estimate. */
+  requestHeaders?: HeadersInit,
 ): Promise<CheckoutDetailsDecision> {
   const request = checkoutDetailsRequestOf(paymentRequired)
-  if (request === null) return { kind: 'none' }
+  if (request === null) {
+    // §2: a malformed entry is no request, and the shape failure is logged
+    // (its presence, never its content).
+    const extensions = paymentRequired.extensions as Record<string, unknown> | undefined
+    if (extensions && extensions[CHECKOUT_DETAILS_EXTENSION] !== undefined) {
+      process.stderr.write('[haven-sdk] checkout details: outcome=unreadable_request (no answer sent)\n')
+    }
+    return { kind: 'none' }
+  }
+  // The option the SDK will pay with. None compatible: the authorization
+  // refuses with its own "no compatible option" answer, which must not be
+  // masked by a checkout-details read or refusal.
+  const accepted = selectStandardPaymentOption(paymentRequired.accepts)
+  if (!accepted) return { kind: 'none' }
   // A request that asks only for optional fields never needs the read to
   // succeed, but it still reads: an optional field is sent when it can be.
   const availability = await readCheckoutDetailsAvailability(client)
   const decided = decideCheckoutDetails(request, availability)
-  const accepted = selectStandardPaymentOption(paymentRequired.accepts) ?? paymentRequired.accepts[0]
-  if (!accepted) return decided
-  // Conservative: which option the authorization picks is decided later, so
-  // the larger erc7710 payload is assumed whenever the challenge offers one.
-  const isErc7710 = paymentRequired.accepts.some((option) => isErc7710Option(option))
+  // The block is estimated for the scheme actually paid: the SDK paths pay
+  // the selected standard (EIP-3009) option, never erc7710.
+  const isErc7710 = isErc7710Option(accepted)
   return withinHeaderBlock(decided, request, (answerHeader) =>
-    estimatePaidHeaderBlockBytes({ paymentRequired, accepted, isErc7710, answerHeader }),
+    estimatePaidHeaderBlockBytes({ paymentRequired, accepted, isErc7710, answerHeader, requestHeaders }),
   )
 }
 
@@ -159,9 +180,9 @@ export async function checkoutDetailsHeaderFor(
   client: { getAgent: () => Promise<{ id: string }>; get: <T>(path: string) => Promise<T> },
   paymentRequired: X402PaymentRequired,
   url: string,
-  { funded = false }: { funded?: boolean } = {},
+  { funded = false, requestHeaders }: { funded?: boolean; requestHeaders?: HeadersInit } = {},
 ): Promise<string | undefined> {
-  const decision = await resolveCheckoutDetails(client, paymentRequired)
+  const decision = await resolveCheckoutDetails(client, paymentRequired, requestHeaders)
   logCheckoutDetailsOutcome(decision, url)
   if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
   return decision.kind === 'answer' ? decision.header : undefined

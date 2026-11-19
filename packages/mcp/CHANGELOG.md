@@ -17,7 +17,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Added
 
-- **Checkout details on the paid x402 request (#4872).** `haven_pay_x402`, `haven_pay_x402_quote` and `haven_resume_x402_payment` reach the SDK seam that answers a merchant's checkout-details request (`docs/architecture/13-checkout-details.md`). A required field this agent cannot share answers `CHECKOUT_DETAILS_UNAVAILABLE` with `missing_fields`, `reason`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`, instead of the generic `API_ERROR`; no payment was created (on resume, the funded payment was not delivered). The three descriptions say so. No update needed.
+- **Checkout details on the paid x402 request (#4872).** `haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool` and `haven_resume_x402_payment` reach the SDK seam that answers a merchant's checkout-details request (`docs/architecture/13-checkout-details.md`). A required field this agent cannot share answers `CHECKOUT_DETAILS_UNAVAILABLE` with `missing_fields`, `reason`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`, instead of the generic `API_ERROR`; no payment was created (on resume, the funded payment was not delivered). The four descriptions say so, including that a resume by `payment_id` alone carries no challenge extensions and so neither shares nor refuses. No update needed.
 
 ### Fixed
 

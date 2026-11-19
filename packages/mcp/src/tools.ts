@@ -527,11 +527,11 @@ const SUBMIT_DESCRIPTION = [
 const LOCAL_CHECKOUT_DETAILS_SENTENCE =
   'When the merchant\'s challenge asks for checkout details (a receipt email, billing or shipping address) and the owner turned sharing on for this agent, the paid request carries only the fields asked for, in X-Checkout-Details, to the seller only. If the merchant marks a field required and this agent cannot share it, the call refuses with CHECKOUT_DETAILS_UNAVAILABLE before any payment is created: stop and tell the user which field the merchant needs.'
 const LOCAL_RESUME_CHECKOUT_DETAILS_SENTENCE =
-  'When the merchant\'s challenge asks for checkout details and a required field cannot be shared, the resume refuses with CHECKOUT_DETAILS_UNAVAILABLE and does not deliver the funded payment: tell the user, and resume again once the owner has saved the field and turned sharing on.'
+  'Resumed from a resume_state that carries the merchant\'s challenge: when it asks for checkout details and a required field cannot be shared, the resume refuses with CHECKOUT_DETAILS_UNAVAILABLE and does not deliver the funded payment — tell the user, and resume again once the owner has saved the field and turned sharing on. Resumed by payment_id alone, the stored state carries no challenge extensions, so checkout details are neither shared nor refused and the payment is delivered as today.'
 
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_send: composeDescription(sharedDescriptions.send, 'local'),
-  haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
+  haven_pay_mcp_tool: `${composeDescription(sharedDescriptions.payMcpTool)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
   haven_pay_x402_quote: `${composeDescription(sharedDescriptions.payX402)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
   haven_pay_x402: `${composeDescription(sharedDescriptions.payX402OneShot)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,

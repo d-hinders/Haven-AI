@@ -22,7 +22,7 @@
  */
 
 import { encodeBase64Json } from './base64.js'
-import type { X402PaymentOption, X402PaymentRequired } from './types.js'
+import type { CheckoutDetailsRefusalReasonName, X402PaymentOption, X402PaymentRequired } from './types.js'
 
 /** The challenge's extension key (§2). */
 export const CHECKOUT_DETAILS_EXTENSION = 'haven-checkout-details'
@@ -123,20 +123,16 @@ function base64UrlJson(value: unknown): string {
   return standard.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
-/** Why a required field could not be shared. */
-export type CheckoutDetailsRefusalReason =
-  /** The owner has not turned sharing on for this agent. */
-  | 'not_shared'
-  /** The deployment has checkout details off; the owner cannot turn sharing on. */
-  | 'feature_disabled'
-  /** Sharing is on, but the owner has not saved this field. */
-  | 'not_stored'
-  /** The answer, or the paid request's header block, would exceed its limit. */
-  | 'over_budget'
-  /** Haven's read of the details failed (a network error, a 5xx, an off-contract body). */
-  | 'unreadable'
-  /** Haven's backend has no agent read at all (a 404: older than #4871). */
-  | 'backend_unsupported'
+/**
+ * Why a required field could not be shared:
+ * - `not_shared`: the owner has not turned sharing on for this agent;
+ * - `feature_disabled`: the deployment has checkout details off;
+ * - `not_stored`: sharing is on, but the owner has not saved this field;
+ * - `over_budget`: the answer, or the paid request's header block, would exceed its limit;
+ * - `unreadable`: Haven's read of the details failed (a network error, a 5xx, an off-contract body);
+ * - `backend_unsupported`: Haven's backend has no agent read at all (a 404: older than #4871).
+ */
+export type CheckoutDetailsRefusalReason = CheckoutDetailsRefusalReasonName
 
 /** What the answer builder decided for one challenge. */
 export type CheckoutDetailsDecision =
@@ -244,6 +240,8 @@ export function estimatePaidHeaderBlockBytes(input: {
   accepted: X402PaymentOption
   isErc7710: boolean
   answerHeader: string | undefined
+  /** The caller's own request headers, which ride the paid request too. */
+  requestHeaders?: HeadersInit
 }): number {
   const envelope = {
     x402Version: input.paymentRequired.x402Version ?? 2,
@@ -254,17 +252,36 @@ export function estimatePaidHeaderBlockBytes(input: {
   }
   const paymentHeaderBytes = encodeBase64Json(envelope).length + PAYMENT_HEADER_NAME_BYTES
   const answerBytes = input.answerHeader ? input.answerHeader.length + ANSWER_HEADER_NAME_BYTES : 0
-  return paymentHeaderBytes + answerBytes + OTHER_HEADERS_ALLOWANCE_BYTES
+  let requestHeaderBytes = 0
+  new Headers(input.requestHeaders).forEach((value, name) => {
+    requestHeaderBytes += name.length + 2 + value.length + 2
+  })
+  return paymentHeaderBytes + answerBytes + requestHeaderBytes + OTHER_HEADERS_ALLOWANCE_BYTES
 }
 
-/** The ACTUAL block's size at the paid request (the safety net): the real payment header plus the answer. */
-export function actualPaidHeaderBlockBytes(paymentHeader: string, answerHeader: string | undefined): number {
-  return (
-    paymentHeader.length +
-    PAYMENT_HEADER_NAME_BYTES +
-    (answerHeader ? answerHeader.length + ANSWER_HEADER_NAME_BYTES : 0) +
-    OTHER_HEADERS_ALLOWANCE_BYTES
-  )
+/**
+ * The ACTUAL block's size at the paid request (the safety net): every header
+ * the request already carries (the caller's own, the session id, the tax
+ * declaration), the real payment header under EACH name it is sent as (a v1
+ * payload goes out twice), and the answer, each counted as
+ * `name: value` plus CRLF. A transport allowance covers the headers the
+ * runtime adds (host, content-length, user-agent).
+ */
+const TRANSPORT_HEADERS_ALLOWANCE_BYTES = 512
+
+export function actualPaidHeaderBlockBytes(input: {
+  headers: Headers
+  paymentHeader: string
+  paymentHeaderNames: readonly string[]
+  answerHeader: string | undefined
+}): number {
+  let bytes = TRANSPORT_HEADERS_ALLOWANCE_BYTES
+  input.headers.forEach((value, name) => {
+    bytes += name.length + 2 + value.length + 2
+  })
+  for (const name of input.paymentHeaderNames) bytes += name.length + 2 + input.paymentHeader.length + 2
+  if (input.answerHeader) bytes += ANSWER_HEADER_NAME_BYTES + input.answerHeader.length
+  return bytes
 }
 
 /**

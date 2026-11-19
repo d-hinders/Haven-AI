@@ -31,8 +31,9 @@ export const SALES_PAGE_SIZE = 50
 
 /**
  * The one sentence that says what a Sales key cannot do (#4984). The Setup
- * tab, the create dialog and the first-run checklist all read it, so the
- * product carries one wording rather than three.
+ * tab's keys section and the create dialog both read it, so those two carry
+ * one wording rather than two. The first-run checklist keeps its own shorter
+ * sentence.
  */
 export const SALES_KEY_CANT_SENTENCE =
   'A key can’t move money, sign, or see anything but this account’s sales.'

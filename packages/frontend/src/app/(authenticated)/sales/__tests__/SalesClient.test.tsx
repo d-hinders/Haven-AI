@@ -57,6 +57,8 @@ vi.mock('@/components/ReceiveDialog', () => ({
 }))
 
 import SalesClient from '../SalesClient'
+import { LocaleProvider } from '@/context/LocaleContext'
+import { ToastProvider } from '@/components/ui/Toast'
 import { previousSalesRange, productFacetValue, salesDayRange, SALES_PAGE_SIZE } from '@/lib/sales'
 
 const SALES_ACCOUNT = {
@@ -245,7 +247,15 @@ const SUMMARY_RATES = { usd: 0.5, eur: 0.92, sek: 10 }
 const PAGE_RATES = { usd: 0.5, eur: 0.5, sek: 99 }
 
 async function renderPage() {
-  render(<SalesClient />)
+  // #4983: the Setup tab now mounts the Stripe deposit addresses, which read
+  // the message catalog and the toast surface — the shell provides both.
+  render(
+    <LocaleProvider>
+      <ToastProvider>
+        <SalesClient />
+      </ToastProvider>
+    </LocaleProvider>,
+  )
   await screen.findByTestId('sales-page')
 }
 

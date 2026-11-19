@@ -159,7 +159,8 @@ test.describe('settings sales section and dialog (#4904, reshaped by #4983)', ()
 
       await expect(card.getByRole('heading', { name: 'Sales' })).toHaveCount(1)
       await expect(card.getByRole('button', { name: 'Turn on Sales' })).toHaveCount(1)
-      await expect(card.getByText('Sales account')).toHaveCount(0)
+      // Exact: the product context above mentions "a separate Sales account".
+      await expect(card.getByText('Sales account', { exact: true })).toHaveCount(0)
       // `/sales` answers not found while Sales is off, so no link to it renders.
       await expect(card.getByRole('link', { name: 'Open the Sales page' })).toHaveCount(0)
       await scrollCardToTop(card)
@@ -178,7 +179,7 @@ test.describe('settings sales section and dialog (#4904, reshaped by #4983)', ()
 
       await expect(card.getByText('Off', { exact: true })).toHaveCount(1)
       await expect(card.getByText('Keys not accepted while off')).toHaveCount(1)
-      await expect(card.getByRole('link', { name: 'Sales' })).toHaveCount(1)
+      await expect(card.getByRole('link', { name: 'Sales', exact: true })).toHaveCount(1)
       await expect(card.getByRole('link', { name: 'Open the Sales page' })).toHaveCount(0)
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
@@ -197,7 +198,8 @@ test.describe('settings sales section and dialog (#4904, reshaped by #4983)', ()
       await expect(card.getByText('On', { exact: true })).toHaveCount(1)
       await expect(card.getByRole('button', { name: 'Turn off Sales' })).toHaveCount(1)
       await expect(card.getByRole('link', { name: 'Open the Sales page' })).toHaveCount(1)
-      await expect(card.getByRole('link', { name: 'Sales' })).toHaveCount(1)
+      // Exact: "Open the Sales page" also contains "Sales".
+      await expect(card.getByRole('link', { name: 'Sales', exact: true })).toHaveCount(1)
       // #4983: the Stripe deposit addresses moved to Sales → Setup.
       await expect(card.getByTestId('sales-deposit-addresses')).toHaveCount(0)
       await scrollCardToTop(card)

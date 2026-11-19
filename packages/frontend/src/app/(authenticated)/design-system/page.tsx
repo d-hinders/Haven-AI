@@ -4323,6 +4323,22 @@ export default function DesignSystemPage() {
         description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. The Sales By-day chart splits by where the money was received when a period has Stripe-held sales: “In Haven” (index 0) and “In Stripe” (index 1), a zero segment dropped. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape, extracted in #4905 as ShowOnceCredentialBlock and used by PaymentCredentialsModal, ReplaceSigningKeyModal and the Sales key dialog."
       >
         <div className="grid items-start gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
+          {/* #4981: first in the grid, so its clip test can isolate it (a multi-track
+              grid keeps the cells above a sample, which would push it under the fold). */}
+          <div className="lg:col-span-2" data-testid="ds-sales-received-chart">
+            <Card hover={false} className="p-5">
+              <h3 className="mb-3 text-sm font-semibold text-[var(--v2-ink)]">Revenue by where received</h3>
+              <StackedBarChart
+                days={DS_RECEIVED_DAYS}
+                currency="USD"
+                ariaLabel={DS_RECEIVED_SUMMARY}
+                formatValue={dsMoney}
+                formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
+                hideRefusals
+              />
+            </Card>
+          </div>
+
           <div data-testid="ds-sales-ledger">
             <Card hover={false} className="overflow-hidden">
               <TransactionActivityDayHeader label="Today" />
@@ -4421,20 +4437,6 @@ export default function DesignSystemPage() {
               formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
             />
           </Card>
-
-          <div className="lg:col-span-2" data-testid="ds-sales-received-chart">
-            <Card hover={false} className="p-5">
-              <h3 className="mb-3 text-sm font-semibold text-[var(--v2-ink)]">Revenue by where received</h3>
-              <StackedBarChart
-                days={DS_RECEIVED_DAYS}
-                currency="USD"
-                ariaLabel={DS_RECEIVED_SUMMARY}
-                formatValue={dsMoney}
-                formatTick={(n, step) => formatAnalyticsTick(n, step, 'USD')}
-                hideRefusals
-              />
-            </Card>
-          </div>
 
           <Card hover={false} className="p-5">
             <DetailList

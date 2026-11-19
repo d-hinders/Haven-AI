@@ -60,6 +60,7 @@ import {
   requireSettleableSelection,
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
+import { refuseUnshareableCheckoutDetails } from './support/checkout-details.js'
 import { resolveCatalogCallArguments } from './support/catalog-arguments.js'
 import { DELEGATION_EXPIRED_OMITTED_REASON, HostedToolError, runTool } from './support/errors.js'
 import {
@@ -333,6 +334,13 @@ export function createCatalogPurchaseHandlers(
           // Moving it below the agent prefetch changes no error ordering: the
           // prefetch is `.then(a => a, () => undefined)`, so it cannot throw.
           const priced = priceSelectedOption(cap, paySelection.option)
+
+          // #4872: a required checkout detail this agent cannot share refuses
+          // HERE — after the quote, cap and scheme, before any funding intent
+          // or settlement child exists — sized for the option actually paid.
+          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, paySelection.option, {
+            idempotencyKey: args.idempotency_key as string | undefined,
+          })
 
           if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
@@ -984,6 +992,11 @@ export function createCatalogPurchaseHandlers(
           // 8. The scheme was selected at step 4 (#2051), so the cap and the
           // budget pre-check could both be asked about the option that will
           // actually be authorized rather than a different accepts[] entry.
+          // #4872: the same refusal as haven_pay_mcp_tool, before any intent.
+          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, catalogSelection.option, {
+            idempotencyKey: args.idempotency_key as string | undefined,
+          })
+
           const catalogCallContext = {
             merchantUrl,
             toolName: entry.toolName,

@@ -262,6 +262,7 @@ describe('checkout details on the paid request (#4872)', () => {
             code: 'CHECKOUT_DETAILS_UNAVAILABLE',
             missing_fields: ['receipt_email'],
             reason,
+            stage: 'before_payment',
             next_action: 'stop_and_tell_user',
           })
           expect(refusal.message).toContain('No payment was created')
@@ -460,6 +461,59 @@ describe('checkout details on the paid request (#4872)', () => {
     const err = await pay('fetch', erc7710Only).catch((e: unknown) => e)
     expect(err).not.toBeInstanceOf(CheckoutDetailsUnavailableError)
     expect(havenCallsOf(calls).some((c) => c.url.includes('/checkout-details'))).toBe(false)
+  })
+
+  it('the hosted settle reads the merchant request back: getX402MerchantCallContext carries checkout_details_request verbatim, and omits it when absent', async () => {
+    const request = { info: { version: 1, fields: { receipt_email: { required: true } } } }
+    const base = { payment_id: 'pay_ctx', merchant_url: 'https://merchant.example/mcp', tool_name: 't', arguments: {} }
+    const answers = [{ ...base, checkout_details_request: request }, base]
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify(answers.shift()), { status: 200 }))
+    const client = newClient()
+    expect((await client.getX402MerchantCallContext('pay_ctx')).checkoutDetailsRequest).toEqual(request)
+    expect('checkoutDetailsRequest' in (await client.getX402MerchantCallContext('pay_ctx'))).toBe(false)
+  })
+
+  it('readCheckoutDetails: the keyless hosted read of the agent\'s own details, never throwing', async () => {
+    const { calls } = wire('fetch', { [DETAILS_PATH]: STORED }, challenge())
+    expect(await newClient().readCheckoutDetails()).toEqual({ available: true, values: STORED.checkout_details })
+    expect(havenCallsOf(calls).some((c) => c.url.endsWith(DETAILS_PATH))).toBe(true)
+  })
+
+  it('completeX402MerchantCall (the hosted delivery): paidRequestHeaders ride ONLY the paid tools/call, never the MCP initialize or notifications/initialized', async () => {
+    const seen: Array<{ method: string; headers: Headers }> = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.startsWith(HAVEN_BASE)) {
+        if (url.endsWith('/machine-payments/pay_hs/status')) {
+          return new Response(JSON.stringify({ ...resumeStatus['/machine-payments/pay_4872/status'], payment_id: 'pay_hs', status: 'submitted', phase: 'awaiting_merchant', tx_hash: null, resource_url: 'https://merchant.example/mcp' }), { status: 200 })
+        }
+        return new Response(JSON.stringify({}), { status: 200 })
+      }
+      const body = typeof init?.body === 'string' ? (JSON.parse(init.body) as { method?: string }) : {}
+      seen.push({ method: body.method ?? '?', headers: new Headers(init?.headers) })
+      if (body.method === 'initialize') {
+        return new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: {} }), { status: 200, headers: { 'Content-Type': 'application/json', 'mcp-session-id': 'sess-1' } })
+      }
+      if (body.method === 'notifications/initialized') return new Response(null, { status: 202 })
+      return new Response(JSON.stringify({ jsonrpc: '2.0', id: 2, result: { content: [] } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+    })
+    await newClient()
+      .completeX402MerchantCall({
+        url: 'https://merchant.example/mcp',
+        init: { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 't', arguments: {} } }) },
+        paymentId: 'pay_hs',
+        paymentHeader: 'eyJ4IjoxfQ==',
+        mcpTransport: { handshakeRequired: true, source: 'path' },
+        noFundingLeg: true,
+        paidRequestHeaders: { [X_CHECKOUT_DETAILS_HEADER]: 'ANSWER' },
+      })
+      .catch(() => undefined)
+    const byMethod = (m: string) => seen.filter((r) => r.method === m)
+    expect(byMethod('initialize').length).toBeGreaterThan(0)
+    for (const r of [...byMethod('initialize'), ...byMethod('notifications/initialized')]) {
+      expect(r.headers.has(X_CHECKOUT_DETAILS_HEADER), r.method).toBe(false)
+    }
+    expect(byMethod('tools/call').at(-1)?.headers.get(X_CHECKOUT_DETAILS_HEADER)).toBe('ANSWER')
   })
 })
 

@@ -12,7 +12,7 @@ import {
 } from './checkout-details.js'
 import { isErc7710Option, selectStandardPaymentOption } from './x402.js'
 import { CheckoutDetailsUnavailableError, HavenApiError } from './types.js'
-import type { X402PaymentRequired } from './types.js'
+import type { X402PaymentOption, X402PaymentRequired } from './types.js'
 
 /**
  * Checkout details on the paid x402 request (#4872): the wire half. Sibling of
@@ -86,22 +86,58 @@ const REASON_WORDS: Record<CheckoutDetailsRefusalReason, string> = {
   over_budget: 'it does not fit in the paid request',
   unreadable: 'Haven could not read the owner’s checkout details right now; try again',
   backend_unsupported: 'this Haven backend does not support checkout details yet',
+  merchant_mismatch: 'the merchant URL given is not the one this payment was quoted for, so the owner\u2019s details are not sent to it',
 }
 
 /** The refusal, as the error the SDK throws. Field names only, never values. */
 export function checkoutDetailsRefusalError(
   missingFields: CheckoutDetailField[],
   reason: CheckoutDetailsRefusalReason,
-  { funded = false }: { funded?: boolean } = {},
+  {
+    funded = false,
+    unsent = false,
+    priorPaymentPossible = false,
+    intentExists = false,
+    stateUnknown = false,
+    paymentId,
+  }: {
+    /** The payment is funded (EIP-3009 after the funding leg): it is not delivered. */
+    funded?: boolean
+    /** A settlement exists but was never sent to the merchant (erc7710 at settle): nothing moved. */
+    unsent?: boolean
+    /**
+     * The call carried an idempotency key an earlier call may already have
+     * paid under: "nothing moved" is true of THIS call only.
+     */
+    priorPaymentPossible?: boolean
+    /** A settle-time refusal before anything was spent: the intent exists, unfunded and unsent. */
+    intentExists?: boolean
+    /**
+     * A settle-time refusal whose payment state could not be read: this call
+     * moved nothing, but an earlier settle may already have funded or settled it.
+     */
+    stateUnknown?: boolean
+    paymentId?: string
+  } = {},
 ): CheckoutDetailsUnavailableError {
   const names = missingFields.map((f) => FIELD_WORDS[f]).join(', ')
-  const outcome = funded
-    ? 'The payment is funded but was not delivered: resume it once the owner has fixed this.'
-    : 'No payment was created and no funds moved.'
+  const outcome = stateUnknown
+    ? "This call moved nothing, but Haven could not read this payment's state, so it may already have been funded or settled: check its payment status before starting a new purchase."
+    : funded
+    ? 'The payment is funded but was not delivered: finish it once the owner has fixed this.'
+    : unsent
+      ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved; start a new purchase once the owner has fixed this.'
+      : priorPaymentPossible
+        ? 'This call created no payment and moved no funds; if an earlier call with the same idempotency key already paid, check its payment status.'
+        : intentExists
+          ? 'Nothing was funded, submitted or sent for this payment.'
+          : 'No payment was created and no funds moved.'
   return new CheckoutDetailsUnavailableError(
     missingFields,
     reason,
     `The merchant requires the ${names}, which this agent cannot share: ${REASON_WORDS[reason]}. ${outcome}`,
+    stateUnknown ? 'state_unknown' : funded ? 'funded' : unsent ? 'unsent' : 'before_payment',
+    paymentId,
   )
 }
 
@@ -139,6 +175,12 @@ export async function resolveCheckoutDetails(
   paymentRequired: X402PaymentRequired,
   /** The paid request's own headers, counted in the block estimate. */
   requestHeaders?: HeadersInit,
+  /**
+   * The option that will actually be paid, when the caller selected it (the
+   * hosted pay tools choose erc7710 or EIP-3009 themselves). Omitted, the
+   * SDK paths' own selection is used: the standard (EIP-3009) option.
+   */
+  paidOption?: X402PaymentOption,
 ): Promise<CheckoutDetailsDecision> {
   const request = checkoutDetailsRequestOf(paymentRequired)
   if (request === null) {
@@ -153,7 +195,7 @@ export async function resolveCheckoutDetails(
   // The option the SDK will pay with. None compatible: the authorization
   // refuses with its own "no compatible option" answer, which must not be
   // masked by a checkout-details read or refusal.
-  const accepted = selectStandardPaymentOption(paymentRequired.accepts)
+  const accepted = paidOption ?? selectStandardPaymentOption(paymentRequired.accepts)
   if (!accepted) return { kind: 'none' }
   // A request that asks only for optional fields never needs the read to
   // succeed, but it still reads: an optional field is sent when it can be.
@@ -187,3 +229,6 @@ export async function checkoutDetailsHeaderFor(
   if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
   return decision.kind === 'answer' ? decision.header : undefined
 }
+
+/** Re-exported so `HavenClient` reads the type through its one checkout-details import. */
+export type { CheckoutDetailsAvailability } from './checkout-details.js'

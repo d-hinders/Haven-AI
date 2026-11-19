@@ -61,6 +61,7 @@ const boundary: ClientBoundary = {
     'precheckBudget',
     'quoteMcpX402',
     'quoteX402',
+    'readCheckoutDetails', // #4872
     'reportDeliveryQuality', // #3770
     'reportSettlementEvidence',
     'reportX402MerchantOutcome',
@@ -82,7 +83,7 @@ const boundary: ClientBoundary = {
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
     "async closeSubBudget(id: string): Promise<CloseSubBudgetResult>",
     "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
-    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; deliveryReference?: string; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; settlementEvidenceOutcome?: EvidenceReportOutcome; }>",
+    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; paidRequestHeaders?: Record<string, string>; deliveryReference?: string; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; settlementEvidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
     "async createX402Intent(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Intent>",
     "async discoverTools(options: { category?: string; search?: string; rail?: 'x402' | 'mpp'; verified?: 'any' | 'verified' | 'operator'; } = {}): Promise<HavenCatalogEntry[]>",
@@ -105,6 +106,7 @@ const boundary: ClientBoundary = {
     "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
+    "async readCheckoutDetails(): Promise<CheckoutDetailsAvailability>", // #4872: the keyless hosted server's read of the agent's own checkout details
     "async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
     "async listReceiptsPage(options: { limit?: number; cursor?: string; compact?: boolean; } = {}): Promise<HavenPaymentReceiptsPage>", // #3423 compact
@@ -545,6 +547,7 @@ describe('HavenClient structural boundary', () => {
       'X402_PAYMENT_RESPONSE_HEADER_NAME',
       'X402_SETTLEMENT_FORWARD_MARGIN_SECONDS',
       'X_CHECKOUT_DETAILS_HEADER', // #4872
+      'actualPaidHeaderBlockBytes', // #4872
       'addressFromKey',
       'advertisesHavenPassport', // #4722
       'assertBoundDirectPaymentUserOp', // #3283
@@ -684,6 +687,7 @@ describe('HavenClient structural boundary', () => {
       'CheckoutDetailsAvailability', // #4872
       'CheckoutDetailsDecision', // #4872
       'CheckoutDetailsRefusalReason', // #4872
+      'CheckoutDetailsRefusalStage', // #4872
       'CheckoutDetailsRequest', // #4872
       'CheckoutDetailsValues', // #4872
       'ClaudeTool',

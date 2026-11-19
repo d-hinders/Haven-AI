@@ -159,9 +159,9 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
       local: 'eb48bc41ac86',
-      hosted: '7eabc12dd14c',
+      hosted: '5607fe91c40b',
       reason:
-        'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
+        'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer. #4872: both texts state the checkout-details behaviour of their own surface — the local one sends the requested fields on the paid request it makes and refuses before paying; the hosted one refuses before any intent (the answer rides the paid request the settle leg sends).',
     },
   },
   'haven_quote_x402↔haven_quote_x402': {

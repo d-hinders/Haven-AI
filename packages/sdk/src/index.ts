@@ -188,6 +188,7 @@ export type {
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
 export type { HavenApiFailureCause } from './types.js'
+export type { CheckoutDetailsRefusalStage } from './types.js'
 
 export {
   HavenError,
@@ -219,6 +220,7 @@ export {
   CHECKOUT_DETAILS_BUDGET_BYTES,
   CHECKOUT_DETAIL_FIELDS,
   HEADER_BLOCK_CEILING_BYTES,
+  actualPaidHeaderBlockBytes,
   X_CHECKOUT_DETAILS_HEADER,
   checkoutDetailsRequestOf,
   decideCheckoutDetails,

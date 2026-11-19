@@ -6356,6 +6356,8 @@ export type components = {
                 [key: string]: unknown;
             };
             catalog_name?: string;
+            /** @description The merchant's checkout-details request from the stored payment challenge (`extensions["haven-checkout-details"]`), verbatim and unvalidated; absent when it asked for nothing. Field names and required flags only, never the owner's values (#4872). */
+            checkout_details_request?: unknown;
             mcp_transport?: {
                 handshake_required?: boolean;
                 /** @enum {string} */

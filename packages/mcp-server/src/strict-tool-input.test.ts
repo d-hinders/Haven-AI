@@ -532,9 +532,9 @@ describe('#2353 — haven_complete_mcp_tool REFUSES `payment_required` over the 
     // stripped" from "the harness cannot observe arguments at all" — the
     // false-zero shape. `merchant_url` + `tool_name` are declared, and
     // supplying them takes the EXPLICIT context branch of
-    // resolveMerchantCallContext, which skips the rehydration GET. Omitting
-    // them takes the rehydration branch and issues it. So the presence or
-    // absence of that one request is a direct read of whether a declared
+    // resolveMerchantCallContext, which needs no rehydration GET to resolve.
+    // Omitting them takes the rehydration branch and issues it first. So
+    // WHERE that request falls is a direct read of whether a declared
     // argument survived the transport.
     const withContext = await connectedClient()
     await callToolText(withContext, 'haven_complete_mcp_tool', SKILL_INSTRUCTED_ARGS)
@@ -549,8 +549,15 @@ describe('#2353 — haven_complete_mcp_tool REFUSES `payment_required` over the 
     const rehydrated = [...fetches]
 
     const CONTEXT_GET = 'GET /x402/pay_1/merchant-call-context'
-    expect(explicit).not.toContain(CONTEXT_GET)
+    const STATUS_GET = 'GET /machine-payments/pay_1/status'
+    // #4872: the explicit branch also reads the stored context now — but only
+    // for the merchant's checkout-details request, and only AFTER the funding
+    // wait (the payment must be known funded first). The rehydration branch
+    // needs it to know where to call at all, so it reads it BEFORE. The order
+    // is therefore still a direct read of whether the declared keys arrived.
+    expect(explicit.indexOf(CONTEXT_GET)).toBeGreaterThan(explicit.indexOf(STATUS_GET))
     expect(rehydrated).toContain(CONTEXT_GET)
+    expect(rehydrated.indexOf(CONTEXT_GET)).toBeLessThan(rehydrated.indexOf(STATUS_GET))
   })
 })
 

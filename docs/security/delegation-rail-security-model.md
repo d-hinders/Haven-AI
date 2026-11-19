@@ -1667,7 +1667,12 @@ signer imports:
   required field the agent cannot share stops the purchase with
   `CHECKOUT_DETAILS_UNAVAILABLE`, so no intent is created and no funds move —
   and it changes no amount, recipient or signing rule. The values are never
-  logged. The design is `docs/architecture/13-checkout-details.md`.
+  logged. On the hosted MCP-merchant paths the keyless server reads the
+  agent's own details and attaches them to the paid request it sends at
+  settle, in memory only — never stored, logged or returned — and refuses
+  before any intent (or, at settle, before the merchant is contacted) when a
+  required field cannot be shared. The design is
+  `docs/architecture/13-checkout-details.md`.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly
 Haven's binding key declared anything else. On `haven_sign`, every refusal on

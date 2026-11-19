@@ -154,6 +154,29 @@ last-verified: "2026-11-12"
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
 
+> **Contract change (#4872, part 2a, 2026-11-19): checkout details on the
+> hosted MCP-merchant tools.** `packages/mcp-server/src/tools/**` is on this
+> contract's cover list. `haven_pay_mcp_tool` and
+> `haven_prepare_catalog_purchase` refuse a required checkout detail the agent
+> cannot share with `code: "CHECKOUT_DETAILS_UNAVAILABLE"`, `statusCode: 409`,
+> `missing_fields`, `reason`, a `phase` and a `stop_and_tell_user` step with a
+> stage-specific `next_tool_omitted_reason`, before any intent is created.
+> `haven_settle_mcp_tool` decides before the funding relay (EIP-3009) or the
+> settlement submit (erc7710; the header block after it), and
+> `haven_complete_mcp_tool` after the funding wait; both send the requested
+> fields only on the paid `tools/call` as `X-Checkout-Details`. The failure envelope
+> gains the optional `missing_fields` and `reason`. `GET
+> /x402/:id/merchant-call-context` gains the optional `checkout_details_request`
+> (the merchant's request, verbatim from the stored challenge).
+>
+> **What an installed client sees.** The four descriptions gain one sentence
+> each (`tools-list.snapshot.json` regenerated; the description budget is
+> round 35 in `description-size.test.ts`). No tool name, argument, input
+> schema, strict-input list, expected-context version, consent hash or
+> `next-arguments-corpus.json` row changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-hosted.test.ts`.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4872, part 1, 2026-11-19): checkout details on the
 > local paid tools.** `packages/mcp/src/tools.ts` is on this contract's cover
 > list. `haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool` and

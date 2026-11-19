@@ -1,4 +1,8 @@
-import { checkoutDetailsHeaderFor } from './client-checkout-details.js'
+import {
+  checkoutDetailsHeaderFor,
+  readCheckoutDetailsAvailability,
+  type CheckoutDetailsAvailability,
+} from './client-checkout-details.js'
 import { hashTypedData } from 'viem'
 import {
   signHash,
@@ -1876,6 +1880,13 @@ export class HavenClient {
      */
     noFundingLeg?: boolean
     /**
+     * #4872: headers for the PAID request only (the `tools/call` that carries
+     * the payment header) — never the unpaid MCP `initialize` or
+     * `notifications/initialized` handshake, which read `init`. The hosted
+     * settle leg passes the checkout-details answer here.
+     */
+    paidRequestHeaders?: Record<string, string>
+    /**
      * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
      * 6ac7…") threaded from haven_settle_mcp_tool / haven_complete_mcp_tool.
      * Recorded on the evidence row when the merchant accepted, so the owner's
@@ -1934,6 +1945,11 @@ export class HavenClient {
 
     let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
+    if (input.paidRequestHeaders) {
+      const paidHeaders = new Headers(requestInit.headers)
+      for (const [name, value] of Object.entries(input.paidRequestHeaders)) paidHeaders.set(name, value)
+      requestInit = { ...requestInit, headers: paidHeaders }
+    }
 
     // #3171: same session recovery as `retryRequest` — the hosted twin of the
     // local paid retry must not report a settled-nothing 404 as a rejection.
@@ -2194,6 +2210,17 @@ export class HavenClient {
    * payment_id, 409 no stored context, 410 expired) — the caller decides the
    * fallback (re-send the full context explicitly).
    */
+  /**
+   * #4872: the agent's own saved checkout details, as the payment flow reads
+   * them (`GET /agents/:id/checkout-details`, #4871). Never throws: a failed
+   * read, a 404 from an older backend and every "not available" answer are a
+   * named unavailable state. The keyless hosted server reads it to answer a
+   * merchant's checkout-details request; it neither stores nor logs the values.
+   */
+  async readCheckoutDetails(): Promise<CheckoutDetailsAvailability> {
+    return readCheckoutDetailsAvailability({ getAgent: () => this.getAgent(), get: (path) => this.get(path) })
+  }
+
   async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {
     const raw = await this.get<RawX402MerchantCallContext>(
       `/x402/${paymentId}/merchant-call-context`,
@@ -2206,6 +2233,8 @@ export class HavenClient {
       // #3781: the catalog row name rides the same blob; absent on a direct
       // haven_pay_mcp_tool purchase.
       ...(raw.catalog_name ? { catalogName: raw.catalog_name } : {}),
+      // #4872: the merchant's checkout-details request, verbatim (untrusted).
+      ...(raw.checkout_details_request !== undefined ? { checkoutDetailsRequest: raw.checkout_details_request } : {}),
       ...(raw.mcp_transport
         ? {
             mcpTransport: {

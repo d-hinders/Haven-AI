@@ -198,8 +198,11 @@ When the merchant's challenge asks for checkout details under
 [`13-checkout-details.md`](13-checkout-details.md)), the paid retry on the SDK
 paths (`fetch`, `payX402Quote`, `resumeX402Payment`, and the local MCP tools
 that call them) also carries `X-Checkout-Details: <base64url(JSON)>` with only
-the fields asked for. These paths pay the EIP-3009 option; erc7710 answers
-arrive with the hosted paths. It is unsigned, goes to the merchant
+the fields asked for. These paths pay the EIP-3009 option. On the hosted
+MCP-merchant completion (`haven_settle_mcp_tool`, `haven_complete_mcp_tool`)
+Haven's server attaches the same header to the paid request it sends, on
+either scheme, after the pay tools refused any required field the agent could
+not share before the intent. It is unsigned, goes to the merchant
 only, and is never merged into the echoed `extensions` in `PAYMENT-SIGNATURE`.
 It is decided before `authorizeX402`: a required field this agent cannot share
 refuses the purchase with `CHECKOUT_DETAILS_UNAVAILABLE` before any payment is

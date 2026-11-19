@@ -2917,6 +2917,36 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
   })
 
+  it('serves the merchant checkout-details request from the stored challenge, verbatim, and only when asked (#4872)', async () => {
+    const request = { info: { version: 1, fields: { receipt_email: { required: true } } } }
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: {
+        ...CALL_CONTEXT_ROW.machine_metadata,
+        payment_required: { x402Version: 2, accepts: [], extensions: { 'haven-checkout-details': request, bazaar: { info: {} } } },
+      },
+    }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().checkout_details_request).toEqual(request)
+    expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', res.json())
+
+    // A challenge that asked for nothing: the key is absent, never null.
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: { ...CALL_CONTEXT_ROW.machine_metadata, payment_required: { x402Version: 2, accepts: [], extensions: { bazaar: {} } } },
+    }])
+    const none = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(none.statusCode).toBe(200)
+    expect('checkout_details_request' in none.json()).toBe(false)
+  })
+
   it('404s an unknown or foreign payment id (same answer on purpose)', async () => {
     serveIntentRow([])
     const res = await app.inject({

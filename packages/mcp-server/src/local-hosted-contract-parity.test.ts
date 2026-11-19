@@ -158,10 +158,10 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: 'f540347d6c34',
+      local: 'eb48bc41ac86',
       hosted: '7eabc12dd14c',
       reason:
-        'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer.',
+        'The local text describes the whole initialize, pay and retry round trip in one call; the hosted text describes step 1 of a flow that hands a funding intent to the signer. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
     },
   },
   'haven_quote_x402↔haven_quote_x402': {
@@ -197,19 +197,19 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
-      local: '49aa7859cd0a',
+      local: '4ee5539c5e93',
       hosted: '86bacb9685b5',
       reason:
-        'Two different input contracts under one name (a quote object versus a restated request), each described as such.',
+        'Two different input contracts under one name (a quote object versus a restated request), each described as such. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
     },
   },
   'haven_resume_x402_payment↔haven_resume_x402_payment': {
     hostedOnly: { url: '#3097: the hosted tool takes the https URL originally quoted, as haven_pay_x402_quote does.' },
     description: {
-      local: 'fc8f347c51db',
+      local: '0896acd83083',
       hosted: '671adfb0a4d0',
       reason:
-        'The local text retries the merchant itself with the signed header; the hosted text returns the signing context for the signer to rebuild it.',
+        'The local text retries the merchant itself with the signed header; the hosted text returns the signing context for the signer to rebuild it. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
     },
   },
   'haven_discover_tools↔haven_discover_tools': {

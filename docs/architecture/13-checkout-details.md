@@ -439,9 +439,11 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > agent's payment header never reaches this tool); on erc7710 availability
 > before the settlement child is submitted and the real block right after it.
 > The answer comes back in the result for the agent's own retry: in
-> `retry_headers` on erc7710, in `additional_retry_headers` on EIP-3009. It is
-> returned only when the payment did not come from the MCP-tool flow, where
-> `haven_complete_mcp_tool` sends it itself. When the stored challenge cannot
+> `retry_headers` on erc7710, in `additional_retry_headers` on EIP-3009. On
+> EIP-3009 it is returned only when the relay confirmed and the payment is
+> known to be plain HTTP: never on the MCP-tool flow, where
+> `haven_complete_mcp_tool` sends it itself, and never when the flow cannot be
+> read. When the stored challenge cannot
 > be read, the submit proceeds as today and sends no answer (§5, "A path that
 > is not supported"); the pay tool has already refused any required field the
 > agent could not share. On EIP-3009 the answer comes back only once the relay

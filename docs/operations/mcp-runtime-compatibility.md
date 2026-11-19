@@ -164,8 +164,9 @@ last-verified: "2026-11-12"
 > (EIP-3009) or the settlement submit (erc7710; the real header block right
 > after it) and returns the answer for the agent's own retry: erc7710's
 > `retry_headers` gains `X-Checkout-Details`, and an EIP-3009 result gains the
-> optional `additional_retry_headers` (`{ "X-Checkout-Details": … }`), absent
-> on the MCP-tool flow and whenever nothing was asked; its `reason` then says
+> optional `additional_retry_headers` (`{ "X-Checkout-Details": … }`), present
+> only on a confirmed relay of a payment known to be plain HTTP (absent on the
+> MCP-tool flow, when the flow cannot be read, and whenever nothing was asked); its `reason` then says
 > to set them. A challenge that asks for nothing gets today's result. The
 > `unsent` and `state_unknown` next steps now name both legs (settle or
 > submit) and `haven_pay_x402_quote`. New backend read: `GET

@@ -381,7 +381,7 @@ function OpenPanel({
           ) : stripe ? (
             <NoticeRow className="mt-4">
               Paid to the Stripe deposit address you registered, not into {accountName}. It counts in your revenue,
-              but not in the Sales account&apos;s balance.
+              but not in its balance.
             </NoticeRow>
           ) : detail.kind === 'no_product' ? (
             <NoticeRow className="mt-4">

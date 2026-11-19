@@ -12481,7 +12481,7 @@ export const openapiSpec = {
           several_payers: { type: 'boolean' },
           receipt_number: { type: 'string', nullable: true },
           vat_treatment: { type: 'string', nullable: true, enum: ['SE_25', 'REVERSE_CHARGE', null] },
-          held_by: { type: 'string', enum: ['account', 'stripe'], description: '`account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): shown apart, never in a balance.' },
+          held_by: { type: 'string', enum: ['account', 'stripe'], description: '`account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): it counts in the summary revenue figures, split by where received (#4981), and never in a balance.' },
           receiving_address: { type: 'string', nullable: true, description: 'The registered deposit address of a Stripe-held sale; null for an account payment.' },
         },
         additionalProperties: false,

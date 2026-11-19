@@ -335,7 +335,7 @@ function OverviewFigures({
   // breakdown; a payment from several wallets at once has none to count.
   const payersExact = data.unattributed.payments === 0
   const revenuePayments = revenueCount(data)
-    const chart = salesChartFormat(money)
+  const chart = salesChartFormat(money)
   const chartDays = salesChartDays(data, range, chart.rate)
   const productRows = productLines(data, money)
   const payerRows = payerLines(data, money)

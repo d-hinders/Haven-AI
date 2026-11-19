@@ -195,8 +195,9 @@ export function salesCardState(
 
 // ── Stripe deposit addresses (#4954, epic #4886; dev and Stripe sandbox) ────
 // The owner's registry (#4952's `/merchant-deposit-addresses` routes). A sale
-// paid to an active registered address is stored as a Stripe-held sale and is
-// shown apart from the Sales account's figures. The address is the owner's
+// paid to an active registered address is stored as a Stripe-held sale: it
+// counts in the Sales revenue figures, split as "in Stripe" (#4981), and never
+// in the Sales account's balance. The address is the owner's
 // word: Haven cannot check a Stripe-controlled address is theirs, so every
 // registration is "registered by you, not verified by Haven".
 

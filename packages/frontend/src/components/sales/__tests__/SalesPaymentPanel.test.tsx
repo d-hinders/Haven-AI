@@ -220,7 +220,7 @@ describe('the panel, by variant', () => {
     serve({ ...base, held_by: 'stripe', tx_hash: 'pi_3Q8example', payer: null, legs: [] })
     await open()
     const text = screen.getByRole('dialog').textContent ?? ''
-    expect(text).toContain('It counts in your revenue, but not in the Sales account')
+    expect(text).toContain('It counts in your revenue, but not in its balance')
     expect(text).not.toContain('not in your revenue')
   })
 

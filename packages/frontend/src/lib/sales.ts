@@ -287,11 +287,14 @@ export function stripeSalesRaw(summary: SalesSummary): string {
   return summary.received_in_stripe?.amount_raw ?? '0'
 }
 
-/** The part of `revenue_raw` received in the Haven account: the read's answer, else the remainder. */
-export function revenueInAccountRaw(summary: SalesSummary): string {
-  if (typeof summary.revenue_in_account_raw === 'string') return summary.revenue_in_account_raw
-  const rest = BigInt(summary.revenue_raw || '0') - BigInt(stripeSalesRaw(summary))
-  return String(rest > 0n ? rest : 0n)
+/**
+ * The part of `revenue_raw` received in the Haven account, from the read only
+ * (#4981: never derived). A backend from before #4981 does not send it, and
+ * its `revenue_raw` is account-only, so a remainder would state a false split:
+ * null there, and the split is not shown.
+ */
+export function revenueInAccountRaw(summary: SalesSummary): string | null {
+  return typeof summary.revenue_in_account_raw === 'string' ? summary.revenue_in_account_raw : null
 }
 
 /**
@@ -302,7 +305,9 @@ export function revenueInAccountRaw(summary: SalesSummary): string {
  */
 export function revenueSplitText(summary: SalesSummary, money: SalesMoney): string | null {
   if (stripeSalesCount(summary) === 0) return null
-  return `${salesTotalText(revenueInAccountRaw(summary), money)} in Haven · ${salesTotalText(stripeSalesRaw(summary), money)} in Stripe`
+  const inAccount = revenueInAccountRaw(summary)
+  if (inAccount === null) return null
+  return `${salesTotalText(inAccount, money)} in Haven · ${salesTotalText(stripeSalesRaw(summary), money)} in Stripe`
 }
 
 /** True for a sale received in Stripe, from the row's `held_by` (the registry's answer, never the record's). */

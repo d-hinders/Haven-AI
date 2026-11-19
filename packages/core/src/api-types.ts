@@ -5404,7 +5404,7 @@ export type components = {
             /** @enum {string|null} */
             vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
             /**
-             * @description `account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): shown apart, never in a balance.
+             * @description `account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): it counts in the summary revenue figures, split by where received (#4981), and never in a balance.
              * @enum {string}
              */
             held_by: "account" | "stripe";

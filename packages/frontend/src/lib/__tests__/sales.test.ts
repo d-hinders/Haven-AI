@@ -187,10 +187,11 @@ describe('what the summary says', () => {
       received_in_stripe: { count: 1, amount_raw: '10000' },
     } as unknown as SalesSummary
 
-    it('reads the in-account part from the wire, else the remainder', () => {
+    it('reads the in-account part from the wire only; an older backend shows no split (#4981 review)', () => {
       expect(revenueInAccountRaw(split)).toBe('2500')
       const older = { ...split, revenue_in_account_raw: undefined } as unknown as SalesSummary
-      expect(revenueInAccountRaw(older)).toBe('2500')
+      expect(revenueInAccountRaw(older)).toBeNull()
+      expect(revenueSplitText(older, { currency: 'USD', chainId: 8453, rates: undefined })).toBeNull()
     })
 
     it('words the split in the display currency, and only when there is a Stripe sale', () => {

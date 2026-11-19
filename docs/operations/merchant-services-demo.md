@@ -10,8 +10,10 @@ covers:
   - packages/backend/src/routes/merchant-sales-reads.ts
   - packages/backend/src/routes/merchant-deposit-addresses.ts
   - packages/frontend/src/components/settings/StripeDepositAddressesSection.tsx
+  - packages/frontend/src/components/sales/SalesKeysSection.tsx
+  - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
   - packages/frontend/src/components/sales/SalesPaymentPanel.tsx
-last-verified: "2026-11-18"
+last-verified: "2026-11-19"
 ---
 
 # Merchant Services Demo
@@ -74,22 +76,25 @@ the owner's.
 
 ### 1.3 Create a Sales key *(not yet verified)*
 
-The key screens are #4905, not shipped yet, so create the key through the API,
-with the merchant's dashboard session.
+1. As the merchant, open the **Sales** page and its **Setup** tab. Under
+   **Sales keys**, choose **Create Sales key**, then **Create Sales key** again
+   in the dialog (#4905).
+2. The **Your new Sales key** dialog shows the key **once**: `sk_merchant_…`.
+   Choose **Copy key**. This is `<SALES_KEY>`. Paste it straight into Railway
+   (step 1.4), nowhere else.
+3. Choose **Done**. From then on the list shows only the key's first
+   characters. If you lose the key, revoke it (step 4.3) and create a new one.
 
-1. As the merchant, open the browser's developer tools on the dev dashboard and
-   read the session token: the `haven_token` entry in local storage. Treat it as
-   a password. Use it only in your own terminal, never in an issue or a chat.
-2. Create the key:
+The same through the API, with the merchant's dashboard session. The session
+token is the `haven_token` entry in the dev dashboard's local storage. Treat it
+as a password: use it only in your own terminal, never in an issue or a chat.
 
-   ```bash
-   curl -s -X POST "<DEV_API>/merchant-keys" \
-     -H "Authorization: Bearer <MERCHANT_SESSION_TOKEN>"
-   ```
+```bash
+curl -s -X POST "<DEV_API>/merchant-keys" \
+  -H "Authorization: Bearer <MERCHANT_SESSION_TOKEN>"
+```
 
-   The answer's `secret` field carries the key **once**: `sk_merchant_…`. This
-   is `<SALES_KEY>`. A key is shown only at creation. If you lose it, revoke it
-   (step 4.3) and create a new one.
+The answer's `secret` field carries the key once.
 
 ### 1.4 Configure the dev demo merchant *(not yet verified)*
 
@@ -191,6 +196,17 @@ The Stripe sandbox dashboard is optional, for the joke.
 4. **Say:** "Haven shows the sale, but the money is in Stripe's custody: it never
    counts in a Haven balance."
 
+### 2.3 More to show, if there is time *(not yet verified)*
+
+- **Find a payment.** On the Sales page's Overview tab, the payments list has a
+  search box and **Product**, **Payer** and **Recorded** filters (#4959, #4960).
+  With a filter set, the tiles and breakdowns follow it.
+- **Revenue beside spending.** Open **Analytics** and switch from **Spending**
+  to **Revenue** (#4901).
+- **The merchant's currency.** Amounts follow the merchant user's display
+  currency. In SEK or EUR they are priced at today's rate, and repriced totals
+  carry "≈" (#4963).
+
 ## 3. Checks before a showing
 
 Run these on the day of a showing.
@@ -284,7 +300,9 @@ curl -s -X DELETE "<DEV_API>/merchant-sales/payments/<TX_HASH>/record" \
 ### 4.3 Rotate the Sales key *(not yet verified)*
 
 1. Create a new key (step 1.3), set it as `MERCHANT_SALES_KEY` and redeploy.
-2. Revoke the old one:
+2. Revoke the old one: on the Sales page's **Setup** tab, under **Sales keys**,
+   choose **Revoke** beside it, then **Revoke key**. It stays listed as Revoked. Through
+   the API:
 
    ```bash
    curl -s "<DEV_API>/merchant-keys" -H "Authorization: Bearer <MERCHANT_SESSION_TOKEN>"   # find its id
@@ -295,11 +313,11 @@ A report sent with a revoked key is refused, and is not resent.
 
 ## 5. What the demo does not show yet
 
-| Not yet | Issue |
+| Not yet | Why |
 |---|---|
-| The Sales key screens (create, show once, list, revoke) | #4905 |
-| Revenue in Analytics | #4901 |
-| Searching and filtering payments, and "last paid" per payer | #4959 (reads), #4960 (page) |
+| The demo merchant's other products on the Sales page | Owner decision 2026-11-18: one Haven product plus the Stripe joke. The rest keep paying `MERCHANT_ADDRESS`. |
+| What a sale was worth on the day it was made | SEK and EUR amounts use today's rate, not the rate at the time of the sale (#4963). |
+| What Stripe shows for a payment the merchant never recorded there | Not tested (#4902). Every joke sale in the demo goes through the recorder, so the case does not arise. |
 
 Production use is out of scope. Before any production use, a proof that the
 merchant owns its deposit address is required (owner decision 2026-11-18,

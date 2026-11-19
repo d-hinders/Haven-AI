@@ -881,9 +881,9 @@ service.
 
 1. **First, on the dev Haven deployment**, as the demo merchant's Haven user:
    turn on Sales (Settings → Business → Sales), which creates the Sales
-   account, and create a Sales key for it (`POST /merchant-keys` with the
-   user's session; the key screens are #4905). The secret is shown once, in
-   that answer. Note the Sales account's address.
+   account, and create a Sales key for it (Sales → Setup → Sales keys → Create
+   Sales key, #4905; or `POST /merchant-keys` with the user's session). The
+   secret is shown once. Note the Sales account's address.
 2. **Set both variables together** on the demo-merchant service, and make sure
    `MERCHANT_HAVEN_BASE_URL` names the dev backend's public origin (it is shared
    with the passport check; set alone it only logs the passport check's

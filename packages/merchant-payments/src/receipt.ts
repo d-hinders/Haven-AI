@@ -4,11 +4,15 @@ import type { AcceptedCheckoutDetails, CheckoutAddress } from './checkout-detail
 // The receipt (`x-receipt-json`) and its rendered text, shared by the demo
 // merchant and the paywall proxy (#4890, #4913; docs/architecture/12-merchant-kit.md §11).
 //
-// #1550: the receipt DOCUMENT (`InvoiceJson` + its Swedish text render) is a
-// Swedish bookkeeping artifact by design. It feeds the `x-receipt-json` header
-// and Haven's accounting (receipt-underlag, receipt-statement), so its keys,
-// values and `beskrivning` stay Swedish whatever the buyer's display locale.
-// Only the human-readable render has an English variant (`renderReceiptText`).
+// #1550: the receipt DOCUMENT (`InvoiceJson`) has the shape of a Swedish
+// bookkeeping document. It feeds the `x-receipt-json` header and Haven's
+// accounting (receipt-underlag, receipt-statement), so its KEYS and its codes
+// (`SE_25`, `REVERSE_CHARGE`, `USDC`, `blockkedjeadress`, `agent_delegate*`)
+// never change. #4980: its human-readable VALUES (`beskrivning`'s billing
+// period, `betalningssatt`, `status`) follow `ReceiptParams.locale`, Swedish by
+// default; the demo merchant passes its buyer's locale, English by default.
+// Haven reads none of those values. The text render has both languages
+// (`renderReceiptText`).
 //
 // #4890: moved from `packages/demo-merchant-mcp/src/invoice.ts`. Everything
 // the demo merchant hard-coded is a parameter here: the seller, the product
@@ -48,11 +52,12 @@ export type ReceiptBillingPeriod = 'monthly' | 'one_time'
 /**
  * The receipt's one line. `beskrivning` is `<name> — <description>`, plus the
  * billing-period suffix when `billingPeriod` is given (the demo merchant's
- * `(1 månad)` / `(engångsköp)`, #4851).
+ * `(1 månad)` / `(engångsköp)`, #4851; `(1 month)` / `(one-time purchase)` on
+ * an English receipt, #4980).
  */
 export interface ReceiptLine {
   name: string
-  /** The Swedish description; the receipt is a Swedish document (#1550). */
+  /** The description, in the receipt's language (`ReceiptParams.locale`, #4980). */
   description: string
   /** The VAT-inclusive price in USDC base units (six decimals). */
   priceAtomic: bigint
@@ -67,8 +72,18 @@ export interface ReceiptNetwork {
   en: string
 }
 
+/** The language of a receipt's human-readable values and of its text render. */
+export type ReceiptLocale = 'sv' | 'en'
+
 export interface ReceiptParams {
   invoiceNumber: string
+  /**
+   * #4980: the language of the document's human-readable VALUES — the line's
+   * billing period, `betalningssatt` and `status`. Keys and codes never change.
+   * Defaults to `sv`, the document as it was before #4980 (the paywall proxy
+   * passes none). The caller supplies `line.description` in the same language.
+   */
+  locale?: ReceiptLocale
   line: ReceiptLine
   seller: ReceiptSellerDetails
   /** #4850: the address the payment was made out to. */
@@ -103,9 +118,9 @@ export interface ReceiptParams {
 }
 
 export interface Invoice {
-  /** Structured data for Swedish bookkeeping / accounting systems */
+  /** Structured data for bookkeeping / accounting systems (Swedish keys) */
   json: InvoiceJson
-  /** Human-readable Swedish receipt text */
+  /** Human-readable receipt text */
   text: string
 }
 
@@ -154,13 +169,27 @@ export interface InvoiceJson {
    */
   momsbehandling: VatTreatment
   valuta: 'USDC'
-  /** `Kryptovaluta (USDC på <network>)`; mainnet is exactly `... på Base)` (#1550, #3834). */
-  betalningssatt: `Kryptovaluta (USDC på ${string})`
+  /**
+   * `Kryptovaluta (USDC på <network>)`; mainnet is exactly `... på Base)` (#1550, #3834).
+   * #4980: `Cryptocurrency (USDC on <network>)` on an English receipt.
+   */
+  betalningssatt: `Kryptovaluta (USDC på ${string})` | `Cryptocurrency (USDC on ${string})`
   /** #2969: `null` on both non-settled states, never the zero hash. */
   blockkedje_referens: string | null
-  /** #2969: 'Betald' only for `settlement === 'settled_onchain'`. */
-  status: 'Betald' | 'Betald i tidigare transaktion — referens saknas' | 'Levererad — ej bekräftad på kedjan'
+  /** #2969: 'Betald' / 'Paid' only for `settlement === 'settled_onchain'`. */
+  status: ReceiptStatusSv | ReceiptStatusEn
 }
+
+/** #2969: the three Swedish status values, one per settlement state. */
+export type ReceiptStatusSv =
+  | 'Betald'
+  | 'Betald i tidigare transaktion — referens saknas'
+  | 'Levererad — ej bekräftad på kedjan'
+/** #4980: the same three, on an English receipt. */
+export type ReceiptStatusEn =
+  | 'Paid'
+  | 'Paid in an earlier transaction — reference unavailable'
+  | 'Delivered — not confirmed on-chain'
 
 /**
  * #4855: the buyer block's declaration fields. Swedish keys, like the rest of
@@ -266,25 +295,35 @@ function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10)
 }
 
-const STATUS_BY_SETTLEMENT: Record<ReceiptSettlementState, InvoiceJson['status']> = {
+const STATUS_SV: Record<ReceiptSettlementState, ReceiptStatusSv> = {
   settled_onchain: 'Betald',
   already_settled_earlier: 'Betald i tidigare transaktion — referens saknas',
   settlement_unknown: 'Levererad — ej bekräftad på kedjan',
 }
 
-const BILLING_PERIOD_SV: Record<ReceiptBillingPeriod, string> = {
-  monthly: '1 månad',
-  one_time: 'engångsköp',
+const STATUS_BY_SETTLEMENT: Record<ReceiptLocale, Record<ReceiptSettlementState, InvoiceJson['status']>> = {
+  sv: STATUS_SV,
+  en: {
+    settled_onchain: 'Paid',
+    already_settled_earlier: 'Paid in an earlier transaction — reference unavailable',
+    settlement_unknown: 'Delivered — not confirmed on-chain',
+  },
+}
+
+const BILLING_PERIOD: Record<ReceiptLocale, Record<ReceiptBillingPeriod, string>> = {
+  sv: { monthly: '1 månad', one_time: 'engångsköp' },
+  en: { monthly: '1 month', one_time: 'one-time purchase' },
 }
 
 /** The receipt's line text: `<name> — <description>`, plus the period when given. */
-export function receiptLineText(line: ReceiptLine): string {
+export function receiptLineText(line: ReceiptLine, locale: ReceiptLocale = 'sv'): string {
   const base = `${line.name} — ${line.description}`
-  return line.billingPeriod ? `${base} (${BILLING_PERIOD_SV[line.billingPeriod]})` : base
+  return line.billingPeriod ? `${base} (${BILLING_PERIOD[locale][line.billingPeriod]})` : base
 }
 
 /** Build the receipt document for one settled payment. */
 export function buildReceipt(params: ReceiptParams): InvoiceJson {
+  const locale: ReceiptLocale = params.locale ?? 'sv'
   const today = params.now ? new Date(params.now.getTime()) : new Date()
   const dueDate = new Date(today)
   dueDate.setDate(dueDate.getDate() + 30)
@@ -303,7 +342,7 @@ export function buildReceipt(params: ReceiptParams): InvoiceJson {
   const blockRef = params.settlement === 'settled_onchain' ? `Tx: ${params.txHash}` : null
 
   const row: InvoiceRow = {
-    beskrivning: receiptLineText(params.line),
+    beskrivning: receiptLineText(params.line, locale),
     antal: 1,
     apris_exkl_moms: formatUsdcAtomic(exklMoms),
     moms_procent: momsProcent,
@@ -337,9 +376,10 @@ export function buildReceipt(params: ReceiptParams): InvoiceJson {
     totalt_inkl_moms: formatUsdcAtomic(totalInclMoms),
     momsbehandling: treatment,
     valuta: 'USDC',
-    betalningssatt: `Kryptovaluta (USDC på ${params.network.sv})`,
+    betalningssatt:
+      locale === 'sv' ? `Kryptovaluta (USDC på ${params.network.sv})` : `Cryptocurrency (USDC on ${params.network.en})`,
     blockkedje_referens: blockRef,
-    status: STATUS_BY_SETTLEMENT[params.settlement],
+    status: STATUS_BY_SETTLEMENT[locale][params.settlement],
   }
 }
 
@@ -357,7 +397,7 @@ function buyerDeclarationBlock(declaration: AcceptedTaxDeclaration): BuyerDeclar
 export interface ReceiptTextOptions {
   /** The product name in the closing thank-you line. */
   productName: string
-  locale: 'sv' | 'en'
+  locale: ReceiptLocale
   /**
    * The network, the same value the receipt was built with. The Swedish
    * render reads `betalningssatt`; the English render names `network.en`.
@@ -368,9 +408,10 @@ export interface ReceiptTextOptions {
 }
 
 /**
- * Locale-aware human-readable render of the SAME `InvoiceJson` (#1550). The
- * document stays Swedish; this only chooses the language of the headings and
- * labels around its values. `sv` is the classic FAKTURA render.
+ * Locale-aware human-readable render of the SAME `InvoiceJson` (#1550). This
+ * chooses the language of the headings and labels around the document's
+ * values; the values are in the language the document was built in (#4980).
+ * `sv` is the classic FAKTURA render.
  */
 export function renderReceiptText(inv: InvoiceJson, opts: ReceiptTextOptions): string {
   return opts.locale === 'sv'
@@ -494,10 +535,18 @@ function reverseChargeLinesSv(inv: InvoiceJson): string {
   )
 }
 
-const STATUS_EN: Record<InvoiceJson['status'], string> = {
+/**
+ * The English render's status line. #4980: an English document's status is
+ * already English and prints as it is; a Swedish one is translated, as
+ * before.
+ */
+const STATUS_EN: Record<InvoiceJson['status'], ReceiptStatusEn> = {
   Betald: 'Paid',
   'Betald i tidigare transaktion — referens saknas': 'Paid in an earlier transaction — reference unavailable',
   'Levererad — ej bekräftad på kedjan': 'Delivered — not confirmed on-chain',
+  Paid: 'Paid',
+  'Paid in an earlier transaction — reference unavailable': 'Paid in an earlier transaction — reference unavailable',
+  'Delivered — not confirmed on-chain': 'Delivered — not confirmed on-chain',
 }
 
 function buildReceiptTextEn(inv: InvoiceJson, productName: string, networkEn: string, supportContact: string): string {

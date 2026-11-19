@@ -83,6 +83,7 @@ describe('generateInvoice — settlement state (#2969)', () => {
       payerRole: 'agent_delegate',
       txHash: ZERO_TX_HASH,
       settlement: 'already_settled_earlier',
+      locale: 'sv',
     })
     expect(invoice.json.blockkedje_referens).toBeNull()
     expect(invoice.json.status).toBe('Betald i tidigare transaktion — referens saknas')
@@ -103,6 +104,7 @@ describe('generateInvoice — settlement state (#2969)', () => {
       payerRole: 'agent_delegate',
       txHash: ZERO_TX_HASH,
       settlement: 'settlement_unknown',
+      locale: 'sv',
     })
     expect(invoice.json.blockkedje_referens).toBeNull()
     expect(invoice.json.status).toBe('Levererad — ej bekräftad på kedjan')
@@ -112,12 +114,45 @@ describe('generateInvoice — settlement state (#2969)', () => {
   })
 
   it('settled_onchain: still prints the real reference and "Betald" (unchanged behaviour)', () => {
-    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate' })
+    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate', locale: 'sv' })
     expect(invoice.json.blockkedje_referens).toBe(`Tx: ${BASE_PARAMS.txHash}`)
     expect(invoice.json.status).toBe('Betald')
     const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
     expect(sv).toContain('BLOCKKEDJEREFERENS')
     expect(sv).toContain(BASE_PARAMS.txHash)
+  })
+
+  // #4980: the default receipt states each settlement truth in English, in
+  // the JSON as in the text — the same three strings the English render
+  // always printed.
+  // #4980: one document per payment — a call in the other locale replays it
+  // under its own headings, so the Swedish render of an English document is
+  // Swedish labels around English values. Pinned so it is a decision, not drift.
+  it('the Swedish render of an English document prints its values as they are', () => {
+    const invoice = generateInvoice({ ...BASE_PARAMS, payerRole: 'agent_delegate' })
+    const sv = renderInvoiceText(invoice.json, 'Cloud Storage 50GB', 'sv')
+    expect(sv).toContain('FAKTURA')
+    expect(sv).toContain('  Status: Paid\n')
+    expect(sv).toContain(`  Betalningssätt:   ${invoice.json.betalningssatt}\n`)
+    expect(invoice.json.betalningssatt).toMatch(/^Cryptocurrency \(USDC on /)
+  })
+
+  it('the default (English) receipt states each settlement state in English', () => {
+    for (const [settlement, status] of [
+      ['settled_onchain', 'Paid'],
+      ['already_settled_earlier', 'Paid in an earlier transaction — reference unavailable'],
+      ['settlement_unknown', 'Delivered — not confirmed on-chain'],
+    ] as const) {
+      const invoice = generateInvoice({
+        ...BASE_PARAMS,
+        payerRole: 'agent_delegate',
+        settlement,
+        txHash: settlement === 'settled_onchain' ? BASE_PARAMS.txHash : ZERO_TX_HASH,
+      })
+      expect(invoice.json.status).toBe(status)
+      expect(invoice.text).toContain(`  Status: ${status}\n`)
+      expect(renderInvoiceText(invoice.json, 'CloudNest 50 GB', 'en')).toBe(invoice.text)
+    }
   })
 })
 

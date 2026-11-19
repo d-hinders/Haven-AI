@@ -21,7 +21,7 @@ PAYER
 
 SERVICES
 
-  CloudNest 50 GB — Säker krypterad molnlagring. 50 GB. Fildelning och automatisk synk ingår. (1 månad)
+  CloudNest 50 GB — Secure encrypted cloud storage. 50 GB. File sharing and automatic sync included. (1 month)
   Quantity: 1  Unit price excl. VAT: 0.0004 USDC
 
 ────────────────────────────────────────────────────────────

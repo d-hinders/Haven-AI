@@ -2,8 +2,8 @@
 
 Internal x402 demo merchant MCP server for Haven. It exposes a small fake
 merchant catalog, gates purchases with standard x402 `PAYMENT-SIGNATURE`,
-supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns a
-Swedish-style invoice.
+supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns an
+invoice in the shape of a Swedish bookkeeping document, English by default.
 
 This package is a technical demo for a merchant-controlled wallet, not a Haven
 custody, facilitator, acquiring, fiat/card or third-party merchant settlement
@@ -36,9 +36,18 @@ other product is settled by the merchant's own key.
   handlers run.
 - The x402 v2 extensions echo, advertised in every challenge and enforced on
   every payment (see [Extensions echo](#extensions-echo-x402-v2-enforced)).
-- An invoice after a settled purchase: Swedish bookkeeping JSON (also sent as
-  the `x-receipt-json` header) and a rendered text, English by default and
-  Swedish with `locale: 'sv'` (#1550).
+- An invoice after a settled purchase: bookkeeping JSON with Swedish keys
+  (also sent as the `x-receipt-json` header) and a rendered text, English by
+  default and Swedish with `locale: 'sv'` (#1550). The JSON's keys and codes
+  (`SE_25`, `REVERSE_CHARGE`, `USDC`, `blockkedjeadress`) never change; its
+  human-readable values follow the locale of the call that paid (#4980) —
+  English by default (`"status": "Paid"`, `"betalningssatt": "Cryptocurrency
+  (USDC on Base Sepolia testnet)"`, the English product line with
+  `(one-time purchase)` or `(1 month)`), Swedish with `locale: 'sv'`
+  (`"Betald"`, `"Kryptovaluta (USDC på …)"`, `(engångsköp)`). A plain-HTTP
+  x402 call carries no locale and gets English. The receipt is one document
+  per payment: a later call for the same payment in the other locale changes
+  only the headings around it.
 - Stripe machine payments (#4853): with a deposit address and a restricted key
   configured, the joke is paid to the Stripe deposit address and each settled
   payment is recorded as a PaymentIntent in `transaction_verification` mode,
@@ -114,7 +123,8 @@ and the merchant support is still offered after it:
 - `eip3009`: the EIP-3009 option first
 
 A method the merchant has not enabled, or the product does not support, is
-refused. The tools also take `locale` (`sv` for Swedish text) and
+refused. The tools also take `locale` (`sv` for Swedish text and receipt
+values) and
 `result_detail` (`summary` drops the rendered invoice and the bookkeeping JSON
 from the text; the structured content, including `summary`, and the
 `x-receipt-json` header are the same either way).
@@ -887,15 +897,17 @@ the joke, settled on chain, paid to the current deposit address
 uses) — the receipt carries two more blocks, in its JSON and in both rendered
 texts, before the closing thank-you box:
 
-- `stripe_referens`: `status: "Väntar"` (pending) and `sok_med`, the receipt
+- `stripe_referens`: `status: "Pending"` (`"Väntar"` with `locale: 'sv'`,
+  #4980) and `sok_med`, the receipt
   number and the transaction hash. Those are the PaymentIntent's
   `receipt_number` and `transaction_hash` metadata, so the payment is found in
   the Stripe Dashboard by either.
 - `belopp_sek`: an indicative SEK amount, never Stripe's own figure. With a
   rate: `tillganglig: true`, `belopp` (SEK, two decimals), `kurs` (SEK per
   USDC), `kalla` (`coingecko_spot`) and `tidpunkt` (when the rate was read).
-  Without one: `tillganglig: false`, `status: "Ej tillgängligt vid
-  köptillfället"` (not available at the time of purchase). The merchant never
+  Without one: `tillganglig: false`, `status: "Not available at the time of
+  purchase"` (`"Ej tillgängligt vid köptillfället"` with `locale: 'sv'`). The
+  merchant never
   estimates a rate.
 
 The rate is CoinGecko's spot price for USD Coin in SEK, the source Haven's

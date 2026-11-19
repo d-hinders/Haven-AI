@@ -262,9 +262,10 @@ describe('settlement through CDP (#4851)', () => {
     expect(fakes.settle.mock.calls[0][1]).toEqual(pr.accepts[0])
     expect(fakes.submit).not.toHaveBeenCalled()
     expect(fakes.waitForReceipt).toHaveBeenCalledWith(CDP_TX)
-    expect(receiptOf(response)).toMatchObject({ status: 'Betald', blockkedje_referens: `Tx: ${CDP_TX}` })
+    expect(receiptOf(response)).toMatchObject({ status: 'Paid', blockkedje_referens: `Tx: ${CDP_TX}` })
     expect(raw).toContain('Your joke:')
-    expect(raw).toContain('engångsköp')
+    expect(raw).toContain('(one-time purchase)')
+    expect(raw).not.toContain('engångsköp')
   })
 
   it('a retried header settles once', async () => {
@@ -347,7 +348,7 @@ describe('settlement through CDP (#4851)', () => {
     fakes.findAuthorizationOutcome.mockResolvedValue({ kind: 'settled', txHash: CDP_TX })
     const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
     expect(response.status).toBe(200)
-    expect(receiptOf(response)).toMatchObject({ status: 'Betald', blockkedje_referens: `Tx: ${CDP_TX}` })
+    expect(receiptOf(response)).toMatchObject({ status: 'Paid', blockkedje_referens: `Tx: ${CDP_TX}` })
     expect(raw).toContain('Your joke:')
     expect(fakes.findAuthorizationOutcome.mock.calls[0][0]).toMatchObject({ authorizer: PAYER, to: MERCHANT, value: 10_000n })
   })
@@ -360,7 +361,7 @@ describe('settlement through CDP (#4851)', () => {
     const { response } = await pay(url, await signedHeader(await challenge(url)))
     expect(response.status).toBe(200)
     expect(receiptOf(response)).toMatchObject({
-      status: 'Betald i tidigare transaktion — referens saknas',
+      status: 'Paid in an earlier transaction — reference unavailable',
       blockkedje_referens: null,
     })
   })

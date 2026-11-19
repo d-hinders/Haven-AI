@@ -12,7 +12,7 @@ covers:
   - packages/merchant-payments/src/receipt.ts
   - packages/paywall-proxy/src/receipt.ts
   - packages/sdk/src/merchant-completion.ts
-last-verified: "2026-11-18"
+last-verified: "2026-11-19"
 ---
 
 # The merchant receipt shape Haven reads
@@ -27,8 +27,12 @@ The shape is the demo merchant's (`InvoiceJson`, built by `buildReceipt` in
 the shared core `packages/merchant-payments/src/receipt.ts`, which the demo
 merchant calls from `packages/demo-merchant-mcp/src/invoice.ts` and the
 merchant kit's paywall proxy from `packages/paywall-proxy/src/receipt.ts`): a
-Swedish bookkeeping document with Swedish keys. A merchant that wants its lines
-and VAT on its customers' accounting entries sends the same keys.
+bookkeeping document with Swedish keys. A merchant that wants its lines and
+VAT on its customers' accounting entries sends the same keys. The language of
+the human-readable values is the merchant's: the demo merchant writes them in
+English by default and in Swedish for a `locale: 'sv'` call (#4980), and the
+paywall proxy in Swedish. Haven reads no value for its language — the line
+description is free text and the treatment and currency are codes.
 
 ## Seller block
 

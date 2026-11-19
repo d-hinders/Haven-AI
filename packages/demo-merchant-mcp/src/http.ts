@@ -41,6 +41,7 @@ import {
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
+import { KIT_DISCOVERY_PATH, buildKitDiscovery } from './kit-discovery.js'
 import {
   CHECKOUT_DETAILS_FIELDS,
   X_CHECKOUT_DETAILS_HEADER,
@@ -369,6 +370,21 @@ async function handle(
   if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/.well-known/haven-demo-merchant')) {
     writeJson(res, 200, buildDiscovery(options))
     return
+  }
+
+  // #4987: the merchant kit's discovery document, so a Haven Sales account can
+  // read this merchant's product list. Only with a Sales account to name as
+  // `pay_to`; otherwise the path answers the same 404 as before.
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === KIT_DISCOVERY_PATH) {
+    const document = buildKitDiscovery({
+      salesAddress: options.sales?.address,
+      stripeConfigured: Boolean(options.stripe),
+      cdpConfigured: Boolean(options.cdpConfigured),
+    })
+    if (document) {
+      writeJson(res, 200, document)
+      return
+    }
   }
 
   if (url.pathname !== options.path) {

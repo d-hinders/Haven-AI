@@ -13,6 +13,7 @@ covers:
   - packages/merchant-payments/src/sale-report.ts
   - packages/merchant-payments/src/merchant-reference.ts
   - packages/demo-merchant-mcp/src/sales.ts
+  - packages/demo-merchant-mcp/src/kit-discovery.ts
   - packages/sdk/src/merchant-discovery.ts
   - packages/sdk/src/merchant-egress.ts
   - packages/sdk/src/merchant-completion.ts
@@ -35,7 +36,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-18"
+last-verified: "2026-11-19"
 ---
 
 # Merchant kit: design
@@ -266,7 +267,28 @@ superset. It drops the demo's MCP and environment fields (`mcp_url`,
 demo's human-decimal `price_usdc` with atomic `price`, keeps `network`, and
 adds `version`, `operator`, `asset`, `pay_to`, `settlement` and per product `route`
 and `description`. The demo merchant keeps serving its own document,
-unchanged, at its own paths; the kit's document is the proxy's.
+unchanged, at its own paths.
+
+### The demo merchant's reduced kit document (#4987)
+
+The demo merchant also serves a kit document at `/.well-known/x402`
+(`packages/demo-merchant-mcp/src/kit-discovery.ts`), so the merchant-services
+demo can fill a Sales account's Products tab: Haven reads a seller's products
+from that path and no other (#4899). It is a **reduced** version 1 document:
+`version`, `operator.name`, `name`, `network`, `asset`, `pay_to`, and per
+product `id`, `name`, `description` and atomic `price`. It leaves out
+`settlement` and each product's `route`, which this table marks required,
+because its products are MCP tools rather than HTTP routes and do not share one
+settlement method or facilitator; neither could be filled truthfully. Haven's
+reader needs only `version`, `network`, `pay_to` and `products`, and a missing
+`route` means nothing to it. It carries no `mcp_url`.
+
+It is served only when the demo merchant has a Sales account
+(`MERCHANT_SALES_ADDRESS`), which is its `pay_to`; otherwise the path is a 404.
+It lists only the products that report a sale to Haven: Field Notes, and the
+joke when Stripe recording is on. The joke is paid to the Stripe deposit
+address, not to `pay_to`: a kit document has one `pay_to`, and nothing pays
+from this document (the SDK never reads this path).
 
 ### Fields for Coinbase's directory
 
@@ -347,7 +369,7 @@ exist so a merchant that wants to be listed has nothing to retrofit.
 ### How an older kit is treated
 
 A document with no `version` is not a kit document: the demo merchant's
-document has none, and it lacks fields version 1 requires, so a reader does
+own document (at `/` and `/.well-known/haven-demo-merchant`) has none, and it lacks fields version 1 requires, so a reader does
 not read it as version 1. A reader that finds a higher version than it knows
 reads the fields it knows and ignores unknown fields; it does not refuse the
 document. A missing optional field means what the field tables say its

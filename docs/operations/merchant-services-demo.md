@@ -151,6 +151,24 @@ only), and the screens say "registered by you, not verified by Haven".
 - **Nothing else.** The joke settles through Coinbase's facilitator, which pays
   the gas, and the Sales account needs no funds to receive.
 
+### 1.7 Point the Products tab at the demo merchant *(not yet verified)*
+
+The Sales page's **Products** tab lists what a seller sells, read from the
+seller's discovery document at `/.well-known/x402` (#4899). The demo merchant
+serves one there once `MERCHANT_SALES_ADDRESS` is set (#4987).
+
+1. As the merchant, open the **Sales** page and its **Setup** tab. Under
+   **Kit address**, enter `<DEV_DEMO_MERCHANT>` (the origin only, no path) and
+   choose **Save**.
+2. Open **Products**. Expect **Haven Field Notes** (0.0025 USDC) and **Haven
+   Joke** (0.01 USDC) on Base Sepolia, with no warning above the list.
+
+The document names the Sales account as the receiving address for both. The
+joke is in fact paid to the Stripe deposit address (step 1.5): a kit document
+has one receiving address, and Haven only uses it to label products, never to
+pay. Leaving the field empty harms nothing: sales still show the product name
+the demo merchant reports.
+
 ## 2. The click path
 
 Have two windows open:
@@ -224,6 +242,15 @@ Expect:
 - a `sales` block with `configured: true` and `address` equal to the Sales
   account;
 - `sales.refused: 0` and `sales.gave_up: 0`.
+
+```bash
+curl -s "<DEV_DEMO_MERCHANT>/.well-known/x402"
+```
+
+Expect `version: 1`, `pay_to` equal to the Sales account, and the products
+`joke` and `field_notes`. A 404 means `MERCHANT_SALES_ADDRESS` is unset or
+unusable, and the Products tab will show "Haven couldn't read your kit just
+now" once the address is saved.
 
 The service's startup log has a `Sales:` line:
 - **Healthy:** `reporting joke (Stripe-settled); field_notes $0.0025 paid into <SALES_ACCOUNT_ADDRESS> to <DEV_API>`.

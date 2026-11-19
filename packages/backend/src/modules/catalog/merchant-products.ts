@@ -173,7 +173,8 @@ function parseProduct(raw: unknown): Omit<ParsedDiscoveryProduct, 'network'> | n
  * Parse the discovery document.
  *
  * `version` is required: a document without one is not a kit document (the demo
- * merchant's document has none and lacks the fields version 1 requires). A
+ * merchant's own document, at `/`, has none and lacks the fields version 1
+ * requires; its kit document at `/.well-known/x402` has one, #4987). A
  * HIGHER version is read for the fields this reader knows and its unknown
  * fields are ignored, per §4 — it is a catalogue, not an authority.
  *

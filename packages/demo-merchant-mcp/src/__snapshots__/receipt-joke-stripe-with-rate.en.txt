@@ -21,7 +21,7 @@ PAYER
 
 SERVICES
 
-  Haven Joke — Ett skämt, levererat direkt. Verifieras och avräknas av Coinbases x402-facilitator (CDP). (engångsköp)
+  Haven Joke — One joke, delivered at once. Verified and settled by Coinbase's hosted x402 facilitator (CDP). (one-time purchase)
   Quantity: 1  Unit price excl. VAT: 0.008 USDC
 
 ────────────────────────────────────────────────────────────

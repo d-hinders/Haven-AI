@@ -17,6 +17,7 @@ import {
 } from './x402.js'
 import {
   CHAIN_ID,
+  DEFAULT_MERCHANT_LOCALE,
   DEFAULT_SETTLEMENT_METHOD,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
@@ -24,6 +25,7 @@ import {
   SUPPORTED_SETTLEMENT_METHODS,
   checkoutDetailsForProduct,
   formatUsdc,
+  isMerchantLocale,
   isSettlementMethod,
   isProductOffered,
   merchantEnvironmentForChain,
@@ -33,6 +35,7 @@ import {
   productToolArgs,
   requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
+  type MerchantLocale,
   type ProductId,
   type ProductOfferOptions,
   type SettlementMethod,
@@ -166,6 +169,12 @@ interface PaymentToolInfo {
   product: (typeof PRODUCTS)[ProductId]
   description: string
   settlementMethod?: SettlementMethod
+  /**
+   * #4980: the paid tool call's `locale` argument, which sets the language of
+   * the receipt's values; `en` when absent or not a known locale (a plain-HTTP
+   * x402 call carries none).
+   */
+  locale: MerchantLocale
 }
 
 const MAX_BODY_BYTES = 500_000
@@ -461,6 +470,7 @@ async function handle(
       taxDeclaration,
       checkoutDetails,
       seller: options.receiptSeller,
+      locale: paymentToolInfo.locale,
       ...(stripeWillRecord ? { stripe: { sekRate: options.sekRate?.current() } } : {}),
     })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
@@ -894,7 +904,8 @@ function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): Payme
   const description = isSkipSettleProduct(productId)
     ? `${product.name} — ${descriptionSuffix}${QA_FIXTURE_DESCRIPTION_SUFFIX}`
     : `${product.name} — ${descriptionSuffix}`
-  return { productId, product, description, settlementMethod }
+  const locale = isMerchantLocale(args.locale) ? args.locale : DEFAULT_MERCHANT_LOCALE
+  return { productId, product, description, settlementMethod, locale }
 }
 
 function isInitializeRequest(body: unknown): boolean {

@@ -11,6 +11,10 @@ import type { SekRate } from './sek-rate.js'
  * shared payment core cannot change a receipt Haven's accounting already
  * reads. The clock is injected at noon UTC so the dates do not depend on the
  * machine's time zone.
+ *
+ * #4980: the fixtures are the SWEDISH receipt (`locale: 'sv'`), byte for byte
+ * as before; the default receipt is English and is pinned in the snapshots
+ * below. Haven's reader takes the keys and codes, which both share.
  */
 const FIXTURES = fileURLToPath(
   new URL('../../backend/src/modules/accounting/__tests__/fixtures/merchant-receipts/', import.meta.url),
@@ -36,7 +40,7 @@ function serialized(json: unknown): string {
 describe('the backend receipt fixtures are the demo merchant builder output (#4890)', () => {
   it('reproduces demo-merchant-se25.json byte for byte', () => {
     const fixture = readFileSync(`${FIXTURES}demo-merchant-se25.json`, 'utf8')
-    expect(serialized(generateInvoice({ ...PARAMS, taxDeclaration: null }).json)).toBe(fixture)
+    expect(serialized(generateInvoice({ ...PARAMS, locale: 'sv', taxDeclaration: null }).json)).toBe(fixture)
   })
 
   it('reproduces demo-merchant-reverse-charge.json byte for byte', () => {
@@ -47,7 +51,7 @@ describe('the backend receipt fixtures are the demo merchant builder output (#48
       taxableStatus: 'TAXABLE_PERSON',
       validUntil: Date.parse('2027-06-30T12:00:00Z'),
     }
-    expect(serialized(generateInvoice({ ...PARAMS, taxDeclaration }).json)).toBe(fixture)
+    expect(serialized(generateInvoice({ ...PARAMS, locale: 'sv', taxDeclaration }).json)).toBe(fixture)
   })
 })
 
@@ -70,12 +74,13 @@ describe('the rendered receipt text is pinned byte for byte (#4890)', () => {
     ['reverse-charge', declaration],
   ] as const) {
     it(`pins the Swedish and English text of the ${name} receipt`, async () => {
-      const invoice = generateInvoice({ ...PARAMS, taxDeclaration })
-      await expect(invoice.text).toMatchFileSnapshot(`./__snapshots__/receipt-${name}.sv.txt`)
-      await expect(renderInvoiceText(invoice.json, 'CloudNest 50 GB', 'en', 8453)).toMatchFileSnapshot(
-        `./__snapshots__/receipt-${name}.en.txt`,
-      )
-      expect(renderInvoiceText(invoice.json, 'CloudNest 50 GB', 'sv', 8453)).toBe(invoice.text)
+      const sv = generateInvoice({ ...PARAMS, locale: 'sv', taxDeclaration })
+      await expect(sv.text).toMatchFileSnapshot(`./__snapshots__/receipt-${name}.sv.txt`)
+      expect(renderInvoiceText(sv.json, 'CloudNest 50 GB', 'sv', 8453)).toBe(sv.text)
+      // #4980: the default receipt is the English document, rendered in English.
+      const en = generateInvoice({ ...PARAMS, taxDeclaration })
+      await expect(en.text).toMatchFileSnapshot(`./__snapshots__/receipt-${name}.en.txt`)
+      expect(renderInvoiceText(en.json, 'CloudNest 50 GB', 'en', 8453)).toBe(en.text)
     })
   }
 })
@@ -98,12 +103,59 @@ describe('the joke receipt without a Stripe context is unchanged (#4856)', () =>
   }
 
   it('pins the joke receipt JSON and its Swedish and English text', async () => {
-    const invoice = generateInvoice(JOKE)
-    await expect(serialized(invoice.json)).toMatchFileSnapshot('./__snapshots__/receipt-joke.json')
-    await expect(invoice.text).toMatchFileSnapshot('./__snapshots__/receipt-joke.sv.txt')
-    await expect(renderInvoiceText(invoice.json, 'Haven Joke', 'en', 84532)).toMatchFileSnapshot(
-      './__snapshots__/receipt-joke.en.txt',
-    )
+    const sv = generateInvoice({ ...JOKE, locale: 'sv' })
+    await expect(serialized(sv.json)).toMatchFileSnapshot('./__snapshots__/receipt-joke.sv.json')
+    await expect(sv.text).toMatchFileSnapshot('./__snapshots__/receipt-joke.sv.txt')
+    // #4980: the default is the English document.
+    const en = generateInvoice(JOKE)
+    await expect(serialized(en.json)).toMatchFileSnapshot('./__snapshots__/receipt-joke.json')
+    await expect(en.text).toMatchFileSnapshot('./__snapshots__/receipt-joke.en.txt')
+    expect(renderInvoiceText(en.json, 'Haven Joke', 'en', 84532)).toBe(en.text)
+  })
+
+  // #4980: the language changes values only — never a key, at any depth.
+  it('the English and Swedish receipts have exactly the same keys', () => {
+    const keys = (value: unknown, prefix = ''): string[] =>
+      value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.entries(value).flatMap(([k, v]) => [`${prefix}${k}`, ...keys(v, `${prefix}${k}.`)])
+        : Array.isArray(value)
+          ? value.flatMap((v, i) => keys(v, `${prefix}${i}.`))
+          : []
+    for (const params of [
+      JOKE,
+      { ...JOKE, stripe: { sekRate: undefined } },
+      { ...PARAMS, productId: 'field_notes' as const, taxDeclaration: null },
+    ]) {
+      const en = generateInvoice(params).json
+      const sv = generateInvoice({ ...params, locale: 'sv' }).json
+      expect(keys(en)).toEqual(keys(sv))
+      // The codes Haven reads are the same in both.
+      expect([en.momsbehandling, en.valuta, en.kopare.typ, en.kopare.roll]).toEqual([
+        sv.momsbehandling,
+        sv.valuta,
+        sv.kopare.typ,
+        sv.kopare.roll,
+      ])
+    }
+  })
+
+  // #4980: the owner's case, a default-locale purchase of the two demo
+  // products — no Swedish value in the JSON outside the keys and the
+  // `blockkedjeadress` type code, or in the text.
+  it('the default field-notes and joke receipts carry no Swedish value', () => {
+    const SWEDISH = /Betald|Kryptovaluta|testnät|engångsköp|månad|Väntar|tillgängligt|fältanteckning|Betalas|Ett skämt|skämt/
+    for (const params of [
+      { ...JOKE, stripe: { sekRate: undefined } },
+      { ...PARAMS, productId: 'field_notes' as const, chainId: 84532, taxDeclaration: null },
+    ]) {
+      const invoice = generateInvoice(params)
+      const { kopare, saljare, ...rest } = invoice.json
+      const { typ, ...kopareRest } = kopare
+      expect(typ).toBe('blockkedjeadress')
+      expect(JSON.stringify({ ...rest, kopare: kopareRest })).not.toMatch(SWEDISH)
+      expect(saljare.name).toBe('Haven Demo AB')
+      expect(invoice.text).not.toMatch(SWEDISH)
+    }
   })
 })
 
@@ -130,26 +182,32 @@ describe('the Stripe product receipt changes only by the new blocks (#4856)', ()
     ['no-rate', undefined],
   ] as const) {
     it(`${name}: the JSON is the pinned joke receipt plus the two blocks`, () => {
-      const base = JSON.parse(readFileSync(`${SNAP}receipt-joke.json`, 'utf8')) as Record<string, unknown>
-      const json = generateInvoice({ ...JOKE, stripe: { sekRate } }).json as unknown as Record<string, unknown>
-      const { stripe_referens, belopp_sek, ...rest } = json
-      expect(rest).toEqual(base)
-      expect(Object.keys(json)).toEqual([...Object.keys(base), 'stripe_referens', 'belopp_sek'])
-      expect(stripe_referens).toEqual({
-        status: 'Väntar',
-        sok_med: { fakturanummer: 'FAK-2026-00099', transaktions_hash: PARAMS.txHash },
-      })
-      expect(belopp_sek).toEqual(
-        sekRate
-          ? { tillganglig: true, belopp: '0.10', kurs: '10.0742', kalla: 'coingecko_spot', tidpunkt: '2026-11-17T11:55:00.000Z' }
-          : { tillganglig: false, status: 'Ej tillgängligt vid köptillfället' },
-      )
+      for (const [locale, file, pending, unavailable] of [
+        ['sv', 'receipt-joke.sv.json', 'Väntar', 'Ej tillgängligt vid köptillfället'],
+        ['en', 'receipt-joke.json', 'Pending', 'Not available at the time of purchase'],
+      ] as const) {
+        const base = JSON.parse(readFileSync(`${SNAP}${file}`, 'utf8')) as Record<string, unknown>
+        const json = generateInvoice({ ...JOKE, locale, stripe: { sekRate } }).json as unknown as Record<string, unknown>
+        const { stripe_referens, belopp_sek, ...rest } = json
+        expect(rest).toEqual(base)
+        expect(Object.keys(json)).toEqual([...Object.keys(base), 'stripe_referens', 'belopp_sek'])
+        expect(stripe_referens).toEqual({
+          status: pending,
+          sok_med: { fakturanummer: 'FAK-2026-00099', transaktions_hash: PARAMS.txHash },
+        })
+        expect(belopp_sek).toEqual(
+          sekRate
+            ? { tillganglig: true, belopp: '0.10', kurs: '10.0742', kalla: 'coingecko_spot', tidpunkt: '2026-11-17T11:55:00.000Z' }
+            : { tillganglig: false, status: unavailable },
+        )
+      }
     })
 
     it(`${name}: the text is the pinned joke text with the sections inserted before the closing frame`, async () => {
-      const invoice = generateInvoice({ ...JOKE, stripe: { sekRate } })
+      const invoice = generateInvoice({ ...JOKE, locale: 'sv', stripe: { sekRate } })
       const sv = invoice.text
-      const en = renderInvoiceText(invoice.json, 'Haven Joke', 'en', 84532)
+      // #4980: the default receipt is the English document.
+      const en = generateInvoice({ ...JOKE, stripe: { sekRate } }).text
       await expect(sv).toMatchFileSnapshot(`./__snapshots__/receipt-joke-stripe-${name}.sv.txt`)
       await expect(en).toMatchFileSnapshot(`./__snapshots__/receipt-joke-stripe-${name}.en.txt`)
       for (const [text, file] of [

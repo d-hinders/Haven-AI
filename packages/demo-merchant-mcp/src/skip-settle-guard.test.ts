@@ -258,13 +258,13 @@ describe('MERCHANT_SKIP_SETTLE_PRODUCT chain guard', () => {
       expect(text).toContain('Amount:')
       expect(text).not.toContain('Paid:')
       expect(text).not.toContain('Status: Paid\n')
-      expect(text).not.toContain('"status": "Betald"')
+      expect(text).not.toContain('"status": "Paid"')
       expect(text).not.toContain(ZERO_TX_HASH)
 
       const receiptHeader = paid.headers.get('x-receipt-json')
       expect(receiptHeader).toBeTruthy()
       const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
-      expect(receipt.status).toBe('Levererad — ej bekräftad på kedjan')
+      expect(receipt.status).toBe('Delivered — not confirmed on-chain')
       expect(receipt.blockkedje_referens).toBeNull()
       expect(JSON.stringify(receipt)).not.toContain(ZERO_TX_HASH)
     } finally {

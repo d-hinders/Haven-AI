@@ -241,7 +241,7 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
 const LOCALE_PARAM = z
   .enum(MERCHANT_LOCALES)
   .optional()
-  .describe("Display language for text output; 'en' (default) or 'sv'. The invoice JSON stays Swedish (bookkeeping document) either way.")
+  .describe("Display language for text output and the invoice JSON's values; 'en' (default) or 'sv'. The invoice JSON's keys and codes are the same either way.")
 const RESULT_DETAIL_PARAM = z
   .enum(RESULT_DETAILS)
   .optional()
@@ -704,6 +704,9 @@ async function completePurchase(
     receivingAddress,
     chainId: config.chainId,
     seller: config.receiptSeller,
+    // #4980: used only when this call builds the invoice (no HTTP layer ran
+    // first, as in a direct handler test); otherwise the cached one replays.
+    locale,
   })
   // #4723: advisory, AFTER settlement, cached per payment. Never a condition
   // of the purchase — the goods are already owed by the time this runs.

@@ -5,6 +5,7 @@
  * setting, never a field of the file.
  */
 import { readFileSync } from 'node:fs'
+import { InputSchemaCompileError, inputValidatorFor } from './input-schema.js'
 
 /** The receipt reader accepts at most this many characters in a line and refuses these characters. */
 export const RECEIPT_LINE_MAX = 300
@@ -13,6 +14,8 @@ const FORBIDDEN_TEXT = /[\u0000-\u001f\u007f-\u009f\u061c\u200b\u200e\u200f\u202
 
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'] as const
 export type HttpMethod = (typeof HTTP_METHODS)[number]
+/** Methods whose requests carry no body, so a product on one cannot carry an `input_schema` (#4988). */
+const BODYLESS_METHODS: ReadonlySet<HttpMethod> = new Set(['GET', 'DELETE'])
 
 export interface Product {
   id: string
@@ -146,7 +149,7 @@ export function parseProducts(raw: unknown): Product[] {
       }
     }
 
-    products.push({
+    const product: Product = {
       id: typeof id === 'string' ? id : '',
       ...(typeof name === 'string' ? { name } : {}),
       method,
@@ -159,7 +162,26 @@ export function parseProducts(raw: unknown): Product[] {
       ...(entry.input_example !== undefined ? { inputExample: entry.input_example } : {}),
       ...(entry.input_schema !== undefined ? { inputSchema: entry.input_schema } : {}),
       ...(entry.output_example !== undefined ? { outputExample: entry.output_example } : {}),
-    })
+    }
+
+    // #4988: the schema is compiled here, so a schema the proxy cannot enforce fails startup.
+    if (entry.input_schema !== undefined) {
+      if (BODYLESS_METHODS.has(method)) {
+        problem(`"input_schema" is for a request body, and a ${method} request has none: remove it or sell the route with a method that carries a body`)
+      } else {
+        try {
+          const validate = inputValidatorFor(product)!
+          const failed = entry.input_example !== undefined ? validate(entry.input_example) : []
+          if (failed.length > 0) {
+            problem(`"input_example" does not pass "input_schema": ${failed.map((e) => `${e.path || '(the body)'} fails "${e.rule}"`).join(', ')}`)
+          }
+        } catch (err) {
+          if (!(err instanceof InputSchemaCompileError)) throw err
+          problem(err.message)
+        }
+      }
+    }
+    products.push(product)
   })
 
   // Two products may share a route only when each pins a different model.

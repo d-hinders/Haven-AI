@@ -842,3 +842,181 @@ describe('no self-settlement', () => {
     }
   })
 })
+
+// ---- #4988: the product's input_schema, before the challenge and before settlement ----
+
+const SEARCH_PATH = '/v1/search'
+const SEARCH_PRODUCT = {
+  id: 'search',
+  route: `POST ${SEARCH_PATH}`,
+  price: '30000',
+  description: 'One search.',
+  input_schema: {
+    type: 'object',
+    required: ['query'],
+    properties: { query: { type: 'string' }, max_results: { type: 'integer', maximum: 10 } },
+  },
+}
+/** A POST product with no schema: the kit forwards its body as it is (§3). */
+const RAW_PRODUCT = { id: 'raw', route: 'POST /v1/raw', price: '40000', description: 'One raw call.' }
+const VALID_SEARCH = JSON.stringify({ query: 'haven', max_results: 5 })
+const searchRequest = (body: string, headers: Record<string, string> = { 'content-type': 'application/json' }): RequestInit => ({ method: 'POST', headers, body })
+
+function keyOf(paid: { payload: { payload: Record<string, unknown> } }): string {
+  const a = paid.payload.payload.authorization as { from: string; nonce: string }
+  return `eip3009:84532:${a.from}:${a.nonce}`.toLowerCase()
+}
+
+describe('input_schema (#4988)', () => {
+  /** Each body the search product's schema refuses, with what the refusal names. */
+  const INVALID: { name: string; init: RequestInit; errors: { path: string; rule: string }[] }[] = [
+    { name: 'an empty body', init: searchRequest(''), errors: [{ path: '', rule: 'json' }] },
+    { name: 'broken JSON', init: searchRequest('{"query": '), errors: [{ path: '', rule: 'json' }] },
+    { name: 'a text/plain body', init: searchRequest(VALID_SEARCH, { 'content-type': 'text/plain' }), errors: [{ path: '', rule: 'content_type' }] },
+    { name: 'a body missing a required field', init: searchRequest(JSON.stringify({ max_results: 5 })), errors: [{ path: '/query', rule: 'required' }] },
+    { name: 'a body over a maximum', init: searchRequest(JSON.stringify({ query: 'SECRET-QUERY-4988', max_results: 9999 })), errors: [{ path: '/max_results', rule: 'maximum' }] },
+  ]
+
+  for (const c of INVALID) {
+    it(`${c.name} is refused 400 invalid_request_body, unpaid and with a payment header, with no facilitator call`, async () => {
+      h = await startHarness({ products: [SEARCH_PRODUCT, RAW_PRODUCT] })
+      const unpaid = await fetch(`${h.base}${SEARCH_PATH}`, c.init)
+      expect(unpaid.status).toBe(400)
+      expect(unpaid.headers.get('payment-required')).toBeNull()
+      const unpaidText = await unpaid.text()
+      const unpaidBody = JSON.parse(unpaidText) as Record<string, unknown>
+      expect(unpaidBody).toMatchObject({ error: 'invalid_request_body', errors: c.errors })
+      expect(typeof unpaidBody.message).toBe('string')
+      expect(unpaidBody.accepts).toBeUndefined()
+
+      // A payment signed for a valid body's challenge, presented with the invalid body.
+      const paid = await newBuyer().pay(h, SEARCH_PATH, searchRequest(VALID_SEARCH))
+      const init = { ...c.init, headers: { ...(c.init.headers as Record<string, string>), 'payment-signature': paid.header } }
+      const res = await fetch(`${h.base}${SEARCH_PATH}`, init)
+      expect(res.status).toBe(400)
+      expect(res.headers.get('payment-required')).toBeNull()
+      const text = await res.text()
+      expect(JSON.parse(text)).toMatchObject({ error: 'invalid_request_body', errors: c.errors })
+      // Nothing verified, settled, recorded or forwarded.
+      expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+      expect(h.upstream.seen).toHaveLength(0)
+      expect(await h.proxy.store.get(keyOf(paid))).toBeNull()
+      // The refusal never echoes the body's values.
+      for (const answer of [unpaidText, text]) {
+        expect(answer).not.toContain('SECRET-QUERY-4988')
+        expect(answer).not.toContain('9999')
+      }
+    })
+  }
+
+  it('a body that validates gets the ordinary 402 unpaid, with or without a Content-Type, and settles and forwards as it was sent', async () => {
+    h = await startHarness({ products: [SEARCH_PRODUCT, RAW_PRODUCT] })
+    const unpaid = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(VALID_SEARCH))
+    expect(unpaid.status).toBe(402)
+    expect(((await unpaid.json()) as { accepts: { amount: string }[] }).accepts[0]!.amount).toBe(SEARCH_PRODUCT.price)
+    // No Content-Type at all (fetch would add text/plain to a string body, so this goes through node:http).
+    const bare = await rawRequest(h.base, SEARCH_PATH, { method: 'POST', headers: {}, body: VALID_SEARCH }).done
+    expect(bare.status).toBe(402)
+
+    const paid = await newBuyer().pay(h, SEARCH_PATH, searchRequest(VALID_SEARCH))
+    const res = await rawRequest(h.base, SEARCH_PATH, { method: 'POST', headers: { 'payment-signature': paid.header }, body: VALID_SEARCH }).done
+    expect(res.status).toBe(200)
+    expect(h.facilitator.settleCalls).toBe(1)
+    expect(h.upstream.seen).toHaveLength(1)
+    expect(h.upstream.seen[0]!.body).toBe(VALID_SEARCH)
+  })
+
+  it('a product without input_schema is unchanged: any body gets its 402 and is forwarded as it is', async () => {
+    h = await startHarness({ products: [SEARCH_PRODUCT, RAW_PRODUCT] })
+    for (const init of [searchRequest('not json', { 'content-type': 'text/plain' }), searchRequest(''), searchRequest(JSON.stringify({ max_results: 9999 }))]) {
+      const res = await fetch(`${h.base}/v1/raw`, init)
+      expect(res.status).toBe(402)
+    }
+    const paid = await newBuyer().pay(h, '/v1/raw', searchRequest('not json', { 'content-type': 'text/plain' }))
+    const res = await fetch(`${h.base}/v1/raw`, searchRequest('not json', { 'content-type': 'text/plain', 'payment-signature': paid.header }))
+    expect(res.status).toBe(200)
+    expect(h.upstream.seen[0]!.body).toBe('not json')
+  })
+
+  it('for a capped product with a schema, a schema failure is invalid_request_body, not cap_not_settable; an over-cap max_tokens is still lowered and messages: [] is the schema\'s call', async () => {
+    const withSchema = {
+      ...CHAT_PRODUCT,
+      input_schema: { type: 'object', required: ['model', 'messages'], properties: { model: { type: 'string' }, messages: { type: 'array' }, max_tokens: { type: 'integer', minimum: 1 } } },
+    }
+    h = await startHarness({ products: [withSchema] })
+    const notChat = JSON.stringify({ model: 'openai/gpt-6-sol', prompt: 'x' })
+    const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, notChat))
+    expect(unpaid.status).toBe(400)
+    expect(await unpaid.json()).toMatchObject({ error: 'invalid_request_body', errors: [{ path: '/messages', rule: 'required' }] })
+
+    // An empty messages array is an array: this schema accepts it, so it is quoted.
+    const empty = JSON.stringify({ model: 'openai/gpt-6-sol', messages: [] })
+    expect((await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, empty))).status).toBe(402)
+
+    // max_tokens 5000 passes the schema and is lowered to the cap on the way upstream.
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(JSON.parse(h.upstream.seen[0]!.body).max_tokens).toBe(1000)
+  })
+
+  it('on a route shared by model, the schema is the one of the product the model picks; an unparseable body is bad_request unless every product has a schema', async () => {
+    const SCHEMA_MODEL = {
+      ...CHAT_PRODUCT,
+      id: 'chat-schema',
+      input_schema: { type: 'object', required: ['model', 'messages'], properties: { model: { type: 'string' }, messages: { type: 'array', minItems: 1 } } },
+    }
+    const PLAIN_MODEL = { ...CHAT_PRODUCT, id: 'chat-plain', model: 'openai/plain', price: '5000', output_token_cap: undefined }
+    h = await startHarness({ products: [PLAIN_MODEL, SCHEMA_MODEL] })
+    // The schema product, with a body its schema refuses: 400 unpaid and paid, no facilitator call.
+    const failing = JSON.stringify({ model: 'openai/gpt-6-sol', messages: [] })
+    const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, failing))
+    expect(unpaid.status).toBe(400)
+    expect(await unpaid.json()).toMatchObject({ error: 'invalid_request_body', errors: [{ path: '/messages', rule: 'minItems' }] })
+    const paid = await newBuyer().pay(h, CHAT_PATH, chatRequest())
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }, failing))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('invalid_request_body')
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+    // The product without a schema, the same shape of body, sent as text/plain: quoted, as today.
+    const plain = JSON.stringify({ model: 'openai/plain', messages: [] })
+    const quoted = await fetch(`${h.base}${CHAT_PATH}`, { method: 'POST', headers: { 'content-type': 'text/plain' }, body: plain })
+    expect(quoted.status).toBe(402)
+    // Not JSON at all: the product cannot be picked, and not every product has a schema.
+    const broken = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, '{"model": '))
+    expect(broken.status).toBe(400)
+    expect((await broken.json()).error).toBe('bad_request')
+  })
+
+  it('a retried known payment with an invalid body is bad_request_after_settlement with errors, or payment_already_delivered once delivered, and is not forwarded', async () => {
+    h = await startHarness({ products: [SEARCH_PRODUCT], upstream: { status: 503 } })
+    const buyer = newBuyer()
+    const paid = await buyer.pay(h, SEARCH_PATH, searchRequest(VALID_SEARCH))
+    const first = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(VALID_SEARCH, { 'content-type': 'application/json', 'payment-signature': paid.header }))
+    expect(first.status).toBe(200)
+    expect(h.upstream.seen).toHaveLength(1)
+    const before = await h.proxy.store.get(keyOf(paid))
+    expect(before).toMatchObject({ state: 'failed', forwardCount: 1 })
+
+    const bad = JSON.stringify({ query: 'SECRET-QUERY-4988', max_results: 9999 })
+    const retry = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(bad, { 'content-type': 'application/json', 'payment-signature': paid.header }))
+    expect(retry.status).toBe(200)
+    const text = await retry.text()
+    const answer = JSON.parse(text) as { error: string; sign_in_with_x: Parameters<Buyer['signIn']>[0] }
+    expect(answer).toMatchObject({ error: 'bad_request_after_settlement', errors: [{ path: '/max_results', rule: 'maximum' }] })
+    expect(text).not.toContain('SECRET-QUERY-4988')
+    expect(h.upstream.seen).toHaveLength(1)
+    expect(h.facilitator.settleCalls).toBe(1)
+    expect(await h.proxy.store.get(keyOf(paid))).toEqual(before)
+
+    // Delivered: the invalid retry is answered as the delivered payment it is.
+    h.upstream.behaviour.status = 200
+    const proof = await buyer.signIn(answer.sign_in_with_x, `${h.base}${SEARCH_PATH}`)
+    const good = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(VALID_SEARCH, { 'content-type': 'application/json', 'payment-signature': paid.header, 'sign-in-with-x': proof }))
+    expect(good.status).toBe(200)
+    expect(await h.proxy.store.get(keyOf(paid))).toMatchObject({ state: 'delivered' })
+    const after = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(bad, { 'content-type': 'application/json', 'payment-signature': paid.header }))
+    expect((await after.json()).error).toBe('payment_already_delivered')
+    expect(h.upstream.seen).toHaveLength(2)
+  })
+})

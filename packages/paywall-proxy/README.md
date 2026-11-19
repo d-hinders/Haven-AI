@@ -125,11 +125,34 @@ product and the field.
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product. |
 | `products[].description` | Yes | Shown in the 402 challenge and in the discovery document. The receipt line joins the name and the description and is at most 300 characters. |
 | `products[].input_example` | No | An example request body, carried into the discovery document. It must pass the proxy's own checks, because a directory probes the route with it. |
-| `products[].input_schema` | No | A JSON Schema the request body validates against, for the same block. |
+| `products[].input_schema` | No | A JSON Schema (draft 2020-12) the request body must pass before the proxy quotes or settles. Also carried into the discovery document. |
 | `products[].output_example` | No | An example response body, for the same block. |
 
 The network is one setting of the deployment, not a field per product. A
 products file that names a network is refused at startup.
+
+**Give every product that takes a body an `input_schema`.** With one, the proxy
+checks each request body against it before it answers with a price and again
+before it settles a payment, so a buyer is never charged for a body your API
+cannot serve. The body must be JSON, sent as `application/json` (or an `application/…+json`
+type) or with no Content-Type; a `text/plain` body is refused. A body that
+fails is answered 400 `invalid_request_body` (a payment the proxy already
+settled gets 200 `bad_request_after_settlement` instead), with an `errors` list
+of `{ path, rule }`: the field, as a JSON pointer, and the schema rule it
+failed; the proxy reports the first failure it finds. The list never repeats
+a value the buyer sent, though a path can contain a property name they sent
+when your schema validates arbitrary keys. **Without a schema the proxy cannot
+refuse a body before payment**: it forwards whatever it is sent.
+
+The dialect is JSON Schema draft 2020-12. At startup the proxy refuses, naming
+the product: a schema it cannot compile; an unknown keyword; a `$ref` that
+points outside the schema (only `#...` references, so loading never makes a
+network call); `input_schema` on a `GET` or `DELETE` route, which has no body;
+and an `input_example` that fails its own schema. `format` is not checked.
+Three things that fail startup when you paste a schema from elsewhere: a
+`"$schema"` naming draft-07 (or any dialect other than 2020-12), OpenAPI's
+`example` keyword (2020-12 spells it `examples`), and `x-*` extension keys.
+Remove them.
 
 What you should see: the proxy starts, and its `started` log line lists your
 product ids under `products`.
@@ -304,7 +327,8 @@ readable body, so Haven never reads a payment that reached you as rejected.
 | The facilitator rejects the payment at verify | 402 | `payment_invalid` |
 | Settle failed and the authorization is unused | 402 | `settle_failed` |
 | Route is not in the products file | 404 | `unknown_route` |
-| Body is not JSON, or `model` does not match | 400 | `bad_request` |
+| The product has an `input_schema` and the body fails it (not JSON, not sent as JSON, or a schema rule) | 400 | `invalid_request_body`, with `errors` |
+| Body is not JSON (no `input_schema`), or `model` does not match | 400 | `bad_request` |
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` |
 | Body over 1 MiB | 413 | `body_too_large` |
 | Too many unpaid or unverified requests from one address | 429 | `rate_limited` |

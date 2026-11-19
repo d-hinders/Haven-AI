@@ -3,9 +3,10 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * Settings → Sales → Stripe deposit addresses (#4954). The routes are mocked
- * at `api`; the hook, the classifier and the section are real, so a refusal is
- * proven end to end from the route's `error_code` to the words on screen.
+ * Sales → Setup → Stripe deposit addresses (#4954; moved here from Settings →
+ * Business → Sales by #4983). The routes are mocked at `api`; the hook, the
+ * classifier and the section are real, so a refusal is proven end to end from
+ * the route's `error_code` to the words on screen.
  */
 
 const mockGet = vi.fn()

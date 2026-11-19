@@ -6,6 +6,25 @@
  * locale must satisfy (see ../index.ts), so a missing or mistyped key in
  * another locale is a compile error, not a silent fallback.
  */
+
+/**
+ * What a seller is, in one shared constant (#4985, widened by the owner on
+ * 2026-11-19: "the kit is one way to sell, not the only one").
+ *
+ * A merchant's own MCP server or API can be the seller; Haven's merchant kit
+ * is one option, never the assumption. #4985 introduces the seller on the
+ * Sales page's first-run helper and Setup tab; #4983's Settings description
+ * uses the same sentences, so the two surfaces cannot drift. #4985 appends the
+ * kit's own sentence ("The merchant kit is a small program you run in front of
+ * an API.") where it introduces the kit — that sentence is kit-specific and
+ * belongs with the kit, not in the definition every seller reads.
+ *
+ * Exported rather than nested in `en` because it is not a message key: it is
+ * one paragraph two surfaces compose into their own sentences.
+ */
+export const SELLER_DEFINITION =
+  'To sell through Haven, you run a seller: your own MCP server or API, or Haven’s merchant kit. It asks each buyer to pay into your Sales account and tells Haven what each payment was for, using a Sales key.'
+
 export const en = {
   common: {
     comingSoon: 'Coming soon',
@@ -496,14 +515,23 @@ export const en = {
     },
 
     /**
-     * Settings → Business → Sales (#4904, epic #4885): the third card, after
-     * Company details and Accounting connections (owner decision 1 on #4894).
+     * Settings → Business → Sales (#4904, epic #4885; reshaped by #4983): the
+     * third section, after Company details and Accounting connections (owner
+     * decision 1 on #4894).
      *
-     * The card is the switch; the dialog is the network choice, one passkey
-     * prompt and the result. Turning Sales off keeps the account and its
-     * history and stops the keys working (owner decision 5 on #4894), and
-     * turning it back on reuses the account with no network choice and no
-     * passkey prompt.
+     * #4983 (owner decision 2026-11-19: "The settings sales part should be a
+     * separate section like Accounting with more context on the sales
+     * product") made it one `SettingsSection` like Accounting: the title sits
+     * above the card, the status and the switch are a `SettingsRow`, and the
+     * heading's link slot carries only the way to the Sales page. `description`
+     * is the product context shown while Sales is off or was never on — it
+     * names the seller from `SELLER_DEFINITION` above, because the merchant kit
+     * is one way to sell, not the only one.
+     *
+     * The dialog is the network choice, one passkey prompt and the result.
+     * Turning Sales off keeps the account and its history and stops the keys
+     * working (owner decision 5 on #4894), and turning it back on reuses the
+     * account with no network choice and no passkey prompt.
      *
      * Every refusal sentence says what the user can do about it and never
      * shows a raw error code (the issue's acceptance criterion). The codes
@@ -511,7 +539,7 @@ export const en = {
      */
     sales: {
       title: 'Sales',
-      description: 'Take payments from customers and their agents, into a separate Sales account.',
+      description: `Sales takes payments from customers and their agents into a separate Sales account, and the Sales page shows what each payment was for. ${SELLER_DEFINITION}`,
       state: {
         on: 'On',
         off: 'Off',
@@ -521,13 +549,16 @@ export const en = {
         off: 'Sales is off. The Sales account and its history are kept, and the Sales keys are not accepted.',
         neverOn: 'Turn Sales on to take payments from customers and their agents.',
       },
+      statusLabel: 'Status',
       accountLabel: 'Sales account',
       networkLabel: 'Network',
       keysLabel: 'Sales keys',
       keysRefused: 'Keys not accepted while off',
-      keysRefusedHelper: 'Sales reports from your merchant kit are refused until Sales is on again.',
+      keysRefusedHelper: 'Sales reports from your seller are refused until Sales is on again.',
       turnOn: 'Turn on Sales',
       turnOff: 'Turn off Sales',
+      /** The heading's trailing link — a link, never a button (design-system.md § Detail-page section rule). */
+      openSalesPage: 'Open the Sales page',
       loading: 'Loading Sales…',
       loadError: 'Haven could not load Sales.',
       retry: 'Try again',

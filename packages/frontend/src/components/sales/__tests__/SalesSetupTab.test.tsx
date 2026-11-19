@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -15,6 +15,8 @@ vi.mock('@/lib/api', async (importOriginal) => ({
 }))
 
 import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
+import { LocaleProvider } from '@/context/LocaleContext'
+import { ToastProvider } from '@/components/ui/Toast'
 import { SalesSetupTab } from '../SalesSetupTab'
 import type { SalesCatalogue } from '@/lib/sales'
 
@@ -61,13 +63,25 @@ const ACCOUNT = { name: 'Sales', chain_id: 8453 }
 
 /** Renders the tab and lets the keys read settle, so no state update lands outside the test. */
 async function renderTab(value: UseMerchantCatalogueResult, onShowAddress = vi.fn()) {
-  render(<SalesSetupTab account={ACCOUNT} catalogue={value} onShowAddress={onShowAddress} />)
+  render(
+    <LocaleProvider>
+      <ToastProvider>
+        <SalesSetupTab account={ACCOUNT} catalogue={value} onShowAddress={onShowAddress} />
+      </ToastProvider>
+    </LocaleProvider>,
+  )
   await screen.findByText('sk_merchant_aaa…')
   return { onShowAddress }
 }
 
 beforeEach(() => {
-  mockGet.mockReset().mockResolvedValue({ keys: [key('aaa', false), key('bbb', false), key('ccc', true)] })
+  mockGet.mockReset().mockImplementation(async (path: string) => {
+    // #4983: the Stripe deposit addresses are one more part of this card.
+    if (path === '/merchant-deposit-addresses') {
+      return { verification: 'Registered by you, not verified by Haven.', addresses: [] }
+    }
+    return { keys: [key('aaa', false), key('bbb', false), key('ccc', true)] }
+  })
   window.history.replaceState(null, '', '/sales?tab=setup')
 })
 
@@ -161,5 +175,22 @@ describe('the Sales keys section', () => {
     expect(mockGet).toHaveBeenCalledWith('/merchant-keys')
     expect(section.textContent).toContain('sk_merchant_bbb…')
     expect(screen.getByRole('button', { name: 'Create Sales key' })).toBeTruthy()
+  })
+})
+
+describe('the Stripe deposit addresses (#4983)', () => {
+  it('renders as one more part of the card, reads the route, and carries the account network', async () => {
+    await renderTab(catalogue())
+
+    const section = await screen.findByTestId('sales-deposit-addresses')
+    expect(mockGet).toHaveBeenCalledWith('/merchant-deposit-addresses')
+    // The part's own anchor, like #receiving-address, #sales-keys and #kit-address.
+    expect(section).toHaveAttribute('id', 'stripe-deposit-addresses')
+    expect(screen.getByRole('heading', { name: 'Stripe deposit addresses', level: 2 })).toBeTruthy()
+
+    // The account's `chain_id` reaches the register dialog's subtitle.
+    await userEvent.click(within(section).getByRole('button', { name: 'Register address' }))
+    const dialog = await screen.findByRole('dialog', { name: 'Register a Stripe deposit address' })
+    expect(dialog.textContent).toContain('Base')
   })
 })

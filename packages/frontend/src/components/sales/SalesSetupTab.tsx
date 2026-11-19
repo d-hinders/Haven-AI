@@ -11,6 +11,7 @@ import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
 import { timeAgo } from '@/lib/format'
 import { catalogueView, type SalesCatalogue } from '@/lib/sales'
 import { SalesKeysSection } from './SalesKeysSection'
+import StripeDepositAddressesSection from './StripeDepositAddressesSection'
 
 /** The helper under the kit address: the mockup's first-run copy, then what the last read said. */
 function kitHelper(catalogue: SalesCatalogue | null): string {
@@ -24,9 +25,10 @@ function kitHelper(catalogue: SalesCatalogue | null): string {
 }
 
 /**
- * The Setup tab (#4900, approved on #4894): where a kit is connected to the
- * Sales account — the receiving address, the Sales keys (a slot #4905 owns) and
- * the kit address. One Card, one `Card.Section` per part.
+ * The Setup tab (#4900, approved on #4894): where a seller is connected to the
+ * Sales account — the receiving address, the Sales keys (a slot #4905 owns),
+ * the kit address and, since #4983, the Stripe deposit addresses. One Card,
+ * one `Card.Section` per part.
  *
  * - **Receiving address**: opens the Receive dialog the page already holds for
  *   the Sales account; no address is printed here.
@@ -35,6 +37,11 @@ function kitHelper(catalogue: SalesCatalogue | null): string {
  *   stores and reads it at once. A refusal reads as the route words it. The
  *   first-run step "Tell Haven where your kit runs" links here with
  *   `#kit-address`, and the field takes focus.
+ * - **Stripe deposit addresses**: `StripeDepositAddressesSection`, moved here
+ *   from Settings → Business → Sales by #4983 (owner decision 2026-11-19:
+ *   "Yes move Stripe deposit address"). It is one more part of this card, so
+ *   it takes the card's padding and the parts' heading scale rather than its
+ *   old `Card.Section divided` wrapper.
  */
 export function SalesSetupTab({
   account,
@@ -136,6 +143,8 @@ export function SalesSetupTab({
             )}
           </form>
         </Card.Section>
+
+        <StripeDepositAddressesSection chainId={account.chain_id} />
       </Card>
     </div>
   )

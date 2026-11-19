@@ -5,8 +5,9 @@
  * Stripe sandbox only): the list, register and retire, through #4952's
  * owner-session routes (`/merchant-deposit-addresses`).
  *
- * Pass `enabled: false` to skip the read — the section renders only while
- * Sales is on, and with Sales off the route answers an empty list anyway.
+ * Pass `enabled: false` to skip the read. The section that mounts this hook
+ * lives on Sales → Setup (#4983), which renders only while Sales is on — the
+ * Sales page answers not found otherwise — so its caller passes `true`.
  * A write that succeeds reads the list again rather than patching it, so the
  * order and the `active` flags are always the route's. A write whose outcome
  * is unknown (no answer, or a 5xx) also reads the list again: the address may

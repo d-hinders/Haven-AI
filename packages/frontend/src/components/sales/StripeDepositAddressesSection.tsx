@@ -1,9 +1,10 @@
 'use client'
 
 /**
- * Settings → Business → Sales → Stripe deposit addresses (#4954, epic #4886;
- * dev and Stripe sandbox only). The design is the note on #4902, approved by
- * the owner 2026-11-18 "with unverified addresses for the demo".
+ * Sales → Setup → Stripe deposit addresses (#4954, epic #4886; dev and Stripe
+ * sandbox only; moved here from Settings → Business → Sales by #4983). The
+ * design is the note on #4902, approved by the owner 2026-11-18 "with
+ * unverified addresses for the demo".
  *
  * ## What it is
  *
@@ -24,13 +25,25 @@
  *
  * ## Patterns
  *
- * `Card.Section divided` under the Sales card's account rows (white on white,
- * never a nested filled card); a `DetailList` with one row per address, shown
- * in full as the Receive dialog shows an address, with its copy and retire
- * actions in the row's actions slot; `StatusBadge` for the two states; `Modal`
- * with `Input`, `DialogActions` and `DialogResult` to register;
- * `ConfirmDialog` to retire; `InlineAlert` for a refusal, inside the dialog
- * that was refused. A retired address stays listed, marked Retired.
+ * One more part of `SalesSetupTab`'s padded card (#4983): a default
+ * `Card.Section` with the same `mt-5 pt-5` as the parts above it, an
+ * `h2 text-sm font-semibold` heading with a `text-xs ink-3` description, and
+ * an `id` anchor (`#stripe-deposit-addresses`) like `#receiving-address`,
+ * `#sales-keys` and `#kit-address`. It is NOT `divided` and carries no
+ * horizontal padding of its own — the card is already padded, so either would
+ * double-indent the part and cut the hairline short. Inside: a `DetailList`
+ * with one row per address, shown in full as the Receive dialog shows an
+ * address, with its copy and retire actions in the row's actions slot;
+ * `StatusBadge` for the two states; `Modal` with `Input`, `DialogActions` and
+ * `DialogResult` to register; `ConfirmDialog` to retire; `InlineAlert` for a
+ * refusal, inside the dialog that was refused. A retired address stays listed,
+ * marked Retired.
+ *
+ * ## Only while Sales is on
+ *
+ * The Sales page renders only while Sales is on (`SalesClient.tsx`), and the
+ * Setup tab mounts only when it is selected, so the rule #4954 stated on the
+ * Settings card holds here without new code.
  */
 
 import { useState, type FormEvent } from 'react'
@@ -135,14 +148,14 @@ export default function StripeDepositAddressesSection({ chainId }: { chainId: nu
   })
 
   return (
-    <Card.Section divided>
-      <div className="space-y-4 px-5 py-4" data-testid="sales-deposit-addresses">
+    <Card.Section className="mt-5 pt-5">
+      <div id="stripe-deposit-addresses" className="space-y-4" data-testid="sales-deposit-addresses">
         {/* Stacks below `sm`, as the card's own header does, so the
             description never squeezes into a narrow column beside the button. */}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0 flex-1">
-            <h3 className="text-sm font-semibold text-[var(--v2-ink)]">{copy.title}</h3>
-            <p className="mt-1 text-sm text-[var(--v2-ink-2)]">{copy.description}</p>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">{copy.title}</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">{copy.description}</p>
           </div>
           <Button
             variant="ghost"

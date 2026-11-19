@@ -888,7 +888,7 @@ describe('sales received in Stripe (#4954, #4981)', () => {
     expect(within(header).getByText('Received in Stripe')).toBeTruthy()
     expect(header.textContent).toContain('to your Stripe address')
     // The sale counts in revenue; it is not in the account's balance (#4981).
-    expect(panel.textContent).toContain('It counts in your revenue, but not in its balance')
+    expect(panel.textContent).toContain('It counts in your revenue, but not in any Haven balance')
     expect(panel.textContent).not.toContain('not in your revenue')
     // The who-line names the Stripe address, never "Paid … into Sales".
     expect(header.textContent).not.toMatch(/Paid by[^·]*into Sales/)

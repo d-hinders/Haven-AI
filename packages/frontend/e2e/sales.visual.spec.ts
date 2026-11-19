@@ -152,7 +152,7 @@ const SCENARIOS: Scenario[] = [
       await expect(panel).toHaveCount(1)
       await expect(panel.getByTestId('sales-payment-header').getByText('Received in Stripe')).toHaveCount(1)
       await expect(panel.getByTestId('sales-payment-header')).toContainText('to your Stripe address')
-      await expect(panel).toContainText('It counts in your revenue, but not in its balance')
+      await expect(panel).toContainText('It counts in your revenue, but not in any Haven balance')
     },
   },
   {

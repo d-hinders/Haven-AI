@@ -217,6 +217,16 @@ describe('what the summary says', () => {
       expect(days[2].series.map((x) => [x.name, x.seriesIndex, x.amount])).toEqual([['In Stripe', 1, 0.25]])
     })
 
+    it('draws one Revenue series when an older backend sends no per-day Stripe part (#4981 review)', () => {
+      const older = {
+        ...split,
+        by_day: [{ day: '2026-11-17', payments: 2, sales: 2, revenue_raw: '1500000' }],
+      } as unknown as SalesSummary
+      const [day] = salesChartDays(older, { from: '2026-11-17', to: '2026-11-17' })
+      expect(day.series.map((x) => x.name)).not.toContain('In Haven')
+      expect(day.series.map((x) => x.amount)).toEqual([1.5])
+    })
+
     it('strikes both segments in the display currency', () => {
       const stripeDays = {
         ...split,

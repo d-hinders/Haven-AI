@@ -406,7 +406,10 @@ export function salesChartDays(
   rate: number | null = null,
 ): StackedBarDay[] {
   const scale = rate ?? 1
-  const split = stripeSalesCount(summary) > 0
+  // Split only when the read carries the per-day Stripe part: a backend from
+  // before #4981 sends `received_in_stripe` but no `in_stripe_raw`, and its
+  // days are account-held only (one Revenue series, as the tile shows no split).
+  const split = stripeSalesCount(summary) > 0 && summary.by_day.every((d) => typeof d.in_stripe_raw === 'string')
   const byDay = new Map(summary.by_day.map((d) => [d.day, d]))
   return salesDayKeys(range).map((day) => {
     const entry = byDay.get(day)

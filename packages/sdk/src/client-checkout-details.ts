@@ -97,6 +97,7 @@ export function checkoutDetailsRefusalError(
     funded = false,
     unsent = false,
     priorPaymentPossible = false,
+    intentExists = false,
     paymentId,
   }: {
     /** The payment is funded (EIP-3009 after the funding leg): it is not delivered. */
@@ -108,6 +109,8 @@ export function checkoutDetailsRefusalError(
      * paid under: "nothing moved" is true of THIS call only.
      */
     priorPaymentPossible?: boolean
+    /** A settle-time refusal before anything was spent: the intent exists, unfunded and unsent. */
+    intentExists?: boolean
     paymentId?: string
   } = {},
 ): CheckoutDetailsUnavailableError {
@@ -118,7 +121,9 @@ export function checkoutDetailsRefusalError(
       ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved; start a new purchase once the owner has fixed this.'
       : priorPaymentPossible
         ? 'This call created no payment and moved no funds; if an earlier call with the same idempotency key already paid, check its payment status.'
-        : 'No payment was created and no funds moved.'
+        : intentExists
+          ? 'Nothing was funded, submitted or sent for this payment.'
+          : 'No payment was created and no funds moved.'
   return new CheckoutDetailsUnavailableError(
     missingFields,
     reason,

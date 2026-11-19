@@ -52,6 +52,7 @@ import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
+  CheckoutDetailsUnavailableError,
   FundingConfirmationUnknownError,
   FundingRevertedError,
   HavenApiError,
@@ -83,6 +84,7 @@ import {
   checkoutDetailsAfterSubmit,
   checkoutDetailsBeforeSpend,
   checkoutDetailsForFundedDelivery,
+  type SettleCheckoutDetails,
   type StoredCheckoutRequest,
 } from './support/checkout-details.js'
 
@@ -1676,12 +1678,28 @@ export function createPaidMcpCompletionHandlers(
         // so the real block is measured now; on erc7710 only availability can
         // be decided (Haven assembles that header at submit), and the block
         // is checked right after the submit, before anything is sent.
-        const checkoutDetails = await checkoutDetailsBeforeSpend(haven, {
-          stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
-          paymentHeader: args.payment_header,
-          requestHeaders: MERCHANT_REQUEST_HEADERS,
-          paymentId: args.payment_id,
-        })
+        //
+        // A before-spend refusal only stands while the intent is still
+        // `pending_signature`. A REPEATED settle (the #3423 crash recovery)
+        // reaches a payment that already moved: there the submit or relay
+        // must give its own answer — the settled replay on erc7710, the state
+        // error on EIP-3009 — and delivery, if any happens, decides checkout
+        // details itself as `funded`/`unsent` (`checkoutDetails: undefined`).
+        // Telling that agent "nothing moved" could make it pay twice.
+        let checkoutDetails: SettleCheckoutDetails | undefined
+        try {
+          checkoutDetails = await checkoutDetailsBeforeSpend(haven, {
+            stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
+            paymentHeader: args.payment_header,
+            requestHeaders: MERCHANT_REQUEST_HEADERS,
+            paymentId: args.payment_id,
+          })
+        } catch (err) {
+          if (!(err instanceof CheckoutDetailsUnavailableError)) throw err
+          const status = await haven.getPaymentStatus(args.payment_id).catch(() => null)
+          if (status === null || status.status === 'pending_signature') throw err
+          checkoutDetails = undefined
+        }
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
@@ -1712,11 +1730,13 @@ export function createPaidMcpCompletionHandlers(
           // and the merchant is NOT called again.
           if (typeof submitted !== 'string') return submitted.settledReplay
           const paymentHeader = submitted
-          const checkoutDetailsHeader7710 = checkoutDetailsAfterSubmit(checkoutDetails, {
-            paymentHeader,
-            requestHeaders: MERCHANT_REQUEST_HEADERS,
-            paymentId: args.payment_id,
-          })
+          const checkoutDetailsHeader7710 = checkoutDetails
+            ? checkoutDetailsAfterSubmit(checkoutDetails, {
+                paymentHeader,
+                requestHeaders: MERCHANT_REQUEST_HEADERS,
+                paymentId: args.payment_id,
+              })
+            : undefined
           const merchant7710 = await deliverMerchantPayment(
             haven,
             { ...args, payment_header: paymentHeader },
@@ -1727,7 +1747,12 @@ export function createPaidMcpCompletionHandlers(
             // the payment status unconditionally, which is a 409 here because
             // the settle above already moved the intent to 'submitted'. Say
             // "there is no funding leg" explicitly instead of implying it.
-            { noFundingLeg: true, context: merchantContext, checkoutDetails: { header: checkoutDetailsHeader7710 } },
+            {
+              noFundingLeg: true,
+              context: merchantContext,
+              // Undecided (a repeated settle): delivery decides it, as `unsent`.
+              ...(checkoutDetails ? { checkoutDetails: { header: checkoutDetailsHeader7710 } } : {}),
+            },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
           // #2970: "settled" means Haven VERIFIED the settlement on-chain, not
@@ -1923,8 +1948,9 @@ export function createPaidMcpCompletionHandlers(
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash, {
           context: merchantContext,
-          // #4872: decided before the funding relay, above.
-          checkoutDetails: { header: checkoutDetails.header },
+          // #4872: decided before the funding relay, above (undecided on a
+          // repeated settle: delivery then decides it as `funded`).
+          ...(checkoutDetails ? { checkoutDetails: { header: checkoutDetails.header } } : {}),
         })
         // #1310: rail-aware remaining-budget summary so the agent can report
         // spend without a separate haven_get_agent/haven_get_allowances round

@@ -18,7 +18,7 @@
  *   no console/stdout/stderr output.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HavenClient, X_CHECKOUT_DETAILS_HEADER } from '@haven_ai/sdk'
+import { HavenClient, X402Erc7710AlreadySettledError, X_CHECKOUT_DETAILS_HEADER } from '@haven_ai/sdk'
 import { createToolHandlers } from '../tools.js'
 import {
   AGENT_RESPONSE,
@@ -32,6 +32,7 @@ import {
   ok,
   recordedCalls,
   stubFetch,
+  x402PreflightStatus,
 } from '../test-support/hosted-mcp.js'
 
 const DETAILS_PATH = `GET /agents/${AGENT_RESPONSE.id}/checkout-details`
@@ -166,8 +167,9 @@ describe('#4872 hosted: the answer at settle', () => {
   const SIG = '0x' + '11'.repeat(65)
   const STORED_URL = 'http://merchant.test/mcp'
 
-  function settleHaven(request: unknown, details: unknown, opts: { storedUrl?: string } = {}) {
+  function settleHaven(request: unknown, details: unknown, opts: { storedUrl?: string; status?: Record<string, unknown> } = {}) {
     stubFetch({
+      ...(opts.status ? { 'GET /machine-payments/pay_x402/status': { status: 200, body: x402PreflightStatus(opts.status) } } : {}),
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       [DETAILS_PATH]: { status: 200, body: details },
@@ -224,7 +226,9 @@ describe('#4872 hosted: the answer at settle', () => {
     const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' })
     const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
     expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'not_shared', phase: 'not_started', paymentId: 'pay_x402' })
-    expect(result.message).toContain('No payment was created')
+    // The intent exists: the settle-leg wording, not the pay tools'.
+    expect(result.message).toContain('Nothing was funded, submitted or sent for this payment')
+    expect(result.message).not.toContain('No payment was created')
     expect(fundingRelays()).toEqual([])
     expect(complete).not.toHaveBeenCalled()
     for (const marker of VALUE_MARKERS) expect(logs()).not.toContain(marker)
@@ -291,8 +295,8 @@ describe('#4872 hosted: the answer at settle', () => {
   })
 
   describe('erc7710 settle', () => {
-    function erc7710Haven(request: unknown, details: unknown, header: string) {
-      const { haven, complete } = settleHaven(request, details)
+    function erc7710Haven(request: unknown, details: unknown, header: string, opts: { status?: Record<string, unknown> } = {}) {
+      const { haven, complete } = settleHaven(request, details, opts)
       const submit = vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue(header as never)
       return { haven, complete, submit }
     }
@@ -310,6 +314,28 @@ describe('#4872 hosted: the answer at settle', () => {
       await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG })
       expect(submit).toHaveBeenCalledTimes(1)
       expect(sentAnswer(complete)).toEqual({ version: 1, receipt_email: EMAIL })
+    })
+
+    it('a REPEATED settle of a payment that already settled, sharing now off: the settled replay, never "nothing moved"', async () => {
+      const { haven, complete, submit } = erc7710Haven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, 'eyJ4IjoxfQ==', {
+        status: { status: 'confirmed', phase: 'settled', next_action: 'none', tx_hash: '0x' + 'ab'.repeat(32) },
+      })
+      submit.mockRejectedValue(new X402Erc7710AlreadySettledError('pay_x402', '0x' + 'ab'.repeat(32)))
+      const result = (await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG })) as { success: boolean; data: unknown }
+      expect(result).toMatchObject({ success: true })
+      expect(result.data).toMatchObject({ idempotent_replay: true, settlement_tx_hash: '0x' + 'ab'.repeat(32), settlement_scheme: 'erc7710' })
+      expect(JSON.stringify(result)).not.toContain('CHECKOUT_DETAILS_UNAVAILABLE')
+      expect(JSON.stringify(result)).not.toContain('Nothing was funded')
+      expect(complete).not.toHaveBeenCalled()
+    })
+
+    it('the same refusal while the intent is still pending_signature stands: nothing submitted', async () => {
+      const { haven, submit } = erc7710Haven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, 'eyJ4IjoxfQ==', {
+        status: { status: 'pending_signature' },
+      })
+      const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG }))
+      expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'not_started' })
+      expect(submit).not.toHaveBeenCalled()
     })
 
     it('a real header too large for the answer after submit: unsent — never sent to the merchant, and the step says start a new purchase', async () => {

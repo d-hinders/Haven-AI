@@ -503,7 +503,12 @@ the fields above on its body, plus `stage` (`before_payment`, `funded` or
 `normalizeError` (`packages/mcp-server/src/tools/support/errors.ts`) answers it
 with the same code and fields, a `phase` per stage and a
 `refusalNextStep({ nextAction: StopAndTellUser })` whose omitted reason is the
-stage's: only `before_payment` says to call again.
+stage's: only `before_payment` says to call again. On the hosted settle leg a
+`before_payment` refusal stands only while the intent is still
+`pending_signature`; a repeated settle of a payment that already moved gets
+the submit's or relay's own answer instead (the settled replay on erc7710), and
+its message there is "Nothing was funded, submitted or sent for this payment",
+since the intent exists.
 
 Status 409 because the request conflicts with the owner's current sharing
 state, and repeating it unchanged gets the same answer. It is not a

@@ -117,7 +117,9 @@ export async function checkoutDetailsBeforeSpend(
     : await haven.readCheckoutDetails()
   const base = decideCheckoutDetails(request, availability)
   const decided = input.paymentHeader ? withinHeaderBlock(base, request, blockFor(input.paymentHeader, input.requestHeaders)) : base
-  if (decided.kind === 'refuse') throw checkoutDetailsRefusalError(decided.missingFields, decided.reason, { paymentId: input.paymentId })
+  if (decided.kind === 'refuse') {
+    throw checkoutDetailsRefusalError(decided.missingFields, decided.reason, { intentExists: true, paymentId: input.paymentId })
+  }
   return { request, availability, header: decided.kind === 'answer' ? decided.header : undefined }
 }
 

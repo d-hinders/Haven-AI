@@ -33,6 +33,8 @@ export interface Product {
   inputExample?: unknown
   inputSchema?: unknown
   outputExample?: unknown
+  /** The shape of the answer, served in the discovery document only, never enforced (#4990). */
+  outputSchema?: unknown
 }
 
 export class ProductsFileError extends Error {
@@ -54,6 +56,7 @@ const PRODUCT_FIELDS = new Set([
   'input_example',
   'input_schema',
   'output_example',
+  'output_schema',
 ])
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -149,6 +152,13 @@ export function parseProducts(raw: unknown): Product[] {
       }
     }
 
+    // #4990: `output_schema` is served in the discovery document, never
+    // enforced, but it must be a JSON object: a string or an array there is a
+    // products-file mistake, not a schema.
+    if (entry.output_schema !== undefined && !isRecord(entry.output_schema)) {
+      problem('"output_schema" must be a JSON object')
+    }
+
     const product: Product = {
       id: typeof id === 'string' ? id : '',
       ...(typeof name === 'string' ? { name } : {}),
@@ -162,6 +172,7 @@ export function parseProducts(raw: unknown): Product[] {
       ...(entry.input_example !== undefined ? { inputExample: entry.input_example } : {}),
       ...(entry.input_schema !== undefined ? { inputSchema: entry.input_schema } : {}),
       ...(entry.output_example !== undefined ? { outputExample: entry.output_example } : {}),
+      ...(entry.output_schema !== undefined ? { outputSchema: entry.output_schema } : {}),
     }
 
     // #4988: the schema is compiled here, so a schema the proxy cannot enforce fails startup.

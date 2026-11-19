@@ -276,10 +276,12 @@ The demo merchant also serves a kit document at `/.well-known/x402`
 demo can fill a Sales account's Products tab: Haven reads a seller's products
 from that path and no other (#4899). It is a **reduced** version 1 document:
 `version`, `operator.name`, `name`, `network`, `asset`, `pay_to`, and per
-product `id`, `name`, `description` and atomic `price`. It leaves out
-`settlement` and each product's `route`, which this table marks required,
-because its products are MCP tools rather than HTTP routes and do not share one
-settlement method or facilitator; neither could be filled truthfully. Haven's
+product `id`, `name`, `description` and atomic `price`. It leaves out the
+top-level `description`, `settlement` and each product's `route`, which this
+table marks required: its products are MCP tools rather than HTTP routes and
+do not share one settlement method or facilitator, so `settlement` and `route`
+could not be filled truthfully, and Haven's reader does not read the top-level
+`description`. Haven's
 reader needs only `version`, `network`, `pay_to` and `products`, and a missing
 `route` means nothing to it. It carries no `mcp_url`.
 

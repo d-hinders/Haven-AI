@@ -114,11 +114,11 @@ describe('the kit discovery document (#4987)', () => {
     expect((await fetch(`${origin}${KIT_DISCOVERY_PATH}`)).status).toBe(404)
   })
 
-  it('answers HEAD with 200 and no body', async () => {
+  it('answers HEAD with 200 and the JSON content type (Node drops the body itself)', async () => {
     const origin = await startServer()
     const res = await fetch(`${origin}${KIT_DISCOVERY_PATH}`, { method: 'HEAD' })
     expect(res.status).toBe(200)
-    expect(await res.text()).toBe('')
+    expect(res.headers.get('content-type')).toBe('application/json')
   })
 
   it('does not answer POST', async () => {

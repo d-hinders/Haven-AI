@@ -166,7 +166,7 @@ serves one there once `MERCHANT_SALES_ADDRESS` is set (#4987).
 The document names the Sales account as the receiving address for both. The
 joke is in fact paid to the Stripe deposit address (step 1.5): a kit document
 has one receiving address, and Haven only uses it to label products, never to
-pay. Leaving the field empty harms nothing: sales still show the product name
+pay. Leaving **Kit address** empty harms nothing: sales still show the product name
 the demo merchant reports.
 
 ## 2. The click path

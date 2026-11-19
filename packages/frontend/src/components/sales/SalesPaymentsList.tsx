@@ -141,7 +141,7 @@ export function SalesPaymentsList({
   list,
   periodTotal,
   revenueText,
-  stripeText = null,
+  splitText = null,
   money,
   merchantName,
   onOpenPayment,
@@ -156,8 +156,8 @@ export function SalesPaymentsList({
   periodTotal: number | null
   /** The filtered summary's Revenue, as text; null while it loads. */
   revenueText: string | null
-  /** The period's sales received in Stripe, as text; null when it has none (#4954). */
-  stripeText?: string | null
+  /** "{in Haven} in Haven · {in Stripe} in Stripe" when the period has Stripe-held sales (#4981); null when it has none. */
+  splitText?: string | null
   money: SalesMoney
   merchantName: string
   onOpenPayment: (txHash: string) => void
@@ -202,7 +202,7 @@ export function SalesPaymentsList({
           revenueText !== null ? (
             <span className="v2-tabular" data-testid="sales-payments-summary">
               Revenue {revenueText}
-              {stripeText !== null ? <> · Received in Stripe {stripeText}</> : null}
+              {splitText ? <> ({splitText})</> : null}
             </span>
           ) : undefined
         }
@@ -293,7 +293,7 @@ export function SalesPaymentsList({
           Transactions
         </Link>
         . Sales adds what each payment was for and leaves your own moves out of the totals.
-        {stripeText !== null ? ' Sales received in Stripe went to your Stripe address, so they are not in Transactions.' : null}
+        {splitText ? ' Sales received in Stripe went to your Stripe address, so they are not in Transactions.' : null}
       </p>
     </section>
   )

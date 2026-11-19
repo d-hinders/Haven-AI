@@ -1804,8 +1804,10 @@ export const FIXTURE_MERCHANT_SERVICES_ON = {
 export const FIXTURE_SALES_SUMMARY = {
   usdc_rates: { usd: 0.9998, eur: 0.92, sek: 11.2 },
   revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
   sales: 3,
-  average_sale_raw: '380000',
+  // $2.14 over every payment counted (3 sales + 1 with no product), rounded down (#4981).
+  average_sale_raw: '535000',
   without_product: { count: 1, amount_raw: '1000000' },
   own_moves: { count: 1, amount_raw: '500000' },
   by_product: [
@@ -1830,9 +1832,9 @@ export const FIXTURE_SALES_SUMMARY = {
   by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
   unattributed: { payments: 0, amount_raw: '0' },
   by_day: [
-    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
-    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
-    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
   ],
   received_in_stripe: { count: 0, amount_raw: '0' },
 }

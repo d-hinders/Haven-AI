@@ -89,9 +89,11 @@ calendar days including today — the Sales page's own mapping, which is what
 makes the two totals comparable.
 
 **The revenue figures.** *Revenue* is the period's total in the display
-currency: sales plus payments that carry no sale record. *Sales* is the count of
-payments with a product, captioned with the payers behind them. *Average sale*
-is the sales' amount divided by the sales count, the read's own figure. *Not
+currency: sales plus payments that carry no sale record, wherever the money was
+received (a sale received in Stripe counts, #4981). *Sales* is every revenue
+payment, sales plus payments with no product, as the Sales page counts them,
+captioned with the payers behind them. *Average sale* is the total over every
+payment counted ("per payment"), the read's own `average_sale_raw`. *Not
 counted* is what moved between the owner's own accounts and agents — it is in no
 total, and the tile says so rather than leaving the reader to wonder where the
 money went; it renders at zero too, because "$0.00 / No transfers between your

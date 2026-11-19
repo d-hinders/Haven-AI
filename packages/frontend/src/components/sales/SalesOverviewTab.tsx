@@ -40,8 +40,7 @@ import {
   salesChartFormat,
   salesRangeDays,
   salesTotalText,
-  stripeSalesCount,
-  stripeSalesRaw,
+  revenueSplitText,
   type SalesCurrency,
   type SalesDayRange,
   type SalesFacets,
@@ -140,9 +139,6 @@ function OverviewSkeleton() {
   )
 }
 
-const STRIPE_HINT =
-  'Sales paid to a Stripe deposit address you registered. They are not in Revenue or in any Haven balance, and this is not your Stripe balance.'
-
 const WITHOUT_PRODUCT_HINT =
   'A payment your kit sent no sale record for. It still counts as revenue; the product is what is missing.'
 
@@ -156,11 +152,11 @@ const WITHOUT_PRODUCT_HINT =
  * while the rows themselves are paged. Moves from the owner's own accounts or
  * agents are left out of every figure and named once, in the notice.
  *
- * Sales received in Stripe (#4954) are in none of those figures: they have one
- * tile of their own, "Received in Stripe", shown only when the period has one,
- * and the list's summary line names their amount beside Revenue. So each kind
- * agrees with its own rows: the account's rows with the account's tiles, the
- * Stripe rows with the Stripe figure.
+ * A sale received in Stripe (#4954) is a sale like any other (#4981): every
+ * figure counts it, wherever the money landed, and the page says where. The
+ * Revenue tile's foot and the list's summary line split the total into "in
+ * Haven" and "in Stripe", and the by-day chart draws the two as series.
+ * Balances stay Haven-only: this page never says a Stripe sale is in one.
  */
 export function SalesOverviewTab({
   range,
@@ -240,8 +236,7 @@ export function SalesOverviewTab({
   if (filtered || (data !== null && !emptyUnfiltered)) listShownFor.current = rangeKey
   const showList = !emptyUnfiltered && listShownFor.current === rangeKey
   const revenueText = data !== null ? salesTotalText(data.revenue_raw, money) : null
-  const stripeCount = data !== null ? stripeSalesCount(data) : 0
-  const stripeText = data !== null && stripeCount > 0 ? salesTotalText(stripeSalesRaw(data), money) : null
+  const splitText = data !== null ? revenueSplitText(data, money) : null
 
   return (
     <div className="mt-6 space-y-4" data-testid="sales-overview">
@@ -261,7 +256,7 @@ export function SalesOverviewTab({
             list={list}
             periodTotal={periodTotal}
             revenueText={revenueText}
-            stripeText={stripeText}
+            splitText={splitText}
             money={money}
             merchantName={merchantName}
             onOpenPayment={onOpenPayment}
@@ -278,7 +273,7 @@ export function SalesOverviewTab({
 }
 
 /**
- * Everything above the list: the tiles, the Stripe tile, the own-moves notice,
+ * Everything above the list: the tiles, the own-moves notice,
  * the by-day chart and both breakdowns, all from the ONE (filtered) summary.
  * While it loads, a skeleton; on a failed read, the retry; a period with no
  * payments says so — unless a filter emptied it, when the list's no-match
@@ -340,14 +335,14 @@ function OverviewFigures({
   // breakdown; a payment from several wallets at once has none to count.
   const payersExact = data.unattributed.payments === 0
   const revenuePayments = revenueCount(data)
-  const averageRaw = revenuePayments > 0 ? String(BigInt(data.revenue_raw || '0') / BigInt(revenuePayments)) : '0'
   const chart = salesChartFormat(money)
   const chartDays = salesChartDays(data, range, chart.rate)
   const productRows = productLines(data, money)
   const payerRows = payerLines(data, money)
   const own = data.own_moves
-  const stripeCount = stripeSalesCount(data)
-  const stripeText = stripeCount > 0 ? salesTotalText(stripeSalesRaw(data), money) : null
+  // #4981: with a Stripe-held sale in the (filtered) period, the foot says where
+  // the money was received; it takes the slot the "no sales before" line has.
+  const splitText = revenueSplitText(data, money)
 
   // #4963: the bars are struck in the display currency, so the values and the
   // axis ticks format them as they are (USDC in token mode).
@@ -368,16 +363,19 @@ function OverviewFigures({
                 // #4963: the chip's decimal mark follows the figure's (no "+15.9%" beside "23,03 kr").
                 ...(chart.rate !== null ? { deltaLocale: currencyLocale(currency) } : {}),
               }
-            : previousRevenueIsZero
+            : {})}
+          {...(splitText !== null
+            ? { footnote: splitText }
+            : change === null && previousRevenueIsZero
               ? { footnote: `No sales in the ${days} days before` }
               : {})}
         />
         <StatTile
           label="Sales"
-          value={String(revenueCount(data))}
+          value={String(revenuePayments)}
           {...(payersExact ? { footnote: `from ${plural(payers, 'payer')}` } : {})}
         />
-        <StatTile label="Average sale" value={salesTotalText(averageRaw, money)} footnote="per payment" />
+        <StatTile label="Average sale" value={salesTotalText(data.average_sale_raw, money)} footnote="per payment" />
         <StatTile
           label="Without a product"
           value={String(data.without_product.count)}
@@ -396,34 +394,6 @@ function OverviewFigures({
           }
         />
       </div>
-
-      {/* #4954: the Stripe figure is its own row, on the same column grid, so
-          the account tiles above stay one row of four and the figure reads as
-          apart from them, as it is: not in Revenue. */}
-      {stripeText !== null ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <div data-testid="sales-stripe-tile">
-            <StatTile
-              className="h-full"
-              label="Received in Stripe"
-              value={stripeText}
-              footnote={`${plural(stripeCount, 'sale')}, not in Revenue`}
-              hint={
-                <Tooltip label={STRIPE_HINT} side="bottom">
-                  <span
-                    tabIndex={0}
-                    role="button"
-                    aria-label={`What this counts: ${STRIPE_HINT}`}
-                    className="rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80"
-                  >
-                    <Icon icon={Info} className="h-3.5 w-3.5" />
-                  </span>
-                </Tooltip>
-              }
-            />
-          </div>
-        </div>
-      ) : null}
 
       {own.count > 0 ? (
         <NoticeRow>

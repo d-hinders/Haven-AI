@@ -546,6 +546,25 @@ test.describe('design-system visual regression', () => {
       await expectShowcaseClip(narrow, vp.height, 'the narrow sample', `design-system-stacked-bar-chart-narrow-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
     })
 
+    test(`/design-system Revenue by where received renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
+      // #4981: the Sales patterns specimen with two non-agent series, "In
+      // Haven" and "In Stripe", and a Stripe-only day. Its own baseline, so
+      // the two-series state is seen rendered, not only built.
+      const scheme = schemeOf(testInfo)
+      const schemeSuffix = scheme === 'dark' ? '-dark' : ''
+      await page.setViewportSize({ width: vp.width, height: vp.height })
+      await page.goto('/design-system')
+      await page.evaluate(() => document.fonts.ready)
+      await page.waitForLoadState('networkidle')
+
+      const specimen = page.getByTestId('ds-sales-received-chart')
+      await expect(specimen).toHaveCount(1)
+      await expect(specimen).toContainText('In Haven')
+      await expect(specimen).toContainText('In Stripe')
+
+      await expectShowcaseClip(specimen, vp.height, 'the where-received sample', `design-system-sales-received-chart-${vp.name}${schemeSuffix}.png`, STACKED_BAR_MAX_DIFF_PIXELS)
+    })
+
     test(`/design-system StackedBarChart swatch list renders pixel-stable (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       const schemeSuffix = scheme === 'dark' ? '-dark' : ''

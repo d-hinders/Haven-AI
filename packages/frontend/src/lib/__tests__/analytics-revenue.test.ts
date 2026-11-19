@@ -28,8 +28,10 @@ const RATES = { usd: 0.9998, eur: 0.92, sek: 11.2 }
 const SUMMARY = {
   usdc_rates: RATES,
   revenue_raw: '1675000',
+  revenue_in_account_raw: '1675000',
   sales: 7,
-  average_sale_raw: '239285',
+  // 1675000 / (7 sales + 1 without a product), rounded down (#4981).
+  average_sale_raw: '209375',
   without_product: { count: 1, amount_raw: '100000' },
   own_moves: { count: 2, amount_raw: '500000' },
   by_product: [
@@ -52,6 +54,7 @@ const SUMMARY = {
       sales: 2,
       revenue_raw: '600000',
       without_product_raw: '0',
+      in_stripe_raw: '0',
       by_product: [
         { product_id: 'p1', amount_raw: '500000' },
         { product_id: 'p2', amount_raw: '100000' },
@@ -64,6 +67,7 @@ const SUMMARY = {
       sales: 5,
       revenue_raw: '1075000',
       without_product_raw: '100000',
+      in_stripe_raw: '0',
       by_product: [
         { product_id: 'p2', amount_raw: '300000' },
         { product_id: 'p3', amount_raw: '300000' },

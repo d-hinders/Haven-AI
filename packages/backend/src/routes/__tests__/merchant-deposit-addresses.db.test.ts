@@ -642,7 +642,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
     })
   })
 
-  describe('the reads keep Stripe-held sales apart', () => {
+  describe('the reads count Stripe-held sales in revenue, split by where received (#4981)', () => {
     const PERIOD = 'from=2026-11-01&to=2026-11-30'
 
     async function seedAccountSale(m: Merchant, tx: string, amount: string) {
@@ -681,7 +681,7 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
     const H2 = '0x' + '02'.repeat(32)
     const H3 = '0x' + '03'.repeat(32)
 
-    it('the tiles and breakdowns count only account-held sales; the Stripe-held figure is separate', async () => {
+    it('the tiles and breakdowns count Stripe-held sales too; the split stays on the wire', async () => {
       const m = await seedMerchant()
       await seedAccountSale(m, H1, '1000000')
       await seedStripeSale(m, H2, '5000000', addr())
@@ -690,28 +690,33 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
 
       const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       expect(summary).toMatchObject({
-        revenue_raw: '1000000',
-        sales: 1,
-        average_sale_raw: '1000000',
+        revenue_raw: '13000000',
+        revenue_in_account_raw: '1000000',
+        sales: 3,
+        // 13,000,000 over 3 payments, rounded down.
+        average_sale_raw: '4333333',
         without_product: { count: 0, amount_raw: '0' },
         own_moves: { count: 0, amount_raw: '0' },
-        unattributed: { payments: 0, amount_raw: '0' },
+        // the several-payer Stripe sale stores no payers: unattributed.
+        unattributed: { payments: 1, amount_raw: '7000000' },
         received_in_stripe: { count: 2, amount_raw: '12000000' },
       })
-      expect(summary.by_product).toEqual([expect.objectContaining({ product_id: 'P1', sales: 1, amount_raw: '1000000' })])
+      expect(summary.by_product.map((p: { product_id: string; sales: number; amount_raw: string }) => [p.product_id, p.sales, p.amount_raw]))
+        .toEqual([['P2', 2, '12000000'], ['P1', 1, '1000000']])
+      // by payer: the account sale and the single-payer Stripe sale share PAYER.
       expect(summary.by_payer).toHaveLength(1)
-      expect(summary.by_payer[0]).toMatchObject({ payments: 1, amount_raw: '1000000' })
-      // #4959: the day's split by product counts the account-held P1 only; the
-      // Stripe-held P2 sales of 11-11 are in no day at all.
-      expect(summary.by_day).toEqual([{
-        day: '2026-11-10',
-        payments: 1,
-        sales: 1,
-        revenue_raw: '1000000',
-        without_product_raw: '0',
-        by_product: [{ product_id: 'P1', amount_raw: '1000000' }],
-        other_products_raw: '0',
-      }])
+      expect(summary.by_payer[0]).toMatchObject({ payments: 2, amount_raw: '6000000' })
+      // by day: 11-10 is account-held, 11-11 Stripe-held; the own-only row is in no day.
+      expect(summary.by_day).toEqual([
+        {
+          day: '2026-11-10', payments: 1, sales: 1, revenue_raw: '1000000', without_product_raw: '0',
+          in_stripe_raw: '0', by_product: [{ product_id: 'P1', amount_raw: '1000000' }], other_products_raw: '0',
+        },
+        {
+          day: '2026-11-11', payments: 2, sales: 2, revenue_raw: '12000000', without_product_raw: '0',
+          in_stripe_raw: '12000000', by_product: [{ product_id: 'P2', amount_raw: '12000000' }], other_products_raw: '0',
+        },
+      ])
     })
 
     it('an account with no Stripe-held sales has exactly the figures it had, and a zero Stripe figure', async () => {
@@ -720,13 +725,14 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
       const { received_in_stripe, ...rest } = summary
       expect(received_in_stripe).toEqual({ count: 0, amount_raw: '0' })
-      expect(rest).toMatchObject({ revenue_raw: '1000000', sales: 1, average_sale_raw: '1000000' })
+      expect(rest).toMatchObject({ revenue_raw: '1000000', revenue_in_account_raw: '1000000', sales: 1, average_sale_raw: '1000000' })
+      expect(rest.by_day[0].in_stripe_raw).toBe('0')
       const payments = (await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments
       expect(payments).toHaveLength(1)
       expect(payments[0]).toMatchObject({ held_by: 'account', receiving_address: null })
     })
 
-    it('the list includes Stripe-held sales with held_by and the receiving address; totals and list agree per kind', async () => {
+    it('the list includes Stripe-held sales with held_by and the receiving address; revenue and the list agree, split by where received', async () => {
       const m = await seedMerchant()
       const deposit = addr()
       await seedAccountSale(m, H1, '1000000')
@@ -738,7 +744,8 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
       const account = payments.filter((p: { held_by: string }) => p.held_by === 'account')
       expect(stripe).toEqual([expect.objectContaining({ tx_hash: H2, kind: 'sale', receiving_address: deposit, amount_raw: '5000000' })])
       const sum = (rows: Array<{ amount_raw: string }>) => rows.reduce((t, r) => t + BigInt(r.amount_raw), 0n).toString()
-      expect(sum(account)).toBe(summary.revenue_raw)
+      expect(sum(account)).toBe(summary.revenue_in_account_raw)
+      expect(sum(payments)).toBe(summary.revenue_raw)
       expect(sum(stripe)).toBe(summary.received_in_stripe.amount_raw)
       expect(stripe.length).toBe(summary.received_in_stripe.count)
     })

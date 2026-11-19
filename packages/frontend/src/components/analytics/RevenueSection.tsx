@@ -15,12 +15,14 @@
  * ── What each tile says ────────────────────────────────────────────────────
  *
  *   Revenue        The period's total, in the display currency: sales plus
- *                  payments that carry no sale record. Own moves are NOT in
- *                  it (the read excludes them), which is why the next tile
- *                  exists.
- *   Sales          The count of payments with a product.
- *   Average sale   The sales' amount divided by the sales count — the read's
- *                  own figure, never a second division here.
+ *                  payments that carry no sale record, wherever the money was
+ *                  received (a Stripe-held sale counts, #4981). Own moves are
+ *                  NOT in it (the read excludes them), which is why the "Not
+ *                  counted" tile exists.
+ *   Sales          Every revenue payment: sales plus payments with no
+ *                  product, as the Sales page counts them.
+ *   Average sale   The total over every payment counted — the read's own
+ *                  `average_sale_raw`, never a second division here.
  *   Not counted    What moved between the owner's own accounts and agents.
  *                  It is in no total, and the tile says so rather than
  *                  leaving the reader to wonder where it went.
@@ -162,13 +164,13 @@ export function RevenueSection({
         />
         <StatTile
           label="Sales"
-          value={String(data.sales)}
-          footnote={payersExact ? `from ${plural(payers, 'payer')}` : 'payments with a product'}
+          value={String(revenuePayments)}
+          {...(payersExact ? { footnote: `from ${plural(payers, 'payer')}` } : {})}
         />
         <StatTile
           label="Average sale"
           value={salesTotalText(data.average_sale_raw, money)}
-          footnote="per sale"
+          footnote="per payment"
         />
         {/* The mockup's "Not counted" tile (#4894): what moved between the
             owner's own accounts and agents. It is in no total above, and the

@@ -24,15 +24,16 @@
  *
  * A sale received at a registered Stripe deposit address (`held_by = 'stripe'`)
  * has no `inbound_transfers` legs; its chain facts are on the sale row, and it
- * is its own arm of `pay`. It is NEVER in a Haven balance, so every summary
- * figure (tiles, breakdowns, days) reads `pay_acct`, the account-held arm only,
- * and the separate `received_in_stripe` figure carries the Stripe-held sales.
- * The list and the detail include them, marked.
+ * is its own arm of `pay`. It is NEVER in a Haven balance, but a sale is a sale
+ * wherever the money landed (#4981): every revenue figure (tiles, breakdowns,
+ * days) reads `pay_f`, both arms. The split stays on the wire, always under the
+ * active filters: `revenue_in_account_raw`, `received_in_stripe` and
+ * `by_day[].in_stripe_raw`. A several-payer Stripe sale stores no individual
+ * payers, so it is `unattributed`. The list and the detail include them, marked.
  *
  * ## Filters and search (#4959)
  *
- * The list, the total and the summary read ONE filtered relation, `pay_f`
- * (`pay_acct` is its account-held part), so for one filter set the totals,
+ * The list, the total and the summary read ONE filtered relation, `pay_f`, so for one filter set the totals,
  * the breakdowns, the count and the rows agree. A filter is a parameter of the
  * statement, never a cut made after the fetch, so keyset paging stays exact.
  * The search term arrives already RESOLVED (`SalesFilters.search`): the module
@@ -166,7 +167,7 @@ const PAYMENTS_CTE = `
     UNION ALL
     -- #4952: a Stripe-held sale has NO inbound_transfers legs: its chain facts
     -- are on the sale row. Never in a Haven balance, so it is its own arm,
-    -- marked held_by = 'stripe', and every summary figure below reads pay_acct.
+    -- marked held_by = 'stripe'. Every summary figure below reads pay_f (#4981).
     SELECT LOWER(ms.tx_hash),
            ms.block_time,
            'sale',
@@ -210,8 +211,7 @@ const PAYMENTS_CTE = `
             OR (p.several_payers AND p.leg_search_match)
             OR (p.kind = 'sale' AND p.product_id = ANY($12::text[]))
             OR p.receipt_number ILIKE $10::text)
-  ),
-  pay_acct AS (SELECT * FROM pay_f WHERE held_by = 'account')`
+  )`
 
 const NO_BOUND_FROM = '-infinity'
 const NO_BOUND_TO = 'infinity'
@@ -246,6 +246,8 @@ export const BREAKDOWN_TOP = 100
 export interface SalesSummaryRaw {
   tiles: {
     revenue_raw: string
+    /** #4981: the part of `revenue_raw` received in the Haven account. */
+    revenue_in_account_raw: string
     sales: number
     sales_raw: string
     without_product_count: number
@@ -266,6 +268,8 @@ export interface SalesSummaryRaw {
     sales: number
     revenue_raw: string
     without_product_raw: string
+    /** #4981: the part of `revenue_raw` received in Stripe. */
+    in_stripe_raw: string
     /** #4959: the day's sales by product, for the products `by_product` names. */
     by_product: Array<{ product_id: string; amount_raw: string }>
     /** The day's sales of the products folded into `by_product_other`. */
@@ -275,7 +279,7 @@ export interface SalesSummaryRaw {
   by_payer: Array<{ payer: string; payments: number; amount_raw: string; last_paid_at: string }>
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
-  /** #4952: Stripe-held sales, apart from every figure above. */
+  /** #4952: the Stripe-held part of the revenue figures above (#4981), under the same filters. */
   received_in_stripe: { count: number; amount_raw: string }
 }
 
@@ -287,7 +291,7 @@ const SUMMARY_SQL = `
            COUNT(*) AS sales,
            SUM(amount) AS amount,
            ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC, product_id) AS rn
-      FROM pay_acct
+      FROM pay_f
      WHERE kind = 'sale'
      GROUP BY product_id
   ),
@@ -297,13 +301,13 @@ const SUMMARY_SQL = `
            SUM(amount) AS amount,
            MAX(block_time) AS last_paid_at,
            ROW_NUMBER() OVER (ORDER BY SUM(amount) DESC, payer) AS rn
-      FROM pay_acct
+      FROM pay_f
      WHERE kind <> 'own_move' AND NOT several_payers AND payer IS NOT NULL
      GROUP BY payer
   ),
   pay_days AS (
-    SELECT TO_CHAR((block_time AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day, kind, product_id, amount
-      FROM pay_acct
+    SELECT TO_CHAR((block_time AT TIME ZONE 'UTC')::date, 'YYYY-MM-DD') AS day, kind, held_by, product_id, amount
+      FROM pay_f
      WHERE kind <> 'own_move'
   ),
   day_products AS (
@@ -319,13 +323,14 @@ const SUMMARY_SQL = `
   SELECT
     (SELECT json_build_object(
         'revenue_raw', COALESCE(SUM(amount) FILTER (WHERE kind <> 'own_move'), 0)::text,
+        'revenue_in_account_raw', COALESCE(SUM(amount) FILTER (WHERE kind <> 'own_move' AND held_by = 'account'), 0)::text,
         'sales', COUNT(*) FILTER (WHERE kind = 'sale'),
         'sales_raw', COALESCE(SUM(amount) FILTER (WHERE kind = 'sale'), 0)::text,
         'without_product_count', COUNT(*) FILTER (WHERE kind = 'no_product'),
         'without_product_raw', COALESCE(SUM(amount) FILTER (WHERE kind = 'no_product'), 0)::text,
         'own_moves_count', COUNT(*) FILTER (WHERE kind = 'own_move'),
         'own_moves_raw', COALESCE(SUM(all_sum) FILTER (WHERE kind = 'own_move'), 0)::text
-      ) FROM pay_acct) AS tiles,
+      ) FROM pay_f) AS tiles,
     (SELECT COALESCE(json_agg(json_build_object(
         'product_id', product_id, 'record_name', record_name,
         'sales', sales, 'amount_raw', amount::text) ORDER BY rn), '[]'::json)
@@ -337,13 +342,15 @@ const SUMMARY_SQL = `
     (SELECT COALESCE(json_agg(json_build_object(
         'day', d.day, 'payments', d.payments, 'sales', d.sales, 'revenue_raw', d.revenue_raw::text,
         'without_product_raw', d.without_product_raw::text,
+        'in_stripe_raw', d.in_stripe_raw::text,
         'by_product', COALESCE(dp.products, '[]'::json),
         'other_products_raw', COALESCE(dp.other_amount, 0)::text) ORDER BY d.day), '[]'::json)
        FROM (SELECT day,
                     COUNT(*) AS payments,
                     COUNT(*) FILTER (WHERE kind = 'sale') AS sales,
                     SUM(amount) AS revenue_raw,
-                    COALESCE(SUM(amount) FILTER (WHERE kind = 'no_product'), 0) AS without_product_raw
+                    COALESCE(SUM(amount) FILTER (WHERE kind = 'no_product'), 0) AS without_product_raw,
+                    COALESCE(SUM(amount) FILTER (WHERE held_by = 'stripe'), 0) AS in_stripe_raw
                FROM pay_days GROUP BY day) d
        LEFT JOIN day_products dp ON dp.day = d.day) AS by_day,
     (SELECT COALESCE(json_agg(json_build_object(
@@ -356,7 +363,7 @@ const SUMMARY_SQL = `
        FROM payer_groups WHERE rn > $14) AS by_payer_other,
     (SELECT json_build_object(
         'payments', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)
-       FROM pay_acct
+       FROM pay_f
       WHERE kind <> 'own_move' AND (several_payers OR payer IS NULL)) AS unattributed,
     (SELECT json_build_object(
         'count', COUNT(*), 'amount_raw', COALESCE(SUM(amount), 0)::text)

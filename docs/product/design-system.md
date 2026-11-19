@@ -2411,6 +2411,13 @@ revenue use.
   is the consuming slice's decision. There is **no refusal marker** on
   revenue — a refused payment is not a sale — and the `ariaLabel` is the
   caller's revenue summary, not the spend wording.
+- **Revenue by where received (#4981).** The Sales By-day chart is one
+  "Revenue" series (`seriesIndex` 0) until the filtered period has a Stripe-held
+  sale; then it draws two non-agent series, **In Haven** (`seriesIndex` 0) and
+  **In Stripe** (`seriesIndex` 1), from each day's `in_stripe_raw`. A zero
+  segment is dropped, so a Stripe-only day shows one segment, and the series add
+  up to the day's revenue and to the Revenue tile. No new props: the series are
+  assigned by index like products. Analytics Revenue stays by product.
 - **Revenue drops the Refusals column.** The chart's screen-reader data table
   renders a **Refusals** column by default, which would read "Refusals 0" on
   every day of a revenue chart. `hideRefusals` (#4900) is the opt-in that drops

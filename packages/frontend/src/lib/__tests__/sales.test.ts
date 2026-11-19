@@ -13,6 +13,8 @@ import {
   isOnChainHash,
   isStripeHeld,
   ledgerCount,
+  revenueInAccountRaw,
+  revenueSplitText,
   stripeSalesCount,
   stripeSalesRaw,
   payerKindLine,
@@ -155,21 +157,84 @@ describe('what the summary says', () => {
     expect(ledgerCount(summary)).toBe(6)
   })
 
-  it('#4954: lists the Stripe sales too, and counts them apart from the account', () => {
-    const withStripe = { ...summary, received_in_stripe: { count: 2, amount_raw: '30000' } } as SalesSummary
+  it('#4981: does not count a Stripe-held sale twice, because `sales` already includes it', () => {
+    // 3 sales (one of them received in Stripe) + 1 with no product + 2 own moves = 6 rows.
+    const withStripe = { ...summary, received_in_stripe: { count: 1, amount_raw: '10000' } } as SalesSummary
+    expect(ledgerCount(withStripe)).toBe(6)
+    expect(ledgerCount(withStripe)).toBe(ledgerCount(summary))
     expect(accountLedgerCount(withStripe)).toBe(6)
-    expect(stripeSalesCount(withStripe)).toBe(2)
-    expect(stripeSalesRaw(withStripe)).toBe('30000')
-    expect(ledgerCount(withStripe)).toBe(8)
+    expect(stripeSalesCount(withStripe)).toBe(1)
+    expect(stripeSalesRaw(withStripe)).toBe('10000')
     // An older backend without the field reads as none.
     expect(stripeSalesCount(summary)).toBe(0)
     expect(stripeSalesRaw(summary)).toBe('0')
   })
 
-  it('#4954: a period with only Stripe sales is not empty', () => {
+  it('#4981: a period with only Stripe sales is not empty, because the sale is a sale', () => {
     const none = { ...summary, sales: 0, without_product: { count: 0, amount_raw: '0' }, own_moves: { count: 0, amount_raw: '0' } } as unknown as SalesSummary
     expect(isEmptyPeriod(none)).toBe(true)
-    expect(isEmptyPeriod({ ...none, received_in_stripe: { count: 1, amount_raw: '10000' } } as SalesSummary)).toBe(false)
+    expect(isEmptyPeriod({ ...none, sales: 1, received_in_stripe: { count: 1, amount_raw: '10000' } } as SalesSummary)).toBe(false)
+  })
+
+  describe('where it was received (#4981)', () => {
+    const RATES = { usd: 0.9998, eur: 0.92, sek: 10.5 }
+    const usd: SalesMoney = { currency: 'USD', chainId: 8453, rates: RATES }
+    const sek: SalesMoney = { currency: 'SEK', chainId: 8453, rates: RATES }
+    const split = {
+      ...summary,
+      revenue_raw: '12500',
+      revenue_in_account_raw: '2500',
+      received_in_stripe: { count: 1, amount_raw: '10000' },
+    } as unknown as SalesSummary
+
+    it('reads the in-account part from the wire only; an older backend shows no split (#4981 review)', () => {
+      expect(revenueInAccountRaw(split)).toBe('2500')
+      const older = { ...split, revenue_in_account_raw: undefined } as unknown as SalesSummary
+      expect(revenueInAccountRaw(older)).toBeNull()
+      expect(revenueSplitText(older, { currency: 'USD', chainId: 8453, rates: undefined })).toBeNull()
+    })
+
+    it('words the split in the display currency, and only when there is a Stripe sale', () => {
+      expect(revenueSplitText(split, usd)).toBe('$0.0025 in Haven · $0.01 in Stripe')
+      expect(revenueSplitText({ ...split, received_in_stripe: { count: 0, amount_raw: '0' } } as SalesSummary, usd)).toBeNull()
+      expect(revenueSplitText(summary, usd)).toBeNull()
+      expect(revenueSplitText(split, sek)).toMatch(/^≈.* in Haven · ≈.* in Stripe$/)
+    })
+
+    it('splits each day into In Haven and In Stripe, dropping a zero segment', () => {
+      const stripeDays = {
+        ...split,
+        by_day: [
+          { day: '2026-11-16', payments: 1, sales: 1, revenue_raw: '1000000', in_stripe_raw: '0' },
+          { day: '2026-11-17', payments: 2, sales: 2, revenue_raw: '1500000', in_stripe_raw: '500000' },
+          { day: '2026-11-18', payments: 1, sales: 1, revenue_raw: '250000', in_stripe_raw: '250000' },
+        ],
+      } as unknown as SalesSummary
+      const days = salesChartDays(stripeDays, { from: '2026-11-16', to: '2026-11-18' })
+      expect(days[0].series.map((x) => [x.name, x.seriesIndex, x.amount])).toEqual([['In Haven', 0, 1]])
+      expect(days[1].series.map((x) => [x.name, x.seriesIndex, x.amount])).toEqual([['In Haven', 0, 1], ['In Stripe', 1, 0.5]])
+      // A Stripe-only day draws one segment.
+      expect(days[2].series.map((x) => [x.name, x.seriesIndex, x.amount])).toEqual([['In Stripe', 1, 0.25]])
+    })
+
+    it('draws one Revenue series when an older backend sends no per-day Stripe part (#4981 review)', () => {
+      const older = {
+        ...split,
+        by_day: [{ day: '2026-11-17', payments: 2, sales: 2, revenue_raw: '1500000' }],
+      } as unknown as SalesSummary
+      const [day] = salesChartDays(older, { from: '2026-11-17', to: '2026-11-17' })
+      expect(day.series.map((x) => x.name)).not.toContain('In Haven')
+      expect(day.series.map((x) => x.amount)).toEqual([1.5])
+    })
+
+    it('strikes both segments in the display currency', () => {
+      const stripeDays = {
+        ...split,
+        by_day: [{ day: '2026-11-17', payments: 2, sales: 2, revenue_raw: '1500000', in_stripe_raw: '500000' }],
+      } as unknown as SalesSummary
+      const [day] = salesChartDays(stripeDays, { from: '2026-11-17', to: '2026-11-17' }, 10)
+      expect(day.series.map((x) => x.amount)).toEqual([10, 5])
+    })
   })
 
   it('#4954: Stripe-held is the row\'s held_by, and nothing else', () => {

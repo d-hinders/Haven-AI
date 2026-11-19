@@ -1506,7 +1506,7 @@ shipped. Each side keeps the one-request rule: the side not on screen issues
 nothing. The Revenue side reads the Sales reads from #4897 over the same
 period, so its total equals the Sales page's total for that period by
 construction. Its four tiles are *Revenue* (the period's total), *Sales* (the
-count of payments with a product), *Average sale*, and *Not counted* (what
+count of every revenue payment: sales, Stripe-held ones included, and payments with no product; #4981), *Average sale*, and *Not counted* (what
 moved between the owner's own accounts and agents — in no total, and said so);
 then the shared `StackedBarChart` stacked by product (five named products, the
 rest folded into "Other" in neutral ink, payments with no sale record in the

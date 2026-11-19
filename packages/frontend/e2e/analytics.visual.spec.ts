@@ -635,6 +635,9 @@ const SCENARIOS: Scenario[] = [
       await expect(tiles.getByText('Revenue', { exact: true })).toHaveCount(1)
       await expect(tiles.getByText('$2.14', { exact: true })).toHaveCount(1)
       await expect(tiles.getByText('Sales', { exact: true })).toHaveCount(1)
+      // Every revenue payment (3 sales + 1 without a product), and the total over them (#4981).
+      await expect(tiles.getByText('4', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('per payment')).toHaveCount(1)
       await expect(tiles.getByText('Not counted', { exact: true })).toHaveCount(1)
       await expect(tiles.getByText('$0.50', { exact: true })).toHaveCount(1)
       await expect(tiles.getByText('1 transfer between your accounts')).toHaveCount(1)

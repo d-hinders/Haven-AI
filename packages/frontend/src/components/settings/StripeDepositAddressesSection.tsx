@@ -10,8 +10,8 @@
  * A payment processor such as Stripe can receive USDC for the merchant at an
  * address Stripe controls. The owner registers that address here, and a sale
  * the merchant kit reports as paid to it is stored as a Stripe-held sale: the
- * Sales page shows it apart, marked "Received in Stripe", and it is never in a
- * Haven balance (#4952).
+ * Sales page counts it in revenue (#4981), marked "Received in Stripe" and
+ * split out as "in Stripe", and it is never in a Haven balance (#4952).
  *
  * ## The address is the owner's word
  *

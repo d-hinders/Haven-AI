@@ -1262,6 +1262,7 @@ export const salesUsdcRates = {
 export const salesEmptySummary = {
   usdc_rates: null as typeof salesUsdcRates | null,
   revenue_raw: '0',
+  revenue_in_account_raw: '0',
   sales: 0,
   average_sale_raw: '0',
   without_product: { count: 0, amount_raw: '0' },
@@ -1278,8 +1279,10 @@ export const salesEmptySummary = {
 export const salesSummary = {
   usdc_rates: salesUsdcRates as typeof salesUsdcRates | null,
   revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
   sales: 3,
-  average_sale_raw: '380000',
+  // $2.14 over every payment counted (3 sales + 1 with no product), rounded down (#4981).
+  average_sale_raw: '535000',
   without_product: { count: 1, amount_raw: '1000000' },
   own_moves: { count: 1, amount_raw: '500000' },
   by_product: [
@@ -1297,9 +1300,9 @@ export const salesSummary = {
     // #4901: the per-product split the Analytics Revenue chart stacks. It adds
     // up to `revenue_raw` on every day (products + other_products_raw +
     // without_product_raw), which is the property the chart's bars rely on.
-    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
-    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
-    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
   ],
   received_in_stripe: { count: 0, amount_raw: '0' },
 }
@@ -1329,13 +1332,30 @@ export const salesDepositAddresses = [
 ]
 
 /**
- * #4954: the same period with two sales received at the registered Stripe
- * address ($0.01 + $0.02, "Joke", the demo merchant's Stripe product). They
- * are in NO account figure — `salesSummary`'s Revenue, Sales, Average sale,
- * chart and breakdowns are unchanged — and in `received_in_stripe` only; the
- * ingest never writes them a transfer (#4952).
+ * #4954, #4981: the same period with two sales received at the registered
+ * Stripe address ($0.01 on the 16th + $0.02 on the 14th, "Joke", the demo
+ * merchant's Stripe product, paid by `salesWallet`). They count in EVERY figure
+ * — Revenue $2.17, 5 sales + 1 with no product = 6 payments, the chart, both
+ * breakdowns — and are split out: `revenue_in_account_raw` ($2.14) plus
+ * `received_in_stripe` ($0.03) is `revenue_raw`, and the two days carry
+ * `in_stripe_raw`. The ingest never writes them a transfer (#4952).
  */
-export const salesSummaryWithStripe = { ...salesSummary, received_in_stripe: { count: 2, amount_raw: '30000' } }
+export const salesSummaryWithStripe = {
+  ...salesSummary,
+  revenue_raw: '2170000',
+  revenue_in_account_raw: '2140000',
+  sales: 5,
+  // 2170000 / (5 sales + 1 with no product), rounded down.
+  average_sale_raw: '361666',
+  by_product: [...salesSummary.by_product, { product_id: 'joke', label: 'Joke', sales: 2, amount_raw: '30000' }],
+  by_payer: [salesSummary.by_payer[0], { ...salesSummary.by_payer[1], payments: 4, amount_raw: '1330000' }],
+  by_day: [
+    salesSummary.by_day[0],
+    { day: '2026-11-14', payments: 2, sales: 2, revenue_raw: '440000', without_product_raw: '0', in_stripe_raw: '20000', by_product: [{ product_id: 'chat', amount_raw: '420000' }, { product_id: 'joke', amount_raw: '20000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 3, sales: 2, revenue_raw: '1430000', without_product_raw: '1000000', in_stripe_raw: '10000', by_product: [{ product_id: 'chat', amount_raw: '420000' }, { product_id: 'joke', amount_raw: '10000' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 2, amount_raw: '30000' },
+}
 export const salesStripePayments = [
   { tx_hash: salesHash('b1'), block_time: '2026-11-16T15:10:00.000Z', kind: 'sale', amount_raw: '10000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },
   { tx_hash: salesHash('b2'), block_time: '2026-11-14T11:20:00.000Z', kind: 'sale', amount_raw: '20000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },

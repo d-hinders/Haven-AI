@@ -216,6 +216,14 @@ describe('the panel, by variant', () => {
     expect(screen.getByTestId('sales-payment-header').textContent).toContain('Paid into Sales')
   })
 
+  it('says a Stripe-held sale counts in revenue but not in the Sales account\'s balance (#4981)', async () => {
+    serve({ ...base, held_by: 'stripe', tx_hash: 'pi_3Q8example', payer: null, legs: [] })
+    await open()
+    const text = screen.getByRole('dialog').textContent ?? ''
+    expect(text).toContain('It counts in your revenue, but not in any Haven balance')
+    expect(text).not.toContain('not in your revenue')
+  })
+
   it('does not crash on a payment held by Stripe: no on-chain hash, no explorer link', async () => {
     serve({ ...base, held_by: 'stripe', tx_hash: 'pi_3Q8example', payer: null, legs: [] })
     await open()

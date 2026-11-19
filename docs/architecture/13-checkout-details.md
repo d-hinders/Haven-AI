@@ -19,6 +19,7 @@ covers:
   - packages/mcp-server/src/tools/catalog-purchase.ts
   - packages/mcp-server/src/tools/support/errors.ts
   - packages/mcp-server/src/tools/support/guidance.ts
+  - packages/mcp-server/src/tools/support/checkout-details.ts
   - packages/backend/src/routes/owner-company-details.ts
   - packages/backend/src/infra/repositories/machine-payments.ts
   - packages/backend/src/modules/accounting/receipt-underlag.ts

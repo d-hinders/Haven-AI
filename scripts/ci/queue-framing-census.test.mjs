@@ -126,6 +126,8 @@ const GUARDED_FILES = [
   // #3329 — the task-budget capability module (open / close, signer hand-off prose)
   'packages/mcp-server/src/tools/task-budgets.ts',
   'packages/mcp-server/src/tools/support/cap-price.ts',
+  // #4872: the hosted checkout-details refusals (agent-visible refusal prose).
+  'packages/mcp-server/src/tools/support/checkout-details.ts',
   // #3769 — the catalog argument-resolution support: holds the fixed-SKU and
   // schema-violation refusal prose (agent-facing payment-refusal strings),
   // verified clean against the phrase list before being added.

@@ -46,6 +46,7 @@ import { DISCOVERY_PATH, buildDiscoveryDocument } from './discovery.js'
 import { applyOutputTokenCap, callUpstream, type UpstreamFailureReason } from './forward.js'
 import { DEFAULT_LIMITS, Gate, IpLimiter, type LimitSettings, type Permit } from './limits.js'
 import { redactor, type LogFn } from './log.js'
+import { inputValidatorFor, isJsonContentType, type InputSchemaError } from './input-schema.js'
 import { indexProducts, type Product } from './products.js'
 import { buildReceiptForPayment, encodeReceiptHeader } from './receipt.js'
 import type { SalesReporter } from './sales.js'
@@ -85,6 +86,20 @@ interface Problem {
   status: number
   error: string
   message: string
+  /** `invalid_request_body` only (#4988): where the body fails the product's schema, never a value from it. */
+  errors?: InputSchemaError[]
+}
+
+/** #4988: the body fails the product's `input_schema`. A 400 with no challenge: the request cannot be bought as it is. */
+function invalidRequestBody(errors: InputSchemaError[]): Problem {
+  const [first] = errors
+  const message =
+    first?.rule === 'content_type'
+      ? 'This product takes a JSON request body: send it with Content-Type: application/json.'
+      : first?.rule === 'json'
+        ? "The request body is not JSON, and this product's input_schema needs a JSON body."
+        : "The request body does not match this product's input_schema (listed at /.well-known/x402). Each entry in errors names a field as a JSON pointer and the schema rule it fails."
+  return { status: 400, error: 'invalid_request_body', message, errors }
 }
 
 /** What the request's body allowed: the selected product and the body to forward, or why neither. */
@@ -174,6 +189,11 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   function refuse(res: ServerResponse, status: number, error: string, message: string, extra: Record<string, unknown> = {}, headers: Record<string, string> = {}): void {
     send(res, status, { error, message, ...extra }, headers)
+  }
+
+  /** A body refusal, before any facilitator call; `errors` rides along when the schema named them. */
+  function refuseProblem(res: ServerResponse, problem: Problem): void {
+    refuse(res, problem.status, problem.error, problem.message, problem.errors ? { errors: problem.errors } : {})
   }
 
   function challengeFor(ctx: RequestContext, product: Product): PaymentRequired {
@@ -312,23 +332,37 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     })
   }
 
-  /** Select the product and prepare the forwarded body; every failure is a refusal that makes no facilitator call. */
-  function checkBody(candidates: readonly Product[], raw: { body: Buffer } | { tooLarge: true }): BodyOutcome {
+  /**
+   * Select the product and prepare the forwarded body; every failure is a
+   * refusal that makes no facilitator call. Order (§8): size, JSON, the
+   * product by `model`, the product's `input_schema` on the body as the buyer
+   * sent it (#4988), then the output cap.
+   */
+  function checkBody(candidates: readonly Product[], raw: { body: Buffer } | { tooLarge: true }, contentType: string | undefined): BodyOutcome {
     if ('tooLarge' in raw) {
       return {
         ...(candidates.length === 1 ? { product: candidates[0] } : {}),
         problem: { status: 413, error: 'body_too_large', message: 'The request body is larger than 1 MiB.' },
       }
     }
-    const needsJson = candidates.some((c) => c.model !== undefined || c.outputTokenCap !== undefined)
+    const hasSchema = (c: Product): boolean => c.inputSchema !== undefined
+    const needsJson = candidates.some((c) => c.model !== undefined || c.outputTokenCap !== undefined || hasSchema(c))
     if (!needsJson) return { product: candidates[0], forwardBody: raw.body }
 
     let parsed: unknown
+    let parses = true
     try {
       parsed = JSON.parse(raw.body.toString('utf8'))
     } catch {
-      return { problem: { status: 400, error: 'bad_request', message: 'The request body must be JSON.' } }
+      parses = false
     }
+    const jsonContentType = isJsonContentType(contentType)
+    // The product is not known yet: a body the route's every product would refuse for its schema is refused as one.
+    const notJson = (allSchemas: boolean): BodyOutcome =>
+      allSchemas
+        ? { ...(candidates.length === 1 ? { product: candidates[0] } : {}), problem: invalidRequestBody([{ path: '', rule: jsonContentType ? 'json' : 'content_type' }]) }
+        : { problem: { status: 400, error: 'bad_request', message: 'The request body must be JSON.' } }
+    if (!parses) return notJson(candidates.every(hasSchema))
 
     let product: Product | undefined
     if (candidates.some((c) => c.model !== undefined)) {
@@ -344,8 +378,16 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
         }
       }
     } else {
-      product = candidates[0]
+      product = candidates[0]!
     }
+
+    const validate = inputValidatorFor(product)
+    if (validate) {
+      if (!jsonContentType) return { product, problem: invalidRequestBody([{ path: '', rule: 'content_type' }]) }
+      const errors = validate(parsed)
+      if (errors.length > 0) return { product, problem: invalidRequestBody(errors) }
+    }
+
     if (product.outputTokenCap === undefined) return { product, forwardBody: raw.body }
     const capped = applyOutputTokenCap(parsed, product.outputTokenCap)
     if (!capped) {
@@ -512,6 +554,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     if (ctx.body.problem || !product) {
       const message = ctx.body.problem?.message ?? 'The request body could not be checked.'
       return answerSettled(res, record, 'bad_request_after_settlement', `${message} Nothing was forwarded and no forward was used.`, {
+        ...(ctx.body.problem?.errors ? { errors: ctx.body.problem.errors } : {}),
         retry: retryInfo(record),
         sign_in_with_x: siwxChallengeFor(ctx, record),
       })
@@ -768,8 +811,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     const { res } = ctx
     const product = ctx.body.product
     if (ctx.body.problem || !product) {
-      const problem = ctx.body.problem!
-      return refuse(res, problem.status, problem.error, problem.message)
+      return refuseProblem(res, ctx.body.problem!)
     }
     const challenge = challengeFor(ctx, product)
 
@@ -1157,7 +1199,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     const rawBody = await readBody(req)
     // An oversized body is not drained: answer, then close the connection.
     if ('tooLarge' in rawBody) res.setHeader('Connection', 'close')
-    const body = checkBody(candidates, rawBody)
+    const body = checkBody(candidates, rawBody, firstHeader(req.headers['content-type']))
     const ctx: RequestContext = {
       req,
       res,
@@ -1169,7 +1211,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     }
 
     if (!header) {
-      if (body.problem) return refuse(res, body.problem.status, body.problem.error, body.problem.message)
+      if (body.problem) return refuseProblem(res, body.problem)
       return send402(ctx, body.product!, undefined, 'Payment required')
     }
 
@@ -1179,7 +1221,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     } catch (err) {
       // No key to look up: the body checks come first, then an invalid payment, which counts against the address.
       ipLimiter.charge(ip)
-      if (body.problem) return refuse(res, body.problem.status, body.problem.error, body.problem.message)
+      if (body.problem) return refuseProblem(res, body.problem)
       return send402(ctx, body.product!, 'payment_invalid', err instanceof PaymentError ? err.message : 'The payment header could not be read.')
     }
 

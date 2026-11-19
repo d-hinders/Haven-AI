@@ -12,7 +12,7 @@ import { useToast } from '@/components/ui/Toast'
 import { useOptionalAuth } from '@/context/AuthContext'
 import { salesKeyLabel, useMerchantKeys } from '@/hooks/useMerchantKeys'
 import { timeAgo } from '@/lib/format'
-import type { SalesKey } from '@/lib/sales'
+import { SALES_KEY_CANT_SENTENCE, type SalesKey } from '@/lib/sales'
 import { CreateSalesKeyDialog } from './CreateSalesKeyDialog'
 
 /** The documented limits of a Sales key (docs/security/merchant-key-limits.md). */
@@ -94,8 +94,7 @@ export function SalesKeysSection() {
         <div className="min-w-0 flex-[1_1_16rem]">
           <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Sales keys</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-            Your kit uses a Sales key to report what each payment was for. A key can’t move money, sign, or see
-            anything but this account’s sales.{' '}
+            Your kit uses a Sales key to report what each payment was for. {SALES_KEY_CANT_SENTENCE}{' '}
             <a
               href={LIMITS_HREF}
               target="_blank"

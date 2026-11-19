@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import { Button } from '@/components/ui/Button'
-import { DetailList } from '@/components/ui/DetailList'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
@@ -10,10 +9,7 @@ import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock
 import { CloseGuardPanel } from '@/components/connect-agent/CloseGuardPanel'
 import { ApiRequestError } from '@/lib/api'
 import { salesKeyLabel, type CreatedSalesKey } from '@/hooks/useMerchantKeys'
-
-/** The only thing of the secret that outlives the dialog. */
-const REPORT_LINE = 'Report what a payment into Sales was for'
-const CANT_LINE = 'Move money, sign, change anything, or read other accounts'
+import { SALES_KEY_CANT_SENTENCE } from '@/lib/sales'
 
 function refusal(error: unknown): string {
   if (error instanceof ApiRequestError && error.status === 409) {
@@ -94,13 +90,7 @@ export function CreateSalesKeyDialog({
             Your kit uses a Sales key to report what each payment was for. Haven shows the key once, right after you
             create it.
           </p>
-          <DetailList
-            density="compact"
-            items={[
-              { label: 'Can', value: REPORT_LINE },
-              { label: 'Can’t', value: CANT_LINE },
-            ]}
-          />
+          <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">{SALES_KEY_CANT_SENTENCE}</p>
           {error ? <InlineAlert>{error}</InlineAlert> : null}
         </div>
       </Modal>
@@ -146,13 +136,6 @@ export function CreateSalesKeyDialog({
               />
             </div>
           </div>
-          <DetailList
-            density="compact"
-            items={[
-              { label: 'Can', value: REPORT_LINE },
-              { label: 'Can’t', value: CANT_LINE },
-            ]}
-          />
         </div>
       )}
     </Modal>

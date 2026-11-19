@@ -117,6 +117,32 @@ describe('the list', () => {
 })
 
 describe('create', () => {
+  it('the create screen shows the intro and one can’t sentence in the Setup tab wording, with no Can / Can’t rows (#4984)', async () => {
+    await renderSection()
+    await userEvent.click(screen.getByRole('button', { name: 'Create Sales key' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create Sales key' })
+
+    expect(dialog.textContent).toContain('Your kit uses a Sales key to report what each payment was for.')
+    expect(dialog.textContent).toContain(
+      'A key can’t move money, sign, or see anything but this account’s sales.',
+    )
+    // One wording, not two: the Setup tab carries the same sentence.
+    expect(screen.getByTestId('sales-keys-section').textContent).toContain(
+      'A key can’t move money, sign, or see anything but this account’s sales.',
+    )
+    expect(dialog.querySelector('dl')).toBeNull()
+  })
+
+  it('the created screen renders no DetailList and no Can / Can’t label (#4984)', async () => {
+    const dialog = await openCreated()
+    const text = dialog.textContent ?? ''
+
+    expect(dialog.querySelector('dl')).toBeNull()
+    // Both apostrophes: the code uses U+2019, and a plain ' must not slip in.
+    expect(text).not.toMatch(/Can[’']t/)
+    expect(text).not.toMatch(/\bCan\b/)
+  })
+
   it('shows the secret once, and Copy copies exactly it', async () => {
     const dialog = await openCreated()
     expect(mockPost).toHaveBeenCalledWith('/merchant-keys')

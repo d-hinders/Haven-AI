@@ -604,8 +604,6 @@ export const en = {
         facts: {
           account: 'The account is named Sales. You can rename it later.',
           passkey: 'Secured by the passkey you use next: your device asks for it once.',
-          backup:
-            'Add a backup passkey or wallet afterwards, so a lost device never means a lost account.',
         },
         submit: 'Turn on Sales',
         waiting: 'Waiting for your passkey…',
@@ -616,10 +614,8 @@ export const en = {
         doneTitle: 'Sales is on',
         doneBody: (network: string) =>
           `Payments from customers and their agents arrive in your Sales account on ${network}.`,
-        backupNotice:
-          'Add a backup — a backup passkey or a wallet — so a lost device never means a lost account.',
-        addBackup: 'Add backup',
-        openAccount: 'Open Sales account',
+        openSales: 'Open Sales',
+        openAccount: 'Open account',
         needsPasskeyTitle: 'Sales needs a passkey',
         needsPasskeyBody:
           'Sales is secured by a passkey from one of your accounts, and none of yours has one yet. Add a passkey from the Who can approve section on an account’s page, then come back here.',

@@ -2,7 +2,8 @@
 
 /**
  * Turning Sales on (#4904, epic #4885) — the dialog the approved mockup
- * (#4894, 2026-11-16) draws.
+ * (#4894, 2026-11-16) draws, minus the backup recommendation the owner
+ * reversed on 2026-11-19 (#4984).
  *
  * ## What it asks, and what it does not
  *
@@ -31,13 +32,14 @@
  * RESULT state for a repeat, never an error — `created` is not something the
  * user needs to read.
  *
- * ## The result recommends a backup, and never gates on it
+ * ## The dialog never mentions a backup
  *
- * After creation the dialog shows the dashboard's existing recommendation to
- * add a backup signer ("Add a backup — a backup passkey or a wallet — so a lost
- * device never means a lost account", `lib/dashboard-attention.ts`), with the
- * same "Add backup" action. It is a `NoticeRow`, not a gate: "Done" and "Open
- * Sales account" both work without it.
+ * The 2026-11-16 drawing put the dashboard's backup recommendation on the
+ * result screen as a `NoticeRow`; the owner reversed that on 2026-11-19 —
+ * "keep it low friction" (#4984). No screen of this dialog mentions a backup.
+ * The standing rule is unchanged: a single-signer account is allowed and never
+ * gated, and the dashboard recommends a backup
+ * (`lib/dashboard-attention.ts`).
  *
  * ## Every refusal says what to do
  *
@@ -54,7 +56,6 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Skeleton } from '@/components/ui/Skeleton'
 import { DialogActions } from '@/components/ui/DialogActions'
 import { DialogResult } from '@/components/ui/DialogResult'
-import { NoticeRow } from '@/components/haven/NoticeRow'
 import NetworkPill from '@/components/NetworkPill'
 import { useT } from '@/context/LocaleContext'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
@@ -178,17 +179,6 @@ function TurnOnSalesDialogBody({ onClose }: { onClose: () => void }) {
           description={copy.doneBody(getChainConfig(created.chain_id).name)}
           announce
         />
-        {/* The dashboard's existing recommendation, reused verbatim — a
-            recommendation, never a gate. */}
-        <NoticeRow
-          action={
-            <Button href={`/accounts/${created.id}`} variant="ghost" size="sm">
-              {copy.addBackup}
-            </Button>
-          }
-        >
-          {copy.backupNotice}
-        </NoticeRow>
       </div>
     )
     footer = (
@@ -196,7 +186,7 @@ function TurnOnSalesDialogBody({ onClose }: { onClose: () => void }) {
         <Button variant="ghost" onClick={onClose}>
           {copy.done}
         </Button>
-        <Button href={`/accounts/${created.id}`}>{copy.openAccount}</Button>
+        <Button href="/sales">{copy.openSales}</Button>
       </DialogActions>
     )
   } else if (stage === 'passkey' || stage === 'creating') {
@@ -248,7 +238,9 @@ function TurnOnSalesDialogBody({ onClose }: { onClose: () => void }) {
         <Button variant="ghost" onClick={onClose}>
           {copy.close}
         </Button>
-        {target ? <Button href={`/accounts/${target.id}`}>{copy.openAccount}</Button> : null}
+        {target ? (
+          <Button href={`/accounts/${target.id}?tab=security`}>{copy.openAccount}</Button>
+        ) : null}
       </DialogActions>
     )
   } else {
@@ -289,7 +281,6 @@ function TurnOnSalesDialogBody({ onClose }: { onClose: () => void }) {
         <ul className="space-y-2 text-sm text-[var(--v2-ink-2)]" data-testid="sales-dialog-facts">
           <li>{copy.facts.account}</li>
           {merchantAccount === null ? <li>{copy.facts.passkey}</li> : null}
-          <li>{copy.facts.backup}</li>
         </ul>
 
         {refusal ? <RefusalMessage refusal={refusal} networkName={networkName} /> : null}

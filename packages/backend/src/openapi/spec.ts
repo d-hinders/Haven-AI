@@ -14296,6 +14296,15 @@ export const openapiSpec = {
           // catalog entry — the settle leg's first-tier purchase label.
           // Absent on a direct haven_pay_mcp_tool purchase.
           catalog_name: { type: 'string', minLength: 1 },
+          // #4872: the merchant's checkout-details request, verbatim from the
+          // stored challenge's `extensions["haven-checkout-details"]`. Merchant
+          // content, untrusted and unvalidated here: field names and required
+          // flags (docs/architecture/13-checkout-details.md §2), never the
+          // owner's values. Absent when the challenge asked for nothing.
+          checkout_details_request: {
+            description:
+              "The merchant's checkout-details request from the stored payment challenge (`extensions[\"haven-checkout-details\"]`), verbatim and unvalidated; absent when it asked for nothing. Field names and required flags only, never the owner's values (#4872).",
+          },
           mcp_transport: {
             type: 'object',
             properties: {

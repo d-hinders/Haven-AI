@@ -61,6 +61,7 @@ const boundary: ClientBoundary = {
     'precheckBudget',
     'quoteMcpX402',
     'quoteX402',
+    'readCheckoutDetails', // #4872
     'reportDeliveryQuality', // #3770
     'reportSettlementEvidence',
     'reportX402MerchantOutcome',
@@ -105,6 +106,7 @@ const boundary: ClientBoundary = {
     "async getTaskBudget(id: string): Promise<HavenTaskBudget>",
     "async getTaskBudgetSignContext(id: string): Promise<TaskBudgetSignContext>",
     "async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext>",
+    "async readCheckoutDetails(): Promise<CheckoutDetailsAvailability>", // #4872: the keyless hosted server's read of the agent's own checkout details
     "async listPendingSubBudgetSignatures(): Promise<HavenPendingSubBudgetSignature[]>",
     "async listReceipts(options: { limit?: number; } = {}): Promise<HavenPaymentReceipt[]>",
     "async listReceiptsPage(options: { limit?: number; cursor?: string; compact?: boolean; } = {}): Promise<HavenPaymentReceiptsPage>", // #3423 compact

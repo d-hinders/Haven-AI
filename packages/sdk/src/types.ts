@@ -541,6 +541,14 @@ export interface X402MerchantCallContext {
   mcpTransport?: X402McpTransport
   /** #3781: the catalog row's name, when the purchase came from a catalog entry. */
   catalogName?: string
+  /**
+   * #4872: the merchant's checkout-details request, verbatim from the challenge
+   * stored at authorize (`extensions["haven-checkout-details"]`). Untrusted
+   * merchant content: read it with `parseCheckoutDetailsRequest` (wrap it as
+   * `{ "haven-checkout-details": value }`), which treats anything malformed as
+   * no request. Absent when the challenge asked for nothing.
+   */
+  checkoutDetailsRequest?: unknown
 }
 
 /** @internal */
@@ -551,6 +559,8 @@ export interface RawX402MerchantCallContext {
   arguments?: Record<string, unknown>
   mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
   catalog_name?: string
+  /** #4872: the merchant's checkout-details request from the stored challenge, verbatim and untrusted. */
+  checkout_details_request?: unknown
   error?: string
   error_code?: string
   status?: string

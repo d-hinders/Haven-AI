@@ -1,4 +1,8 @@
-import { checkoutDetailsHeaderFor } from './client-checkout-details.js'
+import {
+  checkoutDetailsHeaderFor,
+  readCheckoutDetailsAvailability,
+  type CheckoutDetailsAvailability,
+} from './client-checkout-details.js'
 import { hashTypedData } from 'viem'
 import {
   signHash,
@@ -2194,6 +2198,17 @@ export class HavenClient {
    * payment_id, 409 no stored context, 410 expired) — the caller decides the
    * fallback (re-send the full context explicitly).
    */
+  /**
+   * #4872: the agent's own saved checkout details, as the payment flow reads
+   * them (`GET /agents/:id/checkout-details`, #4871). Never throws: a failed
+   * read, a 404 from an older backend and every "not available" answer are a
+   * named unavailable state. The keyless hosted server reads it to answer a
+   * merchant's checkout-details request; it neither stores nor logs the values.
+   */
+  async readCheckoutDetails(): Promise<CheckoutDetailsAvailability> {
+    return readCheckoutDetailsAvailability({ getAgent: () => this.getAgent(), get: (path) => this.get(path) })
+  }
+
   async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {
     const raw = await this.get<RawX402MerchantCallContext>(
       `/x402/${paymentId}/merchant-call-context`,
@@ -2206,6 +2221,8 @@ export class HavenClient {
       // #3781: the catalog row name rides the same blob; absent on a direct
       // haven_pay_mcp_tool purchase.
       ...(raw.catalog_name ? { catalogName: raw.catalog_name } : {}),
+      // #4872: the merchant's checkout-details request, verbatim (untrusted).
+      ...(raw.checkout_details_request !== undefined ? { checkoutDetailsRequest: raw.checkout_details_request } : {}),
       ...(raw.mcp_transport
         ? {
             mcpTransport: {

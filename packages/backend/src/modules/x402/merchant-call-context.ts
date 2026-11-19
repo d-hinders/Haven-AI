@@ -19,8 +19,12 @@
  */
 import { findIntentForAgent, expirePendingIntent } from '../../infra/repositories/payment-intents.js'
 import { machineMetadataOrNull } from '../../domain/machine-metadata.js'
+import { storedPaymentRequiredFromMetadata } from './sign-context.js'
 import type { AgentContext } from '../../middleware/agentAuth.js'
 import type { X402HandlerResult, X402McpCallContextInput } from './types.js'
+
+/** #4872: the challenge's extension key (`docs/architecture/13-checkout-details.md` §2). */
+const CHECKOUT_DETAILS_EXTENSION_KEY = 'haven-checkout-details'
 
 export function storedMcpCallContext(metadata: unknown): X402McpCallContextInput | null {
   const parsed = machineMetadataOrNull(metadata)
@@ -93,6 +97,17 @@ export async function getX402MerchantCallContext(
       },
     }
   }
+  // #4872: the merchant's checkout-details REQUEST, taken verbatim from the
+  // challenge stored at authorize (#1355). It is merchant content — field
+  // names and required flags, already echoed in the payment header — and
+  // untrusted: the hosted settle reads it with the SDK's parser, which treats
+  // anything malformed as no request. Never the owner's values: those are
+  // read from the agent's own details at settle and never stored.
+  const storedExtensions = storedPaymentRequiredFromMetadata(existing.machine_metadata)?.extensions
+  const checkoutDetailsRequest =
+    storedExtensions && typeof storedExtensions === 'object' && !Array.isArray(storedExtensions)
+      ? (storedExtensions as Record<string, unknown>)[CHECKOUT_DETAILS_EXTENSION_KEY]
+      : undefined
   return {
     code: 200,
     body: {
@@ -105,6 +120,7 @@ export async function getX402MerchantCallContext(
       // a direct haven_pay_mcp_tool purchase. Display only, never merchant
       // content (#1349).
       ...(stored.catalogName ? { catalog_name: stored.catalogName } : {}),
+      ...(checkoutDetailsRequest !== undefined ? { checkout_details_request: checkoutDetailsRequest } : {}),
       // #2343: convert the NESTED object too, not just the top-level fields.
       // The stored blob is camelCase throughout (`X402McpCallContextInput`,
       // and `storedMcpCallContext` validates it by reading `merchantUrl` /

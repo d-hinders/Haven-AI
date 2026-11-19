@@ -12,7 +12,7 @@ import {
 } from './checkout-details.js'
 import { isErc7710Option, selectStandardPaymentOption } from './x402.js'
 import { CheckoutDetailsUnavailableError, HavenApiError } from './types.js'
-import type { X402PaymentRequired } from './types.js'
+import type { X402PaymentOption, X402PaymentRequired } from './types.js'
 
 /**
  * Checkout details on the paid x402 request (#4872): the wire half. Sibling of
@@ -139,6 +139,12 @@ export async function resolveCheckoutDetails(
   paymentRequired: X402PaymentRequired,
   /** The paid request's own headers, counted in the block estimate. */
   requestHeaders?: HeadersInit,
+  /**
+   * The option that will actually be paid, when the caller selected it (the
+   * hosted pay tools choose erc7710 or EIP-3009 themselves). Omitted, the
+   * SDK paths' own selection is used: the standard (EIP-3009) option.
+   */
+  paidOption?: X402PaymentOption,
 ): Promise<CheckoutDetailsDecision> {
   const request = checkoutDetailsRequestOf(paymentRequired)
   if (request === null) {
@@ -153,7 +159,7 @@ export async function resolveCheckoutDetails(
   // The option the SDK will pay with. None compatible: the authorization
   // refuses with its own "no compatible option" answer, which must not be
   // masked by a checkout-details read or refusal.
-  const accepted = selectStandardPaymentOption(paymentRequired.accepts)
+  const accepted = paidOption ?? selectStandardPaymentOption(paymentRequired.accepts)
   if (!accepted) return { kind: 'none' }
   // A request that asks only for optional fields never needs the read to
   // succeed, but it still reads: an optional field is sent when it can be.
@@ -187,3 +193,6 @@ export async function checkoutDetailsHeaderFor(
   if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
   return decision.kind === 'answer' ? decision.header : undefined
 }
+
+/** Re-exported so `HavenClient` reads the type through its one checkout-details import. */
+export type { CheckoutDetailsAvailability } from './checkout-details.js'

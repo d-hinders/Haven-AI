@@ -163,12 +163,9 @@ async function intentRow(id: string) {
   return res.rows[0] as Record<string, unknown>
 }
 
+/** The wire shape (`docs/architecture/13-checkout-details.md` §2), verbatim. */
 const CHECKOUT_REQUEST = {
-  version: 1,
-  fields: [
-    { name: 'receipt_email', required: true },
-    { name: 'shipping_address', required: false },
-  ],
+  info: { version: 1, fields: { receipt_email: { required: true }, shipping_address: { required: false } } },
 }
 
 describeDb('GET /x402/:id/payment-required (#4872)', () => {

@@ -549,11 +549,22 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * bytes; the cap is RAISED to the measured value, as rounds 26–28 did for a
  * description an issue requires. No tool was added — 29 holds. Shrink-only
  * from here.
+ *
+ * **Re-derived — round 36, #4872 part 2b (2026-11-19).** Checkout details on
+ * the hosted plain-HTTP path. `haven_pay_x402_quote` gains round 35's pay
+ * sentence unchanged, and `haven_submit` one sentence: a required detail the
+ * agent cannot share refuses before anything is relayed, and an answer rides
+ * retry_headers or additional_retry_headers, to be sent unchanged.
+ * `haven_resume_x402_payment` says in seven words that a resume sends no
+ * answer: it is a path that does not carry them, and #4872 requires such a
+ * path to say so. A first draft at +471 was cut to +375. 32,827 UTF-8 bytes;
+ * the cap is RAISED to the measured value, as round 35 did. No tool was added — 29 holds. Shrink-only
+ * from here.
  */
-const MAX_TOTAL_BYTES = 32_452
-// Mean pin: round 35 (#4872 block above): 32,452 / 29 = 1119.0345…, pinned
-// at the two-decimal ceiling (1119.04). Shrink-only from here.
-const MAX_MEAN_BYTES = 1119.04
+const MAX_TOTAL_BYTES = 32_827
+// Mean pin: round 36 (#4872 part 2b block above): 32,827 / 29 = 1131.9655…,
+// pinned at the two-decimal ceiling (1131.97). Shrink-only from here.
+const MAX_MEAN_BYTES = 1131.97
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

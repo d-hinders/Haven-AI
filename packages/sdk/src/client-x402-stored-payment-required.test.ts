@@ -39,7 +39,7 @@ const CHALLENGE = {
       extra: { name: 'USDC', version: '2' },
     },
   ],
-  extensions: { 'haven-checkout-details': { version: 1, fields: [{ name: 'receipt_email', required: true }] } },
+  extensions: { 'haven-checkout-details': { info: { version: 1, fields: { receipt_email: { required: true } } } } },
 }
 
 afterEach(() => {

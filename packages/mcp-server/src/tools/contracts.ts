@@ -1529,13 +1529,17 @@ const DISCOVER_TOOLS_DESCRIPTION = composeDescription({
  * #4872 part 2: checkout details on the hosted MCP-merchant paths
  * (`docs/architecture/13-checkout-details.md`). The pay tools refuse before
  * any intent; the settle and complete legs answer on the paid request this
- * server sends. Hosted-only sentences: the shared fragments stay
+ * server sends; on plain HTTP `haven_submit` hands the answer back for the
+ * agent's own retry (part 2b). Hosted-only sentences: the shared fragments stay
  * surface-neutral, as the local runtime appends its own.
  */
 const HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE =
   'A required checkout detail this agent cannot share refuses with CHECKOUT_DETAILS_UNAVAILABLE before any payment: tell the user.'
 const HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE =
   'Requested checkout details ride the paid request (X-Checkout-Details, seller only, never stored); if a required one can no longer be shared, delivery refuses with CHECKOUT_DETAILS_UNAVAILABLE.'
+/** #4872 part 2b: the plain-HTTP state-direct path, where the agent sends the paid request itself. */
+const HOSTED_CHECKOUT_DETAILS_SUBMIT_SENTENCE =
+  'A required x402 checkout detail this agent cannot share refuses with CHECKOUT_DETAILS_UNAVAILABLE before anything is relayed; an answer rides retry_headers or additional_retry_headers: send it unchanged.'
 
 export const toolDescriptions: Record<HostedToolName, string> = {
   haven_get_agent: composeDescription(sharedDescriptions.getAgent),
@@ -1546,7 +1550,7 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_submit_catalog_entry: composeDescription(sharedDescriptions.submitCatalogEntry),
   haven_send: composeDescription(sharedDescriptions.send, 'hosted'),
   haven_pay: PAY_DESCRIPTION,
-  haven_submit: SUBMIT_DESCRIPTION,
+  haven_submit: `${SUBMIT_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_SUBMIT_SENTENCE}`,
   haven_pay_mcp_tool: `${PAY_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE}`,
   haven_quote_mcp_tool: QUOTE_MCP_TOOL_DESCRIPTION,
   haven_prepare_catalog_purchase: `${PREPARE_CATALOG_PURCHASE_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE}`,
@@ -1554,8 +1558,9 @@ export const toolDescriptions: Record<HostedToolName, string> = {
   haven_complete_mcp_tool: `${COMPLETE_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE}`,
   haven_settle_mcp_tool: `${SETTLE_MCP_TOOL_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_SETTLE_SENTENCE}`,
   haven_quote_x402: QUOTE_X402_DESCRIPTION,
-  haven_pay_x402_quote: PAY_X402_QUOTE_DESCRIPTION,
-  haven_resume_x402_payment: RESUME_X402_DESCRIPTION,
+  haven_pay_x402_quote: `${PAY_X402_QUOTE_DESCRIPTION} ${HOSTED_CHECKOUT_DETAILS_PAY_SENTENCE}`,
+  // #4872 part 2b: not a supported checkout-details path (the resume state carries no merchant extensions).
+  haven_resume_x402_payment: `${RESUME_X402_DESCRIPTION} A resume sends no checkout-details answer.`,
   haven_report_x402_outcome: REPORT_X402_OUTCOME_DESCRIPTION,
   haven_report_delivery_quality: REPORT_DELIVERY_QUALITY_DESCRIPTION,
   haven_report_settlement_evidence: composeDescription(sharedDescriptions.reportSettlementEvidence),

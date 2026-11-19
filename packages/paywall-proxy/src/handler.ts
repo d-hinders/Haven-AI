@@ -88,6 +88,30 @@ interface Problem {
   message: string
   /** `invalid_request_body` only (#4988): where the body fails the product's schema, never a value from it. */
   errors?: InputSchemaError[]
+  /** #4989: the field the body got wrong, as a JSON pointer (`/messages`). */
+  field?: string
+  /** #4989: what would be accepted. */
+  expected?: unknown
+  /** #4989: what to do next, in words. */
+  next?: string
+}
+
+/**
+ * #4989: the refusal code for a payment error. It reads the code the error
+ * carries, never its message text: rewording a `PaymentError` message must not
+ * change the answer. An error with no code is `payment_invalid`.
+ */
+export function refusalCodeFor(err: unknown): string {
+  return err instanceof PaymentError && err.code !== undefined ? err.code : 'payment_invalid'
+}
+
+/** #4989: the machine-readable extras a `PaymentError` carries, for a refusal body. */
+function paymentErrorDetails(err: PaymentError): Record<string, unknown> {
+  return {
+    ...(err.field !== undefined ? { field: err.field } : {}),
+    ...(err.expected !== undefined ? { expected: err.expected } : {}),
+    ...(err.next !== undefined ? { next: err.next } : {}),
+  }
 }
 
 /** #4988: the body fails the product's `input_schema`. A 400 with no challenge: the request cannot be bought as it is. */
@@ -146,6 +170,9 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
   const settlePollMs = deps.settlePollMs ?? 2_000
   const reservationDeadlineMs = deps.reservationDeadlineMs ?? config.reservationDeadlineMs
   const byRoute = indexProducts(deps.products)
+  /** #4989: the products on a path, whatever their method, so a wrong method is a 405 and not an unknown route. */
+  const byPath = new Map<string, Product[]>()
+  for (const product of deps.products) byPath.set(product.path, [...(byPath.get(product.path) ?? []), product])
   /** §5: a settled payment's product, by the id the store recorded. */
   const productById = new Map(deps.products.map((product) => [product.id, product]))
   // §4: the document is built once, from the products file read at startup, so
@@ -193,20 +220,30 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   /** A body refusal, before any facilitator call; `errors` rides along when the schema named them. */
   function refuseProblem(res: ServerResponse, problem: Problem): void {
-    refuse(res, problem.status, problem.error, problem.message, problem.errors ? { errors: problem.errors } : {})
+    refuse(res, problem.status, problem.error, problem.message, {
+      ...(problem.errors ? { errors: problem.errors } : {}),
+      ...(problem.field !== undefined ? { field: problem.field } : {}),
+      ...(problem.expected !== undefined ? { expected: problem.expected } : {}),
+      ...(problem.next !== undefined ? { next: problem.next } : {}),
+    })
   }
 
   function challengeFor(ctx: RequestContext, product: Product): PaymentRequired {
     return buildChallenge({ chain: config.chain, payTo: config.payTo, product, resourceUrl: ctx.resourceUrl })
   }
 
-  function send402(ctx: RequestContext, product: Product | undefined, error: string | undefined, message: string): void {
-    if (!product) return refuse(ctx.res, 402, error ?? 'payment_required', message)
+  /**
+   * #4989: one 402 shape. The unpaid 402 body carries `error: "payment_required"`
+   * and `message` like every other 402; the `PAYMENT-REQUIRED` header is still
+   * encoded from the challenge itself, so it is byte-identical to before.
+   */
+  function send402(ctx: RequestContext, product: Product | undefined, error: string | undefined, message: string, extra: Record<string, unknown> = {}): void {
+    if (!product) return refuse(ctx.res, 402, error ?? 'payment_required', message, extra)
     const challenge = challengeFor(ctx, product)
     send(
       ctx.res,
       402,
-      error ? refusalWithChallenge(error, message, challenge) : challenge,
+      refusalWithChallenge(error ?? 'payment_required', message, challenge, extra),
       { 'PAYMENT-REQUIRED': encodePaymentRequiredHeader(challenge) },
     )
   }
@@ -369,11 +406,20 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       const model = parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>).model : undefined
       product = candidates.find((c) => c.model === model)
       if (!product) {
+        // #4989: "missing" and "not sold" are different answers, and both name
+        // the models this route sells — already public in the discovery document.
+        const sold = candidates.map((c) => c.model).filter((m): m is string => m !== undefined)
+        const missing = model === undefined
         return {
           problem: {
             status: 400,
-            error: 'bad_request',
-            message: 'The request body\'s "model" is not one this endpoint sells on this route.',
+            error: missing ? 'model_required' : 'model_not_sold',
+            message: missing
+              ? 'The request body has no "model" field, and this route sells by model.'
+              : 'The request body\'s "model" is not one this endpoint sells on this route.',
+            field: '/model',
+            expected: sold,
+            next: 'Send "model" naming one of the models in expected; the same list is in the discovery document at /.well-known/x402.',
           },
         }
       }
@@ -391,6 +437,21 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     if (product.outputTokenCap === undefined) return { product, forwardBody: raw.body }
     const capped = applyOutputTokenCap(parsed, product.outputTokenCap)
     if (!capped) {
+      // #4989: a body with no `messages` field at all is missing the field the
+      // cap is set on; a body that has one (or is not an object) is a body the
+      // cap truly cannot be set on.
+      if (parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed) && !Object.prototype.hasOwnProperty.call(parsed, 'messages')) {
+        return {
+          product,
+          problem: {
+            status: 400,
+            error: 'messages_required',
+            message: `This product caps output at ${product.outputTokenCap} tokens, and the request body has no "messages" field to set the cap on.`,
+            field: '/messages',
+            next: 'Send a chat-completions body with a "messages" array.',
+          },
+        }
+      }
       return {
         product,
         problem: {
@@ -424,10 +485,8 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   /** The merchant's own refusals before settlement: a mismatch with the challenge, or an invalid payment. */
   function localCheckError(err: unknown): string {
-    const message = err instanceof Error ? err.message : ''
-    return /does not match|Unsupported x402|not addressed|echo|extensions|x402Version/.test(message)
-      ? 'payment_mismatch'
-      : 'payment_invalid'
+    // #4989: the code the error carries, never its message text.
+    return refusalCodeFor(err)
   }
 
   // ---- chain resolution --------------------------------------------------
@@ -721,7 +780,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
      * (review of #4893): it is recorded `settled`, and a forward needs a proof.
      */
     | { kind: 'settled'; txHash: Hex; bySelf: boolean }
-    | { kind: 'refused'; error: string; message: string }
+    | { kind: 'refused'; error: string; message: string; details?: Record<string, unknown> }
     | { kind: 'unknown' }
     | { kind: 'unavailable' }
     /** No upstream slot came free after verify: the settle call was never sent. */
@@ -766,7 +825,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       if (err instanceof PaymentError) {
         return verified.expired
           ? { kind: 'refused', error: 'settle_failed', message: 'The payment authorization has expired and was never settled, so nothing was paid.' }
-          : { kind: 'refused', error: localCheckError(err), message: err.message }
+          : { kind: 'refused', error: localCheckError(err), message: err.message, details: paymentErrorDetails(err) }
       }
       log('settle_error', { key: pay.key, error: describeError(err) })
       return watched.seen.settleSent || watched.seen.chainSaidUsed ? { kind: 'unknown' } : { kind: 'unavailable' }
@@ -825,7 +884,12 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       // and payee it signed, a known one by its recorded product. Haven's SDK
       // always sends it (packages/sdk/src/x402.ts).
       if (!pay.payload.resource?.url) {
-        throw new PaymentError('Payment resource does not match quoted resource: the payment names no resource')
+        throw new PaymentError('Payment resource does not match quoted resource: the payment names no resource', undefined, {
+          code: 'payment_mismatch',
+          field: 'resource.url',
+          expected: ctx.resourceUrl,
+          next: 'Send the challenge\'s resource.url in the payment payload.',
+        })
       }
       assertExtensionsEchoed(pay.payload, challenge)
       verified = await verifyCdpAuthorization({
@@ -838,7 +902,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     } catch (err) {
       // A header that has not verified is not yet a payment: it counts against the address (§7).
       ipLimiter.charge(ctx.ip)
-      return send402(ctx, product, localCheckError(err), err instanceof PaymentError ? err.message : 'The payment header could not be checked.')
+      return send402(
+        ctx,
+        product,
+        localCheckError(err),
+        err instanceof PaymentError ? err.message : 'The payment header could not be checked.',
+        err instanceof PaymentError ? paymentErrorDetails(err) : {},
+      )
     }
 
     // §7: an address over the limit gets 429 before its unknown key is reserved; then the global verify cap.
@@ -895,7 +965,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
           await store.release(pay.key)
           log('payment_refused', { key: pay.key, error: outcome.error })
           if (outcome.error === 'payment_invalid' || outcome.error === 'payment_mismatch') ipLimiter.charge(ctx.ip)
-          return send402(ctx, product, outcome.error, outcome.message)
+          return send402(ctx, product, outcome.error, outcome.message, outcome.details ?? {})
         case 'at_capacity':
           await store.release(pay.key)
           log('at_capacity', { key: pay.key })
@@ -1131,6 +1201,26 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
   // ---- routing -----------------------------------------------------------
 
+  /** The absolute origin the challenge's resource URL is built from (§4, §8). */
+  function originFor(req: IncomingMessage): string {
+    return config.publicBaseUrl ?? `http://${firstHeader(req.headers.host) ?? 'localhost'}`
+  }
+
+  /** #4989: the absolute discovery URL, the one place the products are listed. */
+  function discoveryUrlFor(req: IncomingMessage): string {
+    return `${originFor(req)}${DISCOVERY_PATH}`
+  }
+
+  /**
+   * #4989: an unknown path is still a 404, but it says where the products are
+   * listed. `GET /` lands here unless the products file sells `GET /`.
+   */
+  function unknownRoute(req: IncomingMessage, res: ServerResponse): void {
+    refuse(res, 404, 'unknown_route', 'This route is not sold here. The products this endpoint sells are listed at the discovery document.', {
+      discovery_url: discoveryUrlFor(req),
+    })
+  }
+
   async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const method = req.method ?? 'GET'
     const url = new URL(req.url ?? '/', 'http://proxy.invalid')
@@ -1154,11 +1244,33 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
 
     const { basePath } = config
     if (basePath && url.pathname !== basePath && !url.pathname.startsWith(`${basePath}/`)) {
-      return refuse(res, 404, 'unknown_route', 'This route is not sold here.')
+      return unknownRoute(req, res)
     }
     const subPath = (basePath ? url.pathname.slice(basePath.length) : url.pathname) || '/'
     const candidates = byRoute.get(`${method} ${subPath}`)
-    if (!candidates) return refuse(res, 404, 'unknown_route', 'This route is not sold here.')
+    if (!candidates) {
+      // #4989: a path that is sold, but not with this method, is a 405 with the
+      // methods it is sold with — never an unknown route. OPTIONS answers 204
+      // with the same Allow and makes no facilitator call.
+      const onPath = byPath.get(subPath)
+      if (onPath && onPath.length > 0) {
+        const allow = [...new Set(onPath.map((product) => product.method))]
+        if (method === 'OPTIONS') {
+          res.writeHead(204, { Allow: allow.join(', ') })
+          res.end()
+          return
+        }
+        return refuse(
+          res,
+          405,
+          'method_not_allowed',
+          `This path is sold, but not with ${method}. The methods it is sold with are in the Allow header.`,
+          { expected: allow },
+          { Allow: allow.join(', ') },
+        )
+      }
+      return unknownRoute(req, res)
+    }
 
     const ip = clientIp(req)
     const header = firstHeader(req.headers['payment-signature']) ?? firstHeader(req.headers['x-payment'])
@@ -1195,7 +1307,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     ip: string,
     header: string | undefined,
   ): Promise<void> {
-    const origin = config.publicBaseUrl ?? `http://${firstHeader(req.headers.host) ?? 'localhost'}`
+    const origin = originFor(req)
     const rawBody = await readBody(req)
     // An oversized body is not drained: answer, then close the connection.
     if ('tooLarge' in rawBody) res.setHeader('Connection', 'close')
@@ -1222,7 +1334,13 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       // No key to look up: the body checks come first, then an invalid payment, which counts against the address.
       ipLimiter.charge(ip)
       if (body.problem) return refuseProblem(res, body.problem)
-      return send402(ctx, body.product!, 'payment_invalid', err instanceof PaymentError ? err.message : 'The payment header could not be read.')
+      return send402(
+        ctx,
+        body.product!,
+        'payment_invalid',
+        err instanceof PaymentError ? err.message : 'The payment header could not be read.',
+        err instanceof PaymentError ? paymentErrorDetails(err) : {},
+      )
     }
 
     const known = await store.get(pay.key)

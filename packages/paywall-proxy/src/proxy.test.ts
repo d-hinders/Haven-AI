@@ -5,7 +5,9 @@
  * proves.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { decodePaymentRequiredHeader, decodePaymentResponseHeader } from '@x402/core/http'
+import { decodePaymentRequiredHeader, decodePaymentResponseHeader, encodePaymentRequiredHeader, encodePaymentSignatureHeader } from '@x402/core/http'
+import { PaymentError } from '@haven_ai/merchant-payments'
+import { refusalCodeFor } from './handler.js'
 import {
   CDP_SECRET,
   CHAT_BODY,
@@ -70,7 +72,7 @@ describe('unpaid requests', () => {
     expect(h.upstream.seen).toHaveLength(0)
   })
 
-  it('a request for a route that is not in the products file is refused without a challenge', async () => {
+  it('a request for a route that is not in the products file is refused without a challenge, and names the discovery document', async () => {
     h = await startHarness()
     const res = await fetch(`${h.base}/v1/not-sold`)
     expect(res.status).toBe(404)
@@ -78,9 +80,12 @@ describe('unpaid requests', () => {
     const body = await res.json()
     expect(body.error).toBe('unknown_route')
     expect(body.accepts).toBeUndefined()
-    // wrong method on a sold path is also not sold
+    expect(body.discovery_url).toBe(`${h.base}/.well-known/x402`)
+    // #4989: a wrong method on a sold path is a 405 with Allow, not an unknown route.
     const wrong = await fetch(`${h.base}/v1/lookup`, { method: 'POST' })
-    expect(wrong.status).toBe(404)
+    expect(wrong.status).toBe(405)
+    expect(wrong.headers.get('allow')).toBe('GET')
+    expect((await wrong.json()).error).toBe('method_not_allowed')
   })
 
   it('GET /healthz is unpriced and reports readiness', async () => {
@@ -212,19 +217,23 @@ describe('product, model and output-token-cap checks run before any facilitator 
     expect(h.facilitator.settleCalls).toBe(1)
   })
 
-  it('a request whose body names a different model is refused 400 with no challenge, unpaid and paid, with no facilitator call', async () => {
+  it('a request whose body names a different model is refused 400 model_not_sold with the models sold, unpaid and paid, with no facilitator call', async () => {
     h = await startHarness()
     const wrong = JSON.stringify({ model: 'openai/other', messages: [{ role: 'user', content: 'hi' }] })
     const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, wrong))
     expect(unpaid.status).toBe(400)
     expect(unpaid.headers.get('payment-required')).toBeNull()
-    expect((await unpaid.json()).error).toBe('bad_request')
+    expect(await unpaid.json()).toMatchObject({
+      error: 'model_not_sold',
+      field: '/model',
+      expected: [CHAT_PRODUCT.model],
+    })
 
     const buyer = newBuyer()
     const paid = await buyer.pay(h, CHAT_PATH, chatRequest())
     const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }, wrong))
     expect(res.status).toBe(400)
-    expect((await res.json()).error).toBe('bad_request')
+    expect((await res.json()).error).toBe('model_not_sold')
     expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
     expect(h.upstream.seen).toHaveLength(0)
   })
@@ -238,15 +247,30 @@ describe('product, model and output-token-cap checks run before any facilitator 
     expect(h.facilitator.verifyCalls).toBe(0)
   })
 
-  it('a product with a cap and a body that cannot carry it is 400 cap_not_settable, before settlement', async () => {
+  it('a capped product with a sold model and no messages is 400 messages_required naming /messages, before settlement', async () => {
     h = await startHarness()
     const notChat = JSON.stringify({ model: 'openai/gpt-6-sol', prompt: 'x' })
+    const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, notChat))
+    expect(unpaid.status).toBe(400)
+    expect(await unpaid.json()).toMatchObject({ error: 'messages_required', field: '/messages' })
+    const paid = await newBuyer().pay(h, CHAT_PATH, chatRequest())
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }, notChat))
+    expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('messages_required')
+    expect(h.facilitator.verifyCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+  })
+
+  it('a capped product with a messages field the cap still cannot be set on is 400 cap_not_settable, before settlement', async () => {
+    h = await startHarness()
+    const notChat = JSON.stringify({ model: 'openai/gpt-6-sol', messages: 'hi' })
     const unpaid = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, notChat))
     expect(unpaid.status).toBe(400)
     expect((await unpaid.json()).error).toBe('cap_not_settable')
     const paid = await newBuyer().pay(h, CHAT_PATH, chatRequest())
     const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }, notChat))
     expect(res.status).toBe(400)
+    expect((await res.json()).error).toBe('cap_not_settable')
     expect(h.facilitator.verifyCalls).toBe(0)
     expect(h.upstream.seen).toHaveLength(0)
   })
@@ -534,7 +558,10 @@ describe('a settled payment whose call succeeded cannot buy a second call', () =
     const { encodePaymentSignatureHeader } = await import('@x402/core/http')
     const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': encodePaymentSignatureHeader(forged) }))
     expect(res.status).toBe(402)
-    expect((await res.json()).error).toBe('payment_mismatch')
+    const body = (await res.json()) as { error: string; field?: string }
+    expect(body.error).toBe('payment_mismatch')
+    // #4989: a known-key mismatch names no field, as today.
+    expect(body.field).toBeUndefined()
     expect(h.upstream.seen).toHaveLength(1)
     const after = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }))
     expect((await after.json()).error).toBe('payment_already_delivered')
@@ -1018,5 +1045,188 @@ describe('input_schema (#4988)', () => {
     const after = await fetch(`${h.base}${SEARCH_PATH}`, searchRequest(bad, { 'content-type': 'application/json', 'payment-signature': paid.header }))
     expect((await after.json()).error).toBe('payment_already_delivered')
     expect(h.upstream.seen).toHaveLength(2)
+  })
+})
+
+describe('#4989: answers that tell an agent what to do next', () => {
+  it('GET / and an unknown path answer 404 unknown_route with the absolute discovery URL, with and without BASE_PATH', async () => {
+    h = await startHarness()
+    for (const path of ['/', '/v1/not-sold']) {
+      const res = await fetch(`${h.base}${path}`)
+      expect(res.status, path).toBe(404)
+      expect(await res.json(), path).toMatchObject({
+        error: 'unknown_route',
+        discovery_url: `${h.base}/.well-known/x402`,
+      })
+    }
+    // The discovery document itself is still served, and is where the URL points.
+    expect((await fetch(`${h.base}/.well-known/x402`)).status).toBe(200)
+
+    await h.restart({}, { BASE_PATH: '/api' })
+    for (const path of ['/', '/api/not-sold']) {
+      const res = await fetch(`${h.base}${path}`)
+      expect(res.status, path).toBe(404)
+      expect(await res.json(), path).toMatchObject({
+        error: 'unknown_route',
+        discovery_url: `${h.base}/.well-known/x402`,
+      })
+    }
+  })
+
+  it('GET and OPTIONS on a sold POST route answer 405 (204 for OPTIONS) with Allow: POST, and make no facilitator call', async () => {
+    h = await startHarness()
+    const get = await fetch(`${h.base}${CHAT_PATH}`)
+    expect(get.status).toBe(405)
+    expect(get.headers.get('allow')).toBe('POST')
+    expect(await get.json()).toMatchObject({ error: 'method_not_allowed', expected: ['POST'] })
+
+    const options = await fetch(`${h.base}${CHAT_PATH}`, { method: 'OPTIONS' })
+    expect(options.status).toBe(204)
+    expect(options.headers.get('allow')).toBe('POST')
+    expect(await options.text()).toBe('')
+
+    // HEAD is not a sold method either: 405 with the same Allow.
+    const head = await fetch(`${h.base}${CHAT_PATH}`, { method: 'HEAD' })
+    expect(head.status).toBe(405)
+    expect(head.headers.get('allow')).toBe('POST')
+
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+  })
+
+  it('a missing model is model_required and an unsold model is model_not_sold, each listing exactly the models sold on the route', async () => {
+    const MODEL_A = { ...CHAT_PRODUCT, id: 'chat-a', model: 'openai/a' }
+    const MODEL_B = { ...CHAT_PRODUCT, id: 'chat-b', model: 'openai/b', price: '20000' }
+    h = await startHarness({ products: [MODEL_A, MODEL_B] })
+    const sold = ['openai/a', 'openai/b']
+
+    const missing = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] })))
+    expect(missing.status).toBe(400)
+    expect(await missing.json()).toMatchObject({ error: 'model_required', field: '/model', expected: sold })
+
+    const unsold = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, JSON.stringify({ model: 'openai/c', messages: [] })))
+    expect(unsold.status).toBe(400)
+    expect(await unsold.json()).toMatchObject({ error: 'model_not_sold', field: '/model', expected: sold })
+
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+  })
+
+  it('a payment whose amount differs from the quote answers 402 payment_mismatch with field naming the amount', async () => {
+    h = await startHarness()
+    // The accepted option's amount differs from the quoted option.
+    const paid = await newBuyer().pay(h, '/v1/lookup', { method: 'GET' })
+    const payload = structuredClone(paid.payload) as unknown as { accepted: Record<string, unknown> }
+    payload.accepted.amount = '1'
+    const res = await fetch(`${h.base}/v1/lookup`, { headers: { 'payment-signature': encodePaymentSignatureHeader(payload as never) } })
+    expect(res.status).toBe(402)
+    expect(await res.json()).toMatchObject({
+      error: 'payment_mismatch',
+      field: 'accepted.amount',
+      expected: '20000',
+    })
+
+    // The signed authorization's value differs from the quote.
+    const signed = await newBuyer().pay(h, '/v1/lookup', { method: 'GET', amountOverride: '1' })
+    const signedRes = await fetch(`${h.base}/v1/lookup`, { headers: { 'payment-signature': signed.header } })
+    expect(signedRes.status).toBe(402)
+    expect(await signedRes.json()).toMatchObject({
+      error: 'payment_mismatch',
+      field: 'payload.authorization.value',
+      expected: '20000',
+    })
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+  })
+
+  it('a payment that differs on method, network, amount, payTo, asset or timeout names that field', async () => {
+    h = await startHarness()
+    const cases: [string, (accepted: Record<string, unknown>) => void, string][] = [
+      ['method', (a) => { a.extra = { ...(a.extra as Record<string, unknown>), assetTransferMethod: 'erc7710' } }, 'accepted.extra.assetTransferMethod'],
+      ['network', (a) => { a.network = 'eip155:8453' }, 'accepted.network'],
+      ['amount', (a) => { a.amount = '1' }, 'accepted.amount'],
+      ['payTo', (a) => { a.payTo = '0x0000000000000000000000000000000000000001' }, 'accepted.payTo'],
+      ['asset', (a) => { a.asset = '0x0000000000000000000000000000000000000002' }, 'accepted.asset'],
+      ['timeout', (a) => { a.maxTimeoutSeconds = 299 }, 'accepted.maxTimeoutSeconds'],
+    ]
+    for (const [name, mutate, field] of cases) {
+      const paid = await newBuyer().pay(h, '/v1/lookup', { method: 'GET' })
+      const payload = structuredClone(paid.payload) as unknown as { accepted: Record<string, unknown> }
+      mutate(payload.accepted)
+      const res = await fetch(`${h.base}/v1/lookup`, { headers: { 'payment-signature': encodePaymentSignatureHeader(payload as never) } })
+      expect(res.status, name).toBe(402)
+      expect(await res.json(), name).toMatchObject({ error: 'payment_mismatch', field })
+    }
+    expect(h.facilitator.verifyCalls + h.facilitator.settleCalls).toBe(0)
+    expect(h.upstream.seen).toHaveLength(0)
+  })
+
+  it('a header that decodes to JSON without the payload object gets a PaymentError naming the field, not the generic sentence', async () => {
+    h = await startHarness()
+    const paid = await newBuyer().pay(h, '/v1/lookup', { method: 'GET' })
+    const broken = { ...paid.payload, payload: undefined }
+    const res = await fetch(`${h.base}/v1/lookup`, { headers: { 'payment-signature': encodePaymentSignatureHeader(broken as never) } })
+    expect(res.status).toBe(402)
+    const body = (await res.json()) as { error: string; message: string; field?: string }
+    expect(body.error).toBe('payment_invalid')
+    expect(body.field).toBe('payload')
+    expect(body.message).not.toBe('The payment header could not be read.')
+    expect(body.message).toContain('payload')
+    expect(h.facilitator.verifyCalls).toBe(0)
+  })
+
+  it('the unpaid 402 body carries error payment_required and message, and the PAYMENT-REQUIRED header is byte-identical', async () => {
+    h = await startHarness()
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest())
+    expect(res.status).toBe(402)
+    const body = (await res.json()) as { error: string; message: string; accepts: unknown[]; x402Version: number }
+    expect(body.error).toBe('payment_required')
+    expect(typeof body.message).toBe('string')
+    expect(body.x402Version).toBe(2)
+    expect(body.accepts).toHaveLength(1)
+    // The header is still encoded from the challenge itself: its `error` is the
+    // sentence, and re-encoding the decoded object reproduces the exact string.
+    const header = res.headers.get('payment-required')!
+    const decoded = decodePaymentRequiredHeader(header) as { error?: string }
+    expect(decoded.error).toBe('Payment required')
+    expect(encodePaymentRequiredHeader(decoded as never)).toBe(header)
+  })
+
+  it('for a product with a schema, a missing messages answers invalid_request_body; without a schema it answers messages_required', async () => {
+    const withSchema = {
+      ...CHAT_PRODUCT,
+      input_schema: { type: 'object', required: ['model', 'messages'], properties: { model: { type: 'string' }, messages: { type: 'array' } } },
+    }
+    h = await startHarness({ products: [withSchema] })
+    const noMessages = JSON.stringify({ model: 'openai/gpt-6-sol' })
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, noMessages))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: 'invalid_request_body', errors: [{ path: '/messages', rule: 'required' }] })
+  })
+
+  it('without a schema, a missing messages answers messages_required with field /messages', async () => {
+    h = await startHarness({ products: [CHAT_PRODUCT] })
+    const noMessages = JSON.stringify({ model: 'openai/gpt-6-sol' })
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, noMessages))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: 'messages_required', field: '/messages' })
+  })
+
+  it('a missing model reaches model_required even when the product has a schema that requires it (#4988 picks the product by model first)', async () => {
+    const withSchema = {
+      ...CHAT_PRODUCT,
+      input_schema: { type: 'object', required: ['model', 'messages'], properties: { model: { type: 'string' }, messages: { type: 'array' } } },
+    }
+    h = await startHarness({ products: [withSchema] })
+    const res = await fetch(`${h.base}${CHAT_PATH}`, chatRequest({}, JSON.stringify({ messages: [] })))
+    expect(res.status).toBe(400)
+    expect(await res.json()).toMatchObject({ error: 'model_required', field: '/model', expected: [CHAT_PRODUCT.model] })
+  })
+
+  it('refusalCodeFor reads the code a PaymentError carries, never its message text', () => {
+    // The old regex matched this sentence; with no code it is now payment_invalid.
+    expect(refusalCodeFor(new PaymentError('Payment accepted option does not match a quoted settlement method'))).toBe('payment_invalid')
+    // A reworded message with the code still answers payment_mismatch.
+    expect(refusalCodeFor(new PaymentError('reworded words that match nothing', undefined, { code: 'payment_mismatch' }))).toBe('payment_mismatch')
+    expect(refusalCodeFor(new Error('does not match'))).toBe('payment_invalid')
   })
 })

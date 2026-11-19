@@ -53,6 +53,23 @@ describe('buildReceipt takes every merchant value as a parameter (#4890)', () =>
     expect(buildReceipt(KIT_MERCHANT).betalningssatt).toBe('Kryptovaluta (USDC på Base Sepolia testnät)')
   })
 
+  // #4980: `locale: 'en'` puts the human-readable values in English; with no
+  // locale (the paywall proxy) the document is Swedish, as before.
+  it("locale 'en' writes the values in English and keeps every key and code", () => {
+    const sv = buildReceipt(KIT_MERCHANT)
+    const en = buildReceipt({ ...KIT_MERCHANT, locale: 'en' })
+    expect(en.betalningssatt).toBe('Cryptocurrency (USDC on Base Sepolia testnet)')
+    expect(en.status).toBe('Paid')
+    expect(buildReceipt({ ...KIT_MERCHANT, locale: 'en', settlement: 'settlement_unknown' }).status).toBe(
+      'Delivered — not confirmed on-chain',
+    )
+    expect(Object.keys(en)).toEqual(Object.keys(sv))
+    expect([en.momsbehandling, en.valuta, en.kopare.typ]).toEqual([sv.momsbehandling, sv.valuta, sv.kopare.typ])
+    expect(sv.status).toBe('Betald')
+    expect(receiptLineText({ ...KIT_MERCHANT.line, billingPeriod: 'monthly' }, 'en')).toMatch(/\(1 month\)$/)
+    expect(receiptLineText({ ...KIT_MERCHANT.line, billingPeriod: 'one_time' }, 'en')).toMatch(/\(one-time purchase\)$/)
+  })
+
   it('states the VAT figures at full six-decimal precision for a sub-cent price', () => {
     const json = buildReceipt(KIT_MERCHANT)
     expect(json.totalt_inkl_moms).toBe('0.002')

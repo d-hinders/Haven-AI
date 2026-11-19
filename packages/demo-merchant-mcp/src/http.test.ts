@@ -312,7 +312,7 @@ describe('demo merchant MCP x402 flow', () => {
     const receiptHeader = paid.headers.get('x-receipt-json')
     expect(receiptHeader).toBeTruthy()
     const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
-    expect(receipt.status).toBe('Betald')
+    expect(receipt.status).toBe('Paid')
     expect(receipt.blockkedje_referens).toContain(TX_HASH)
     expect(text).toContain(receipt.fakturanummer)
 
@@ -945,15 +945,15 @@ describe('demo merchant MCP x402 flow', () => {
       // transaction" status string, which itself contains the substring
       // "Betald", is allowed and expected — checked above).
       expect(text).not.toContain('Status: Paid\n')
-      expect(text).not.toContain('"status": "Betald"')
+      expect(text).not.toContain('"status": "Paid"')
       const zeroHash = `0x${'0'.repeat(64)}`
       expect(text).not.toContain(zeroHash)
 
       const receiptHeader = headers.get('x-receipt-json')
       expect(receiptHeader).toBeTruthy()
       const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
-      expect(receipt.status).toBe('Betald i tidigare transaktion — referens saknas')
-      expect(receipt.status).not.toBe('Betald')
+      expect(receipt.status).toBe('Paid in an earlier transaction — reference unavailable')
+      expect(receipt.status).not.toBe('Paid')
       expect(receipt.blockkedje_referens).toBeNull()
       expect(JSON.stringify(receipt)).not.toContain(zeroHash)
 
@@ -979,9 +979,9 @@ describe('demo merchant MCP x402 flow', () => {
 })
 
 // ── #1550: display locale + result_detail ────────────────────────────────────
-// English is the demo default; Swedish stays behind `locale: 'sv'`; and the
-// invoice DOCUMENT (x-receipt-json + the JSON block) stays Swedish on every
-// locale — it is a bookkeeping artifact, not display copy.
+// English is the demo default; Swedish stays behind `locale: 'sv'`. #4980:
+// the invoice DOCUMENT (x-receipt-json + the JSON block) keeps its Swedish
+// keys and codes on every locale, and its values follow the paid call's locale.
 describe('display locale and result detail (#1550)', () => {
   async function initSession(url: string): Promise<string> {
     const init = await postMcp(url, {
@@ -1021,7 +1021,7 @@ describe('display locale and result detail (#1550)', () => {
     return { paymentHeader }
   }
 
-  it('defaults to English text while the invoice document stays Swedish', async () => {
+  it('defaults to English text and English receipt values, with the same keys and codes (#4980)', async () => {
     const { url } = await startServer()
     const sessionId = await initSession(url)
     const { paymentHeader } = await settle(url, sessionId)
@@ -1036,15 +1036,18 @@ describe('display locale and result detail (#1550)', () => {
     expect(text).not.toContain('Köp bekräftat')
     expect(text).not.toContain('FAKTURA')
 
-    // The bookkeeping document is untouched by the display locale: Swedish
-    // keys, Swedish values, Swedish line description — in the header AND in
-    // the embedded JSON block.
+    // #4980: Swedish keys and codes, English values and line description —
+    // in the header AND in the embedded JSON block.
     const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
-    expect(receipt.status).toBe('Betald')
-    expect(receipt.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
-    expect(receipt.rader[0].beskrivning).toContain('Grundläggande VPN-skydd')
+    expect(receipt.status).toBe('Paid')
+    expect(receipt.betalningssatt).toBe('Cryptocurrency (USDC on Base)')
+    expect(receipt.rader[0].beskrivning).toContain('Essential VPN protection')
+    expect(receipt.rader[0].beskrivning).toMatch(/\(1 month\)$/)
+    expect(receipt.momsbehandling).toBe('SE_25')
+    expect(receipt.kopare.typ).toBe('blockkedjeadress')
     expect(toolText(text)).toContain('"fakturanummer"')
-    expect(toolText(text)).toContain('Grundläggande VPN-skydd')
+    expect(toolText(text)).toContain('"status": "Paid"')
+    expect(toolText(text)).not.toContain('Grundläggande VPN-skydd')
   })
 
   it("locale: 'sv' renders the classic Swedish output", async () => {
@@ -1060,6 +1063,14 @@ describe('display locale and result detail (#1550)', () => {
     expect(text).toContain('FAKTURA')
     expect(text).toContain('Tack för ditt köp')
     expect(text).not.toContain('Purchase confirmed')
+
+    // #4980: the HTTP layer read the paid call's `locale`, so the receipt
+    // document's values are Swedish too, as before.
+    const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+    expect(receipt.status).toBe('Betald')
+    expect(receipt.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
+    expect(receipt.rader[0].beskrivning).toContain('Grundläggande VPN-skydd')
+    expect(toolText(text)).toContain('"status": "Betald"')
   })
 
   it("result_detail: 'summary' drops the invoice from the text but not from the contract", async () => {

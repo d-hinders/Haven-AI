@@ -19,7 +19,7 @@
   },
   "rader": [
     {
-      "beskrivning": "Haven Joke — Ett skämt, levererat direkt. Verifieras och avräknas av Coinbases x402-facilitator (CDP). (engångsköp)",
+      "beskrivning": "Haven Joke — One joke, delivered at once. Verified and settled by Coinbase's hosted x402 facilitator (CDP). (one-time purchase)",
       "antal": 1,
       "apris_exkl_moms": "0.008",
       "moms_procent": 25,
@@ -33,7 +33,7 @@
   "totalt_inkl_moms": "0.01",
   "momsbehandling": "SE_25",
   "valuta": "USDC",
-  "betalningssatt": "Kryptovaluta (USDC på Base Sepolia testnät)",
+  "betalningssatt": "Cryptocurrency (USDC on Base Sepolia testnet)",
   "blockkedje_referens": "Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
-  "status": "Betald"
+  "status": "Paid"
 }

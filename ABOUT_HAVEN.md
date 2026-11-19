@@ -39,7 +39,7 @@ Haven is non-custodial smart account software. It helps users configure, verify,
 - `haven_get_allowances` tooling for live "what can this agent spend?" questions.
 - Dashboard, account, agent, transaction, activity, and tool-invocation surfaces.
 - Agent pause, resume, revoke, and API-key rotation flows.
-- Internal demo merchant MCP package for Base USDC x402 test purchases and Swedish invoice output.
+- Internal demo merchant MCP package for Base USDC x402 test purchases, with an invoice in the shape of a Swedish bookkeeping document, English by default.
 - Quality, review, and agent workflow documentation for implementation work.
 
 ## Agent Credentials

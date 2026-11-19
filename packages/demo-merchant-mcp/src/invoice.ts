@@ -9,16 +9,24 @@ import {
   type VatRule,
 } from '@haven_ai/merchant-payments'
 import type { MerchantLocale, ProductId } from './products.js'
-import { CHAIN_ID, PRODUCTS, networkDisplayName, productBillingPeriod } from './products.js'
+import {
+  CHAIN_ID,
+  DEFAULT_MERCHANT_LOCALE,
+  PRODUCTS,
+  networkDisplayName,
+  productBillingPeriod,
+  productDescription,
+} from './products.js'
 import type { SekRate } from './sek-rate.js'
 import type { SettledPayment, SettlementState } from './x402.js'
 
-// #1550: the invoice DOCUMENT (`InvoiceJson` + its Swedish text render) is a
-// Swedish bookkeeping artifact by design — it feeds the `x-receipt-json`
-// header and downstream accounting fixtures (Fortnox / receipt-underlag), so
-// the display-locale switch never touches it: keys, values, and `beskrivning`
-// stay Swedish regardless of the buyer-facing locale. Only the human-readable
-// render gains an English variant, via `renderInvoiceText`.
+// #1550: the invoice DOCUMENT (`InvoiceJson`) has the shape of a Swedish
+// bookkeeping document — it feeds the `x-receipt-json` header and Haven's
+// accounting (receipt-underlag, receipt-statement), so its keys and codes never
+// change. #4980: its human-readable VALUES (the line's description and billing
+// period, `betalningssatt`, `status`, and the two Stripe blocks' `status`)
+// follow the buyer's display locale — English by default, Swedish with
+// `locale: 'sv'`. Haven reads none of those values.
 //
 // #4890: the receipt builder, its rendered text, the receipt number, the VAT
 // amounts and the declaration check live in `@haven_ai/merchant-payments`,
@@ -114,7 +122,8 @@ export function resolveReceiptSeller(
 
 /** #4856: the Stripe reference on the receipt; always pending at answer time. */
 export interface StripeReferenceBlock {
-  status: 'Väntar'
+  /** #4980: `Pending` on an English receipt. */
+  status: 'Väntar' | 'Pending'
   /** The two values the PaymentIntent can be found by in Stripe. */
   sok_med: { fakturanummer: string; transaktions_hash: string }
 }
@@ -131,7 +140,17 @@ export type SekAmountBlock =
       /** ISO time the rate was read. */
       tidpunkt: string
     }
-  | { tillganglig: false; status: 'Ej tillgängligt vid köptillfället' }
+  | { tillganglig: false; status: SekUnavailableStatus }
+
+/** #4856, #4980: the SEK block's status when no rate was available, per locale. */
+export type SekUnavailableStatus = 'Ej tillgängligt vid köptillfället' | 'Not available at the time of purchase'
+
+const SEK_UNAVAILABLE: Record<MerchantLocale, SekUnavailableStatus> = {
+  sv: 'Ej tillgängligt vid köptillfället',
+  en: 'Not available at the time of purchase',
+}
+
+const STRIPE_PENDING: Record<MerchantLocale, StripeReferenceBlock['status']> = { sv: 'Väntar', en: 'Pending' }
 
 /** The demo merchant's receipt: the core document plus the #4856 blocks. */
 export type DemoInvoiceJson = InvoiceJson & {
@@ -155,8 +174,8 @@ export function sekAmountText(priceAtomic: bigint, rate: number): string {
   return ((Number(priceAtomic) / 1_000_000) * rate).toFixed(2)
 }
 
-function sekAmountBlock(priceAtomic: bigint, sekRate: SekRate | undefined): SekAmountBlock {
-  if (!sekRate) return { tillganglig: false, status: 'Ej tillgängligt vid köptillfället' }
+function sekAmountBlock(priceAtomic: bigint, sekRate: SekRate | undefined, locale: MerchantLocale): SekAmountBlock {
+  if (!sekRate) return { tillganglig: false, status: SEK_UNAVAILABLE[locale] }
   return {
     tillganglig: true,
     belopp: sekAmountText(priceAtomic, sekRate.rate),
@@ -294,6 +313,12 @@ export interface InvoiceParams {
   /** #4856: the configured seller; defaults to the demo seller. */
   seller?: ReceiptSellerDetails
   /**
+   * #4980: the language of the document's human-readable values and of
+   * `text`. Defaults to `DEFAULT_MERCHANT_LOCALE` (`en`). Keys and codes are
+   * the same in both.
+   */
+  locale?: MerchantLocale
+  /**
    * #4856: present only when Stripe will record this payment
    * (`stripeRecordingDecision` answers `record`). Then, and only for a payment
    * settled on chain, the receipt carries the pending Stripe reference and the
@@ -306,13 +331,15 @@ export function generateInvoice(params: InvoiceParams): DemoInvoice {
   const product = PRODUCTS[params.productId]
   const chainId = params.chainId ?? CHAIN_ID
   const network = { sv: networkDisplayName(chainId, 'sv'), en: networkDisplayName(chainId, 'en') }
+  const locale = params.locale ?? DEFAULT_MERCHANT_LOCALE
   const json: InvoiceJson = buildReceipt({
     invoiceNumber: params.invoiceNumber,
-    // Always the SWEDISH description (#1550). #4851: a one-time product is
-    // not a month of anything.
+    // #4980: the description in the receipt's language. #4851: a one-time
+    // product is not a month of anything.
+    locale,
     line: {
       name: product.name,
-      description: product.description_sv,
+      description: productDescription(product, locale),
       priceAtomic: product.price_usdc,
       billingPeriod: productBillingPeriod(product),
     },
@@ -335,26 +362,27 @@ export function generateInvoice(params: InvoiceParams): DemoInvoice {
       ? {
           ...json,
           stripe_referens: {
-            status: 'Väntar',
+            status: STRIPE_PENDING[locale],
             sok_med: { fakturanummer: json.fakturanummer, transaktions_hash: params.txHash },
           },
-          belopp_sek: sekAmountBlock(product.price_usdc, params.stripe.sekRate),
+          belopp_sek: sekAmountBlock(product.price_usdc, params.stripe.sekRate, locale),
         }
       : json
   const text = renderReceiptText(demoJson, {
     productName: product.name,
-    locale: 'sv',
+    locale,
     network,
     supportContact: SUPPORT_CONTACT,
   })
-  return { json: demoJson, text: withStripeSections(text, demoJson, 'sv') }
+  return { json: demoJson, text: withStripeSections(text, demoJson, locale) }
 }
 
 /**
- * Locale-aware human-readable render of the SAME `InvoiceJson` (#1550). The
- * underlying document stays Swedish (see the module comment); this only
- * chooses the language of the headings and labels around its values. `en` is
- * the demo default; `sv` reproduces the classic FAKTURA render byte-for-byte.
+ * Locale-aware human-readable render of the SAME `InvoiceJson` (#1550). This
+ * chooses the language of the headings and labels around its values; the
+ * values are in the language the document was built in (#4980), which is the
+ * locale of the call that paid. `en` is the demo default; `sv` on a Swedish
+ * document reproduces the classic FAKTURA render byte-for-byte.
  */
 export function renderInvoiceText(
   inv: DemoInvoiceJson,
@@ -389,6 +417,11 @@ export { nextInvoiceNumber }
 // #4856: so are `seller` and `stripe`. The HTTP layer builds the invoice
 // first (before the MCP handler runs) and passes both; the handler's later
 // call replays the cached invoice.
+//
+// #4980: and `locale`: the document's values are in the language of the call
+// that paid (the HTTP layer reads it from the tool call's arguments). A later
+// call for the same payment in the other locale replays that document under
+// its own headings.
 const invoicesByPayment = new WeakMap<SettledPayment, DemoInvoice>()
 
 export function invoiceForPayment(
@@ -402,6 +435,8 @@ export function invoiceForPayment(
     checkoutDetails?: AcceptedCheckoutDetails | null
     seller?: ReceiptSellerDetails
     stripe?: StripeReceiptContext
+    /** #4980: the language of the document's values; defaults to `en`. */
+    locale?: MerchantLocale
   },
 ): DemoInvoice {
   const cached = invoicesByPayment.get(payment)
@@ -429,6 +464,7 @@ export function invoiceForPayment(
     settlement: payment.settlement,
     seller: opts.seller,
     stripe: opts.stripe,
+    locale: opts.locale,
   })
   invoicesByPayment.set(payment, invoice)
   return invoice

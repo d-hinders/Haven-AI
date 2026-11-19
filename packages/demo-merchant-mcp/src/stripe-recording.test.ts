@@ -718,7 +718,7 @@ describe('the receipt for a Stripe-recorded payment says the reference is pendin
     expect(response.status).toBe(200)
     const receipt = fullReceiptOf(response)
     expect(receipt.stripe_referens).toEqual({
-      status: 'Väntar',
+      status: 'Pending',
       sok_med: { fakturanummer: receiptNumberForTransaction(CDP_TX), transaktions_hash: CDP_TX },
     })
     expect(receipt.belopp_sek).toEqual({
@@ -740,7 +740,7 @@ describe('the receipt for a Stripe-recorded payment says the reference is pendin
     const { response, raw } = await pay(url, await signedHeader(await challenge(url)))
     expect(fullReceiptOf(response).belopp_sek).toEqual({
       tillganglig: false,
-      status: 'Ej tillgängligt vid köptillfället',
+      status: 'Not available at the time of purchase',
     })
     expect(raw).toContain('Not available at the time of purchase')
   })
@@ -749,7 +749,7 @@ describe('the receipt for a Stripe-recorded payment says the reference is pendin
     const { url } = await startServer()
     const { response } = await pay(url, await signedHeader(await challenge(url)))
     expect(fullReceiptOf(response).belopp_sek).toMatchObject({ tillganglig: false })
-    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Väntar')
+    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Pending')
   })
 
   it('never waits for Stripe: the receipt says pending while the Stripe call has not answered', async () => {
@@ -759,7 +759,7 @@ describe('the receipt for a Stripe-recorded payment says the reference is pendin
     // Stripe has recorded nothing when the receipt is returned; the call
     // times out afterwards, and the receipt said pending all along.
     expect(recording!.stats()).toMatchObject({ attempted: 1, recorded: 0 })
-    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Väntar')
+    expect(fullReceiptOf(response).stripe_referens?.status).toBe('Pending')
     await recording!.flush()
     expect(recording!.stats().failed).toBe(1)
   })

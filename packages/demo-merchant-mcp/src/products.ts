@@ -137,9 +137,9 @@ export interface Product {
   /** English display description (#1550 — the demo default is English). */
   description: string
   /**
-   * Swedish display description, and the text that feeds the invoice JSON's
-   * `beskrivning` row: the invoice document is a Swedish bookkeeping artifact
-   * by design (see invoice.ts) and stays Swedish regardless of display locale.
+   * Swedish display description, and the text of the invoice JSON's
+   * `beskrivning` row on a Swedish receipt (`locale: 'sv'`); an English
+   * receipt uses `description` (#4980, see invoice.ts).
    */
   description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
@@ -497,12 +497,16 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
 // ── Display locale (#1550) ───────────────────────────────────────────────────
 // English is the demo default — this merchant is Haven's own showcase and its
 // transcripts are read mostly by English-speaking developers. Swedish stays a
-// first-class option, and the invoice JSON (a Swedish bookkeeping artifact —
-// see invoice.ts) is deliberately NOT localized by this switch.
+// first-class option. #4980: the invoice JSON's human-readable values follow
+// this switch too; its keys and codes never do (see invoice.ts).
 
 export const MERCHANT_LOCALES = ['en', 'sv'] as const
 export type MerchantLocale = (typeof MERCHANT_LOCALES)[number]
 export const DEFAULT_MERCHANT_LOCALE: MerchantLocale = 'en'
+
+export function isMerchantLocale(value: unknown): value is MerchantLocale {
+  return value === 'en' || value === 'sv'
+}
 
 export function productDescription(product: Product, locale: MerchantLocale): string {
   return locale === 'sv' ? product.description_sv : product.description

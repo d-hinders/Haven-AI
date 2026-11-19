@@ -130,10 +130,39 @@ describe('#4872 hosted: refused before any intent', () => {
   })
 })
 
+describe('#4872 hosted: the pay tools, more cases', () => {
+  it('with an idempotency_key, the refusal says THIS call created nothing and points at an earlier payment', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': challengeHeader(ask({ receipt_email: { required: true } })) } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      [DETAILS_PATH]: { status: 200, body: { available: false, reason: 'disabled' } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const out = fail(await handlers().haven_pay_mcp_tool({ ...PAY, idempotency_key: 'retry-4872' }))
+    expect(out.code).toBe('CHECKOUT_DETAILS_UNAVAILABLE')
+    expect(out.message).toContain('This call created no payment')
+    expect(out.message).toContain('earlier call with the same idempotency key')
+  })
+
+  it('a required request in a challenge too large to store (over 64 KB) is refused at pay time: settle could never answer it', async () => {
+    const big = { ...PAYMENT_REQUIRED, extensions: { 'haven-checkout-details': ask({ receipt_email: { required: true } }), bazaar: { info: { blob: 'x'.repeat(70000) } } } }
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(big)) } },
+      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      [DETAILS_PATH]: { status: 200, body: STORED },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const out = fail(await handlers().haven_pay_mcp_tool(PAY))
+    expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'over_budget' })
+    expect(intentCalls()).toEqual([])
+  })
+})
+
 describe('#4872 hosted: the answer at settle', () => {
   const SIG = '0x' + '11'.repeat(65)
+  const STORED_URL = 'http://merchant.test/mcp'
 
-  function settleHaven(request: unknown, details: unknown) {
+  function settleHaven(request: unknown, details: unknown, opts: { storedUrl?: string } = {}) {
     stubFetch({
       'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
@@ -142,7 +171,7 @@ describe('#4872 hosted: the answer at settle', () => {
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     vi.spyOn(haven, 'getX402MerchantCallContext').mockResolvedValue({
       paymentId: 'pay_x402',
-      merchantUrl: 'http://merchant.test/mcp',
+      merchantUrl: opts.storedUrl ?? STORED_URL,
       toolName: 'buy_cloud_storage',
       arguments: { tier: '50gb' },
       ...(request !== undefined ? { checkoutDetailsRequest: request } : {}),
@@ -154,38 +183,61 @@ describe('#4872 hosted: the answer at settle', () => {
     return { haven, complete }
   }
   const sentAnswer = (complete: ReturnType<typeof settleHaven>['complete']) => {
-    const header = new Headers(complete.mock.calls[0][0].init?.headers).get(X_CHECKOUT_DETAILS_HEADER)
+    const call = complete.mock.calls[0][0]
+    // Never on the handshake init — only on the paid request's own headers.
+    expect(new Headers(call.init?.headers).has(X_CHECKOUT_DETAILS_HEADER)).toBe(false)
+    const header = call.paidRequestHeaders?.[X_CHECKOUT_DETAILS_HEADER]
     return header ? (JSON.parse(Buffer.from(header, 'base64url').toString('utf8')) as Record<string, unknown>) : undefined
   }
+  const fundingRelays = () => recordedCalls().filter((c) => new URL(c.url).pathname === '/payments/pay_x402/sign')
+  const captureLogs = () => {
+    const spies = [
+      vi.spyOn(process.stdout, 'write').mockImplementation(() => true),
+      vi.spyOn(process.stderr, 'write').mockImplementation(() => true),
+      vi.spyOn(console, 'log').mockImplementation(() => {}),
+      vi.spyOn(console, 'warn').mockImplementation(() => {}),
+      vi.spyOn(console, 'error').mockImplementation(() => {}),
+    ]
+    return () => spies.flatMap((s) => s.mock.calls.map((c) => c.map(String).join(' '))).join('\n')
+  }
 
-  it('haven_settle_mcp_tool: only the fields asked for ride the paid request the server sends, and no value reaches the result or the logs', async () => {
-    const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
-    const err = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {})
+  it('haven_settle_mcp_tool: only the fields asked for ride the paid request, and no value reaches the result or the logs', async () => {
+    const logs = captureLogs()
     const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), STORED)
     const result = await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 })
     expect(result.success).toBe(true)
     expect(sentAnswer(complete)).toEqual({ version: 1, receipt_email: EMAIL })
-    const logged = [out, err, log, warn, error].flatMap((s) => s.mock.calls.map((c) => c.map(String).join(' '))).join('\n')
     for (const marker of VALUE_MARKERS) {
       expect(JSON.stringify(result)).not.toContain(marker)
-      expect(logged).not.toContain(marker)
+      expect(logs()).not.toContain(marker)
     }
   })
 
-  it('haven_complete_mcp_tool: the same answer on the complete leg', async () => {
+  it('EIP-3009 settle: a required field that cannot be shared is refused BEFORE the funding relay — nothing funded, safe to call again', async () => {
+    const logs = captureLogs()
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' })
+    const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'not_shared', phase: 'not_started', paymentId: 'pay_x402' })
+    expect(result.message).toContain('No payment was created')
+    expect(fundingRelays()).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
+    for (const marker of VALUE_MARKERS) expect(logs()).not.toContain(marker)
+  })
+
+  it('haven_complete_mcp_tool (already funded): the same answer on the complete leg', async () => {
     const { haven, complete } = settleHaven(ask({ billing_address: { required: false } }), STORED)
     ok(await createToolHandlers(haven).haven_complete_mcp_tool({ payment_id: 'pay_x402', payment_header: 'eyJ4IjoxfQ==' }))
     expect(sentAnswer(complete)).toEqual({ version: 1, billing_address: ADDRESS })
   })
 
-  it('a required field that can no longer be shared at settle: delivery refused before the merchant is contacted (funded wording on EIP-3009)', async () => {
+  it('haven_complete_mcp_tool, required field no longer shareable: funded-not-delivered, and the step names complete or verify-then-sweep, never settle', async () => {
     const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' })
-    const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
-    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'not_shared' })
+    const result = fail(await createToolHandlers(haven).haven_complete_mcp_tool({ payment_id: 'pay_x402', payment_header: 'eyJ4IjoxfQ==' }))
+    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'funded_but_unsettled', paymentId: 'pay_x402' })
     expect(result.message).toContain('funded but was not delivered')
+    expect(result.next_tool_omitted_reason).toContain('haven_complete_mcp_tool')
+    expect(result.next_tool_omitted_reason).toContain('haven_sweep_delegate')
+    expect(result.next_tool_omitted_reason).not.toContain('haven_settle_mcp_tool')
     expect(complete).not.toHaveBeenCalled()
   })
 
@@ -193,21 +245,71 @@ describe('#4872 hosted: the answer at settle', () => {
     const { haven, complete } = settleHaven(undefined, STORED)
     ok(await createToolHandlers(haven).haven_complete_mcp_tool({ payment_id: 'pay_x402', payment_header: 'eyJ4IjoxfQ==' }))
     expect(sentAnswer(complete)).toBeUndefined()
+    expect(complete.mock.calls[0][0].paidRequestHeaders).toBeUndefined()
     expect(detailReads()).toEqual([])
     expect(complete.mock.calls[0][0].init?.headers).toEqual({ 'Content-Type': 'application/json' })
   })
 
-  it('an explicitly threaded context (no stored challenge) sends nothing and refuses nothing', async () => {
-    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' })
+  it('the documented flow (explicit context, matching the stored URL) still answers — the stored request is read', async () => {
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), STORED)
     ok(
-      await createToolHandlers(haven).haven_complete_mcp_tool({
+      await createToolHandlers(haven).haven_settle_mcp_tool({
         payment_id: 'pay_x402',
-        merchant_url: 'http://merchant.test/mcp',
+        signature: SIG,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+        merchant_url: STORED_URL,
         tool_name: 'buy_cloud_storage',
-        payment_header: 'eyJ4IjoxfQ==',
       }),
     )
-    expect(sentAnswer(complete)).toBeUndefined()
+    expect(sentAnswer(complete)).toEqual({ version: 1, receipt_email: EMAIL })
+  })
+
+  it('an explicit merchant_url that is not the one quoted never receives the owner’s details: a required field refuses before funding', async () => {
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), STORED, { storedUrl: 'http://merchant.test/other' })
+    const result = fail(
+      await createToolHandlers(haven).haven_settle_mcp_tool({
+        payment_id: 'pay_x402',
+        signature: SIG,
+        payment_header: VALID_PAYMENT_HEADER_REF.v1,
+        merchant_url: STORED_URL,
+        tool_name: 'buy_cloud_storage',
+      }),
+    )
+    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', reason: 'merchant_mismatch', phase: 'not_started' })
+    expect(fundingRelays()).toEqual([])
     expect(detailReads()).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  describe('erc7710 settle', () => {
+    function erc7710Haven(request: unknown, details: unknown, header: string) {
+      const { haven, complete } = settleHaven(request, details)
+      const submit = vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue(header as never)
+      return { haven, complete, submit }
+    }
+
+    it('availability is decided BEFORE the settlement child is submitted: sharing off refuses with nothing submitted', async () => {
+      const { haven, complete, submit } = erc7710Haven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, 'eyJ4IjoxfQ==')
+      const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG }))
+      expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'not_started' })
+      expect(submit).not.toHaveBeenCalled()
+      expect(complete).not.toHaveBeenCalled()
+    })
+
+    it('the answer rides the paid request on erc7710 too', async () => {
+      const { haven, complete, submit } = erc7710Haven(ask({ receipt_email: { required: true } }), STORED, 'eyJ4IjoxfQ==')
+      await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG })
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(sentAnswer(complete)).toEqual({ version: 1, receipt_email: EMAIL })
+    })
+
+    it('a real header too large for the answer after submit: unsent — never sent to the merchant, and the step says start a new purchase', async () => {
+      const { haven, complete } = erc7710Haven(ask({ receipt_email: { required: true } }), STORED, 'h'.repeat(16000))
+      const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG }))
+      expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', reason: 'over_budget', phase: 'not_delivered', paymentId: 'pay_x402' })
+      expect(result.message).toContain('nothing was redeemed')
+      expect(result.next_tool_omitted_reason).toContain('start a new purchase')
+      expect(complete).not.toHaveBeenCalled()
+    })
   })
 })

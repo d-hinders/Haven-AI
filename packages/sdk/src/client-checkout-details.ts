@@ -86,6 +86,7 @@ const REASON_WORDS: Record<CheckoutDetailsRefusalReason, string> = {
   over_budget: 'it does not fit in the paid request',
   unreadable: 'Haven could not read the owner’s checkout details right now; try again',
   backend_unsupported: 'this Haven backend does not support checkout details yet',
+  merchant_mismatch: 'the merchant URL given is not the one this payment was quoted for, so the owner\u2019s details are not sent to it',
 }
 
 /** The refusal, as the error the SDK throws. Field names only, never values. */
@@ -95,23 +96,35 @@ export function checkoutDetailsRefusalError(
   {
     funded = false,
     unsent = false,
+    priorPaymentPossible = false,
+    paymentId,
   }: {
     /** The payment is funded (EIP-3009 after the funding leg): it is not delivered. */
     funded?: boolean
     /** A settlement exists but was never sent to the merchant (erc7710 at settle): nothing moved. */
     unsent?: boolean
+    /**
+     * The call carried an idempotency key an earlier call may already have
+     * paid under: "nothing moved" is true of THIS call only.
+     */
+    priorPaymentPossible?: boolean
+    paymentId?: string
   } = {},
 ): CheckoutDetailsUnavailableError {
   const names = missingFields.map((f) => FIELD_WORDS[f]).join(', ')
   const outcome = funded
-    ? 'The payment is funded but was not delivered: resume it once the owner has fixed this.'
+    ? 'The payment is funded but was not delivered: finish it once the owner has fixed this.'
     : unsent
-      ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved.'
-      : 'No payment was created and no funds moved.'
+      ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved; start a new purchase once the owner has fixed this.'
+      : priorPaymentPossible
+        ? 'This call created no payment and moved no funds; if an earlier call with the same idempotency key already paid, check its payment status.'
+        : 'No payment was created and no funds moved.'
   return new CheckoutDetailsUnavailableError(
     missingFields,
     reason,
     `The merchant requires the ${names}, which this agent cannot share: ${REASON_WORDS[reason]}. ${outcome}`,
+    funded ? 'funded' : unsent ? 'unsent' : 'before_payment',
+    paymentId,
   )
 }
 

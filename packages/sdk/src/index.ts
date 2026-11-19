@@ -188,6 +188,7 @@ export type {
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
 export type { HavenApiFailureCause } from './types.js'
+export type { CheckoutDetailsRefusalStage } from './types.js'
 
 export {
   HavenError,

@@ -286,7 +286,11 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // answer for the paid request it sends. One module, so both read the same
   // SDK decision.
   refuseUnshareableCheckoutDetails: { module: 'checkout-details', slices: ['s2810'] },
-  checkoutDetailsHeaderForSettle: { module: 'checkout-details', slices: ['s2812'] },
+  checkoutDetailsBeforeSpend: { module: 'checkout-details', slices: ['s2812'] },
+  checkoutDetailsAfterSubmit: { module: 'checkout-details', slices: ['s2812'] },
+  checkoutDetailsForFundedDelivery: { module: 'checkout-details', slices: ['s2812'] },
+  SettleCheckoutDetails: { module: 'checkout-details', slices: ['s2812'] },
+  StoredCheckoutRequest: { module: 'checkout-details', slices: ['s2812'] },
   // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
   DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
@@ -312,7 +316,15 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
   refuseUnshareableCheckoutDetails:
     '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
-  checkoutDetailsHeaderForSettle:
+  checkoutDetailsBeforeSpend:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  checkoutDetailsAfterSubmit:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  checkoutDetailsForFundedDelivery:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  SettleCheckoutDetails:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  StoredCheckoutRequest:
     '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
   // s2811 (#4830): the expected_amount comparison and the not-compared answer.
   // Only haven_quote_x402 calls them (the two MCP quote tools take no
@@ -520,7 +532,14 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
   // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
   // moved VERBATIM, call sites unchanged.
   'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
-  'checkout-details': ['refuseUnshareableCheckoutDetails', 'checkoutDetailsHeaderForSettle'],
+  'checkout-details': [
+    'refuseUnshareableCheckoutDetails',
+    'checkoutDetailsBeforeSpend',
+    'checkoutDetailsAfterSubmit',
+    'checkoutDetailsForFundedDelivery',
+    'SettleCheckoutDetails',
+    'StoredCheckoutRequest',
+  ],
   errors: [
     'HostedToolError',
     'runTool',
@@ -650,7 +669,7 @@ const REGISTRATION_SURFACE_EXPORTS = new Set([
 ])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
-const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock'])
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock', 'SettleCheckoutDetails', 'StoredCheckoutRequest'])
 
 /**
  * Exact-name exclusion for symbols that appear on a module namespace at

@@ -416,11 +416,18 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > at authorize (`GET /x402/:id/merchant-call-context` serves it as
 > `checkout_details_request`), read the agent's details again, and send the
 > answer on the paid request. At settle the block is measured on the actual
-> payment header, and a required field that can no longer be shared refuses
-> delivery before the merchant is contacted. An explicitly threaded context,
-> or a challenge too large to store (over 64 KB), has no stored request, so
-> nothing is sent or refused there. The plain-HTTP and state-direct paths
-> follow in the last #4872 PR.
+> payment header. Settle decides BEFORE anything is spent: on EIP-3009 before
+> the funding relay (the agent's header is in hand), on erc7710 availability
+> before the settlement child is submitted and the block right after it; the
+> complete leg, already funded, decides after the funding wait. An explicitly
+> threaded context (the flow the pay tools describe) still reads the stored
+> request; only the merchant URL the payment was quoted for receives the
+> details, and a different one refuses a required field
+> (`merchant_mismatch`). A required request in a challenge too large to store
+> (over 64 KB) is refused at pay time. The answer rides only the paid
+> `tools/call` (`completeX402MerchantCall`'s `paidRequestHeaders`), never the
+> MCP handshake. The plain-HTTP and state-direct paths follow in the last
+> #4872 PR.
 
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers
@@ -471,7 +478,7 @@ request, which is sent after funding.
 |---|---|---|
 | SDK `fetch` and `payX402Quote` | Before `authorizeX402` (lines 1764 and 1479). | A required field that cannot be shared throws `CheckoutDetailsUnavailableError`. No payment is created and no funds move. |
 | SDK `resumeX402Payment` | Before the paid request, after the payment is already funded (line 1638). | The resume reports the refusal and does not send the paid request. The payment stays funded but undelivered. |
-| Hosted MCP-merchant completion | In `haven_pay_mcp_tool` (`packages/mcp-server/src/tools/catalog-purchase.ts`, line 268), after the quote and before `prepareX402Erc7710` or `createX402Intent`. | The tool refuses before the signer is asked to authorise. No payment is created. |
+| Hosted MCP-merchant completion | In `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` (`packages/mcp-server/src/tools/catalog-purchase.ts`), after the quote, cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_settle_mcp_tool` before the funding relay (EIP-3009, with the real header block) or before the settlement child is submitted (erc7710, availability; the block right after submit); in `haven_complete_mcp_tool` after the funding wait. | Before the intent and before the relay or submit: nothing is created or spent. After an erc7710 submit: the settlement is never sent, so nothing is redeemed (`unsent`, start a new purchase). On complete: funded but not delivered (`funded`, complete again once fixed, or verify then sweep). |
 | Hosted state-direct | The same `haven_pay_mcp_tool` check. The `haven_submit` call itself is after authorisation. | The answer rides `retry_headers`. A `haven_submit` call that arrives without the earlier check reports the missing required field in its tool result, and the agent must not send the paid request. On erc7710 there is no funding leg, so nothing has moved. |
 
 ### The machine-readable reason
@@ -491,11 +498,12 @@ created.
 The SDK throws `CheckoutDetailsUnavailableError`, a `HavenApiError` subclass
 with status 409, `failureCause: { kind: 'deterministic' }` and
 `readonly checkoutDetailsErrorCode = 'checkout_details_unavailable'`, carrying
-the fields above on its body. The hosted tools refuse through
-`HostedToolError` (`packages/mcp-server/src/tools/support/errors.ts`) with the
-same code and fields, and a `nextStep` from
-`refusalNextStep({ nextAction: StopAndTellUser })`
-(`packages/mcp-server/src/tools/support/guidance.ts`).
+the fields above on its body, plus `stage` (`before_payment`, `funded` or
+`unsent`, #4872). The hosted tools throw the same SDK error, and the hosted
+`normalizeError` (`packages/mcp-server/src/tools/support/errors.ts`) answers it
+with the same code and fields, a `phase` per stage and a
+`refusalNextStep({ nextAction: StopAndTellUser })` whose omitted reason is the
+stage's: only `before_payment` says to call again.
 
 Status 409 because the request conflicts with the owner's current sharing
 state, and repeating it unchanged gets the same answer. It is not a

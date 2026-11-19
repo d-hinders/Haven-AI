@@ -3174,6 +3174,20 @@ export type CheckoutDetailsRefusalReasonName =
   | 'over_budget'
   | 'unreadable'
   | 'backend_unsupported'
+  /** Hosted settle: the explicit merchant_url is not the one the payment was quoted for, so the owner's data is not sent. */
+  | 'merchant_mismatch'
+
+/**
+ * #4872: where in the purchase the refusal landed, which decides what the
+ * agent may do next:
+ * - `before_payment`: nothing was authorised, funded or sent — call again once
+ *   the owner has fixed it;
+ * - `funded`: an EIP-3009 payment is funded but not delivered — finish it once
+ *   fixed (resume / complete), or verify then sweep;
+ * - `unsent`: an erc7710 settlement was prepared but never sent to the
+ *   merchant, so nothing can be redeemed — start a new purchase once fixed.
+ */
+export type CheckoutDetailsRefusalStage = 'before_payment' | 'funded' | 'unsent'
 
 export class CheckoutDetailsUnavailableError extends HavenApiError {
   readonly checkoutDetailsErrorCode = 'checkout_details_unavailable' as const
@@ -3181,6 +3195,8 @@ export class CheckoutDetailsUnavailableError extends HavenApiError {
     public readonly missingFields: string[],
     public readonly reason: CheckoutDetailsRefusalReasonName,
     message: string,
+    public readonly stage: CheckoutDetailsRefusalStage = 'before_payment',
+    paymentId?: string,
   ) {
     super(
       message,
@@ -3189,9 +3205,10 @@ export class CheckoutDetailsUnavailableError extends HavenApiError {
         code: 'CHECKOUT_DETAILS_UNAVAILABLE',
         missing_fields: missingFields,
         reason,
+        stage,
         next_action: 'stop_and_tell_user',
       },
-      undefined,
+      paymentId,
       { kind: 'deterministic' },
     )
     this.name = 'CheckoutDetailsUnavailableError'

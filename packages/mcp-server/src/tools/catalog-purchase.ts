@@ -338,7 +338,9 @@ export function createCatalogPurchaseHandlers(
           // #4872: a required checkout detail this agent cannot share refuses
           // HERE — after the quote, cap and scheme, before any funding intent
           // or settlement child exists — sized for the option actually paid.
-          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, paySelection.option)
+          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, paySelection.option, {
+            idempotencyKey: args.idempotency_key as string | undefined,
+          })
 
           if (paySelection.scheme === 'erc7710') {
             const prepared = await haven.prepareX402Erc7710(
@@ -991,7 +993,9 @@ export function createCatalogPurchaseHandlers(
           // budget pre-check could both be asked about the option that will
           // actually be authorized rather than a different accepts[] entry.
           // #4872: the same refusal as haven_pay_mcp_tool, before any intent.
-          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, catalogSelection.option)
+          await refuseUnshareableCheckoutDetails(haven, quote.paymentRequired as X402PaymentRequired, catalogSelection.option, {
+            idempotencyKey: args.idempotency_key as string | undefined,
+          })
 
           const catalogCallContext = {
             merchantUrl,

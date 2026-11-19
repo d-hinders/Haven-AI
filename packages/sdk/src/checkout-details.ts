@@ -130,7 +130,8 @@ function base64UrlJson(value: unknown): string {
  * - `not_stored`: sharing is on, but the owner has not saved this field;
  * - `over_budget`: the answer, or the paid request's header block, would exceed its limit;
  * - `unreadable`: Haven's read of the details failed (a network error, a 5xx, an off-contract body);
- * - `backend_unsupported`: Haven's backend has no agent read at all (a 404: older than #4871).
+ * - `backend_unsupported`: Haven's backend has no agent read at all (a 404: older than #4871);
+ * - `merchant_mismatch`: (hosted settle) the explicit merchant URL is not the one the payment was quoted for.
  */
 export type CheckoutDetailsRefusalReason = CheckoutDetailsRefusalReasonName
 

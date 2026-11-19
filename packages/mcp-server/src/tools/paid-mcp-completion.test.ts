@@ -1644,7 +1644,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — rehydration is never called', async () => {
+  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — the stored context never decides where to call', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext')
@@ -1662,7 +1662,10 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       }),
     )
 
-    expect(rehydrateSpy).not.toHaveBeenCalled()
+    // #4872: after the funding wait the stored context IS read — for the
+    // merchant's checkout-details request only, never for where to call. The
+    // call still goes where the explicit merchant_url/tool_name say.
+    expect(rehydrateSpy.mock.calls.length).toBeLessThanOrEqual(1)
     expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
     const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
     expect(envelope.params).toEqual({ name: 'create_text', arguments: { prompt: 'explicit' } })

@@ -544,6 +544,25 @@ function normalizeMerchantEgressError(
 export const CHECKOUT_DETAILS_OMITTED_REASON =
   'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
 
+/**
+ * #4872: the reason per stage. Only `before_payment` may say "retry the same
+ * tool": nothing was spent. A FUNDED refusal must never send the agent back to
+ * haven_settle_mcp_tool (it would relay funding again); an UNSENT erc7710
+ * settlement child is consumed, so only a new purchase works.
+ */
+const CHECKOUT_DETAILS_STAGE_REASON: Record<'before_payment' | 'funded' | 'unsent', string> = {
+  before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
+  funded:
+    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_complete_mcp_tool with this payment_id and payment_header; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
+  unsent:
+    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase (haven_pay_mcp_tool or haven_prepare_catalog_purchase); do not call settle again for this payment',
+}
+const CHECKOUT_DETAILS_STAGE_PHASE: Record<'before_payment' | 'funded' | 'unsent', string> = {
+  before_payment: 'not_started',
+  funded: 'funded_but_unsettled',
+  unsent: 'not_delivered',
+}
+
 export function normalizeError(err: unknown): ToolFailure {
   // #4872: a merchant requires a checkout detail this agent cannot share.
   // The hosted pay tools throw it BEFORE any intent is created, and the
@@ -555,6 +574,7 @@ export function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       ...(err.paymentId ? { paymentId: err.paymentId } : {}),
+      phase: CHECKOUT_DETAILS_STAGE_PHASE[err.stage],
       missing_fields: err.missingFields,
       reason: err.reason,
       next_action: AgentPaymentNextAction.StopAndTellUser,
@@ -562,7 +582,7 @@ export function normalizeError(err: unknown): ToolFailure {
         refusalNextStep({
           nextAction: AgentPaymentNextAction.StopAndTellUser,
           nextTool: null,
-          nextToolOmittedReason: CHECKOUT_DETAILS_OMITTED_REASON,
+          nextToolOmittedReason: CHECKOUT_DETAILS_STAGE_REASON[err.stage],
         }),
       ),
     }

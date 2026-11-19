@@ -79,7 +79,15 @@ import {
   paymentWindowExpiredError,
   runTool,
 } from './support/errors.js'
-import { checkoutDetailsHeaderForSettle } from './support/checkout-details.js'
+import {
+  checkoutDetailsAfterSubmit,
+  checkoutDetailsBeforeSpend,
+  checkoutDetailsForFundedDelivery,
+  type StoredCheckoutRequest,
+} from './support/checkout-details.js'
+
+/** The paid MCP request's own headers (the SDK adds the session, wallet and payment headers). */
+const MERCHANT_REQUEST_HEADERS = { 'Content-Type': 'application/json' } as const
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -121,11 +129,54 @@ export interface ResolvedMerchantCallContext {
   /**
    * #4872: the merchant's checkout-details request, verbatim from the challenge
    * stored at authorize (merchant-call-context). Untrusted; parsed with the
-   * SDK's reader at settle. Absent when the challenge asked for nothing, and
-   * on an explicitly-threaded context (the version-skew path has no stored
-   * challenge to read, so no answer is sent there).
+   * SDK's reader at settle. Read on BOTH paths: an explicitly threaded context
+   * still reads the stored request, and `merchantMismatch` marks an explicit
+   * merchant_url that is not the one the payment was quoted for — the owner's
+   * details are never sent to it. Absent when nothing was stored or asked.
    */
-  checkoutDetailsRequest?: unknown
+  checkoutDetailsStored?: StoredCheckoutRequest
+}
+
+/**
+ * #4872: the stored checkout-details request for an explicitly threaded
+ * context. A failed read (no stored context, a version-skew backend) is no
+ * request. A stored merchant URL that differs from the explicit one marks the
+ * request as a mismatch: a required field then refuses, an optional one is
+ * not sent.
+ */
+async function storedCheckoutRequestFor(
+  haven: HavenClient,
+  paymentId: string,
+  explicitMerchantUrl: string,
+): Promise<{ checkoutDetailsStored?: StoredCheckoutRequest }> {
+  let stored: Awaited<ReturnType<HavenClient['getX402MerchantCallContext']>>
+  try {
+    stored = await haven.getX402MerchantCallContext(paymentId)
+  } catch {
+    return {}
+  }
+  if (stored.checkoutDetailsRequest === undefined) return {}
+  return {
+    checkoutDetailsStored: {
+      value: stored.checkoutDetailsRequest,
+      ...(stored.merchantUrl !== explicitMerchantUrl ? { merchantMismatch: true } : {}),
+    },
+  }
+}
+
+/**
+ * #4872: the documented flow threads the context explicitly, and the intent
+ * still holds the challenge it was authorized against — read its
+ * checkout-details request too. Only for an explicit context (a rehydrated one
+ * already carries it); no stored context is no request.
+ */
+async function explicitCheckoutRequest(
+  haven: HavenClient,
+  args: Record<string, unknown>,
+  context: ResolvedMerchantCallContext,
+): Promise<StoredCheckoutRequest | undefined> {
+  if (typeof args.merchant_url !== 'string') return undefined
+  return (await storedCheckoutRequestFor(haven, args.payment_id as string, context.merchantUrl)).checkoutDetailsStored
 }
 
 /** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
@@ -475,7 +526,7 @@ export async function resolveMerchantCallContext(
       // catalog entry (the stored context carries it); absent on a direct
       // haven_pay_mcp_tool purchase.
       catalogName: ctx.catalogName ?? null,
-      ...(ctx.checkoutDetailsRequest !== undefined ? { checkoutDetailsRequest: ctx.checkoutDetailsRequest } : {}),
+      ...(ctx.checkoutDetailsRequest !== undefined ? { checkoutDetailsStored: { value: ctx.checkoutDetailsRequest } } : {}),
       mcpTransport: parseMcpTransport(
         ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
       ),
@@ -715,7 +766,12 @@ export async function deliverMerchantPayment(
   fundingTxHash?: string,
   // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
   // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
-  options?: { noFundingLeg?: boolean; context?: ResolvedMerchantCallContext },
+  options?: {
+    noFundingLeg?: boolean
+    context?: ResolvedMerchantCallContext
+    /** #4872: the checkout-details answer the settle handler already decided before spending. */
+    checkoutDetails?: { header: string | undefined }
+  },
 ): Promise<{
   status: number
   ok: boolean
@@ -744,20 +800,7 @@ export async function deliverMerchantPayment(
   // their own tool name and run before any submit — never here.)
   const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
 
-  // #4872: the checkout-details answer for the paid request this server is
-  // about to send, measured on the ACTUAL payment header. A required field
-  // that can no longer be shared (sharing turned off since the pay tool's
-  // check) or that does not fit refuses delivery here — before the funding
-  // wait and before the merchant is contacted. The values stay in memory:
-  // never stored, logged or returned.
-  const requestHeaders = { 'Content-Type': 'application/json' }
-  const checkoutDetailsHeader = await checkoutDetailsHeaderForSettle(haven, {
-    storedRequest: context.checkoutDetailsRequest,
-    paymentHeader: args.payment_header,
-    requestHeaders,
-    noFundingLeg: options?.noFundingLeg === true,
-    paymentId: args.payment_id,
-  })
+  const requestHeaders = MERCHANT_REQUEST_HEADERS
 
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
@@ -777,6 +820,23 @@ export async function deliverMerchantPayment(
     await ensureFundingConfirmedOrRefuse(haven, args.payment_id, fundingTxHash)
   }
 
+  // #4872: the checkout-details answer. The settle handler decides it BEFORE
+  // anything is spent and hands it in; haven_complete_mcp_tool's payment is
+  // already funded, so it is decided here, after the funding wait, and a
+  // refusal is `funded` (not delivered). The values stay in memory and ride
+  // only the paid request — never the MCP handshake, never a result or log.
+  const checkoutDetailsHeader = options?.checkoutDetails
+    ? options.checkoutDetails.header
+    : await checkoutDetailsForFundedDelivery(haven, {
+        // An explicitly threaded context reads the stored request only here,
+        // after the funding wait — the payment is then known to be funded.
+        stored: context.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, context)),
+        paymentHeader: args.payment_header,
+        requestHeaders,
+        paymentId: args.payment_id,
+        noFundingLeg: options?.noFundingLeg === true,
+      })
+
   const envelope = {
     jsonrpc: '2.0',
     id: `haven-mcp-${randomUUID()}`,
@@ -789,14 +849,13 @@ export async function deliverMerchantPayment(
       url: context.merchantUrl,
       init: {
         method: 'POST',
-        headers: checkoutDetailsHeader
-          ? { ...requestHeaders, [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader }
-          : requestHeaders,
+        headers: requestHeaders,
         body: JSON.stringify(envelope),
       },
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: context.mcpTransport,
+      ...(checkoutDetailsHeader ? { paidRequestHeaders: { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader } } : {}),
       // #3778: the validated non-secret delivery pointer — recorded on the
       // evidence row when the merchant accepted, so the owner's receipt and
       // dashboard show a deliverable exists.
@@ -1611,6 +1670,18 @@ export function createPaidMcpCompletionHandlers(
             throw egressRefusalBeforeIntent(err, 'merchant_url')
           }
         }
+        // #4872: checkout details are decided HERE, before the funding relay
+        // and before the erc7710 submit — the same move #2282 made for the
+        // context refusal. On EIP-3009 the agent's payment header is in hand,
+        // so the real block is measured now; on erc7710 only availability can
+        // be decided (Haven assembles that header at submit), and the block
+        // is checked right after the submit, before anything is sent.
+        const checkoutDetails = await checkoutDetailsBeforeSpend(haven, {
+          stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
+          paymentHeader: args.payment_header,
+          requestHeaders: MERCHANT_REQUEST_HEADERS,
+          paymentId: args.payment_id,
+        })
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
@@ -1641,6 +1712,11 @@ export function createPaidMcpCompletionHandlers(
           // and the merchant is NOT called again.
           if (typeof submitted !== 'string') return submitted.settledReplay
           const paymentHeader = submitted
+          const checkoutDetailsHeader7710 = checkoutDetailsAfterSubmit(checkoutDetails, {
+            paymentHeader,
+            requestHeaders: MERCHANT_REQUEST_HEADERS,
+            paymentId: args.payment_id,
+          })
           const merchant7710 = await deliverMerchantPayment(
             haven,
             { ...args, payment_header: paymentHeader },
@@ -1651,7 +1727,7 @@ export function createPaidMcpCompletionHandlers(
             // the payment status unconditionally, which is a 409 here because
             // the settle above already moved the intent to 'submitted'. Say
             // "there is no funding leg" explicitly instead of implying it.
-            { noFundingLeg: true, context: merchantContext },
+            { noFundingLeg: true, context: merchantContext, checkoutDetails: { header: checkoutDetailsHeader7710 } },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
           // #2970: "settled" means Haven VERIFIED the settlement on-chain, not
@@ -1847,6 +1923,8 @@ export function createPaidMcpCompletionHandlers(
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash, {
           context: merchantContext,
+          // #4872: decided before the funding relay, above.
+          checkoutDetails: { header: checkoutDetails.header },
         })
         // #1310: rail-aware remaining-budget summary so the agent can report
         // spend without a separate haven_get_agent/haven_get_allowances round

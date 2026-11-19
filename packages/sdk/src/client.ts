@@ -1880,6 +1880,13 @@ export class HavenClient {
      */
     noFundingLeg?: boolean
     /**
+     * #4872: headers for the PAID request only (the `tools/call` that carries
+     * the payment header) — never the unpaid MCP `initialize` or
+     * `notifications/initialized` handshake, which read `init`. The hosted
+     * settle leg passes the checkout-details answer here.
+     */
+    paidRequestHeaders?: Record<string, string>
+    /**
      * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
      * 6ac7…") threaded from haven_settle_mcp_tool / haven_complete_mcp_tool.
      * Recorded on the evidence row when the merchant accepted, so the owner's
@@ -1938,6 +1945,11 @@ export class HavenClient {
 
     let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
     if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
+    if (input.paidRequestHeaders) {
+      const paidHeaders = new Headers(requestInit.headers)
+      for (const [name, value] of Object.entries(input.paidRequestHeaders)) paidHeaders.set(name, value)
+      requestInit = { ...requestInit, headers: paidHeaders }
+    }
 
     // #3171: same session recovery as `retryRequest` — the hosted twin of the
     // local paid retry must not report a settled-nothing 404 as a rejection.

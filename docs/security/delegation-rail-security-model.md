@@ -1671,7 +1671,13 @@ signer imports:
   agent's own details and attaches them to the paid request it sends at
   settle, in memory only — never stored, logged or returned — and refuses
   before any intent (or, at settle, before the merchant is contacted) when a
-  required field cannot be shared. The design is
+  required field cannot be shared. On the hosted plain-HTTP path the agent
+  sends the paid request itself, so `haven_submit` returns the answer in its
+  retry headers for that request, and only there in the result; it decides
+  before it relays the funding signature or submits the settlement child, and
+  still never stores or logs the values. The new read it uses, `GET
+  /x402/:id/payment-required`, re-serves only the merchant's own challenge to
+  the agent that created the intent. The design is
   `docs/architecture/13-checkout-details.md`.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly

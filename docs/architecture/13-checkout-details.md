@@ -17,6 +17,8 @@ covers:
   - packages/mcp-server/src/tools/paid-mcp-completion.ts
   - packages/mcp-server/src/tools/state-direct-recovery.ts
   - packages/mcp-server/src/tools/catalog-purchase.ts
+  - packages/mcp-server/src/tools/plain-http-x402.ts
+  - packages/backend/src/modules/x402/stored-challenge.ts
   - packages/mcp-server/src/tools/support/errors.ts
   - packages/mcp-server/src/tools/support/guidance.ts
   - packages/mcp-server/src/tools/support/checkout-details.ts
@@ -427,8 +429,23 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > (`merchant_mismatch`). A required request in a challenge too large to store
 > (over 64 KB) is refused at pay time. The answer rides only the paid
 > `tools/call` (`completeX402MerchantCall`'s `paidRequestHeaders`), never the
-> MCP handshake. The plain-HTTP and state-direct paths follow in the last
-> #4872 PR.
+> MCP handshake. The hosted plain-HTTP path is supported too (#4872 part 2b):
+> `haven_pay_x402_quote` refuses before any intent, sized for the option paid,
+> in both its payment_required and request modes. On that path the agent sends
+> the paid request itself, so `haven_submit` reads the merchant's request back
+> from the challenge stored at authorize (`GET /x402/:id/payment-required`),
+> reads the agent's details, and decides before it spends: on EIP-3009 before
+> the funding relay, with the block ESTIMATED from the stored challenge (the
+> agent's payment header never reaches this tool); on erc7710 availability
+> before the settlement child is submitted and the real block right after it.
+> The answer comes back in the result for the agent's own retry: in
+> `retry_headers` on erc7710, in `additional_retry_headers` on EIP-3009. It is
+> returned only when the payment did not come from the MCP-tool flow, where
+> `haven_complete_mcp_tool` sends it itself. When the stored challenge cannot
+> be read, the submit proceeds as today and sends no answer (§5, "A path that
+> is not supported"); the pay tool has already refused any required field the
+> agent could not share. On EIP-3009 the answer comes back only once the relay
+> has confirmed: a relay that is still `submitted` returns none.
 
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers
@@ -441,7 +458,9 @@ the request and refuses before payment when a required field cannot be shared.
 | SDK `resumeX402Payment` (`packages/sdk/src/client.ts`, line 1638) | **Supported in this epic**, with the funded-payment rule in section 5. | The same seam, after the resume re-signs the payment header. |
 | Local MCP tools (`packages/mcp/src/tools.ts`, lines 879, 1043 and 1057) | **Supported in this epic.** | They call `haven.fetch` and `haven.payX402Quote`, so they reach the same seam. |
 | Hosted MCP-merchant completion (`packages/mcp-server/src/tools/paid-mcp-completion.ts`, lines 760 to 762, into `completeX402MerchantCall` at `packages/sdk/src/client.ts` line 1825) | **Supported in this epic.** | Haven's server sends the paid request itself and adds the header to the request it sends. |
-| Hosted state-direct path (`packages/mcp-server/src/tools/state-direct-recovery.ts`, lines 1024 to 1026, the `haven_submit` tool) | **Supported in this epic.** | Haven's server adds the header to the `retry_headers` it returns; the agent sends the paid request itself. |
+| Hosted plain-HTTP pay tool (`packages/mcp-server/src/tools/plain-http-x402.ts`, the `haven_pay_x402_quote` tool) | **Supported in this epic.** | None here: it refuses before any intent. The answer is attached by the state-direct `haven_submit` below. |
+| Hosted state-direct path (`packages/mcp-server/src/tools/state-direct-recovery.ts`, the `haven_submit` tool) | **Supported in this epic**, on both schemes. | Haven's server adds the header to the `retry_headers` it returns on erc7710, and returns it as `additional_retry_headers` on EIP-3009 (the signer builds that scheme's `retry_headers`); the agent sends the paid request itself. |
+| Hosted `haven_resume_x402_payment` | **Not supported, because** it resumes from the same resume state as the local `payment_id` resume, which carries no merchant `extensions`. Its description says a resume sends no answer. | None. The funded payment is delivered as today. |
 | A resume by `payment_id` alone (the local `haven_resume_x402_payment { payment_id }`, which reads `GET /payments/:id/resume_state`) | **Not supported, because** the stored resume state rebuilds `paymentRequired` without the merchant's `extensions`, so there is no request to answer or refuse. A resume from a preserved `resume_state` that carries the challenge is supported. | None. The funded payment is delivered as today. |
 | SDK tool adapter `authorize_x402_payment` (`packages/sdk/src/client.ts`, line 2286) and `resume_x402_payment` (line 2309) | **Not supported, because** they rebuild the challenge from tool arguments with `toolX402PaymentRequired`, which carries no `extensions` (`packages/sdk/src/tool-adapter.ts` has no `extensions` at all), so they can neither answer nor refuse. | None. The purchase is paid as today. |
 | An integrator calling `POST /x402/authorize` directly | **Not supported, because** the request carries the payment requirements the integrator supplies, not the merchant's challenge, so Haven never sees the merchant's request. | None. The purchase is paid as today. |
@@ -480,7 +499,7 @@ request, which is sent after funding.
 | SDK `fetch` and `payX402Quote` | Before `authorizeX402` (lines 1764 and 1479). | A required field that cannot be shared throws `CheckoutDetailsUnavailableError`. No payment is created and no funds move. |
 | SDK `resumeX402Payment` | Before the paid request, after the payment is already funded (line 1638). | The resume reports the refusal and does not send the paid request. The payment stays funded but undelivered. |
 | Hosted MCP-merchant completion | In `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` (`packages/mcp-server/src/tools/catalog-purchase.ts`), after the quote, cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_settle_mcp_tool` before the funding relay (EIP-3009, with the real header block) or before the settlement child is submitted (erc7710, availability; the block right after submit); in `haven_complete_mcp_tool` after the funding wait. | Before the intent and before the relay or submit: nothing is created or spent. After an erc7710 submit: the settlement is never sent, so nothing is redeemed (`unsent`, start a new purchase). On complete: funded but not delivered (`funded`, complete again once fixed, or verify then sweep). |
-| Hosted state-direct | The same `haven_pay_mcp_tool` check. The `haven_submit` call itself is after authorisation. | The answer rides `retry_headers`. A `haven_submit` call that arrives without the earlier check reports the missing required field in its tool result, and the agent must not send the paid request. On erc7710 there is no funding leg, so nothing has moved. |
+| Hosted state-direct (plain HTTP) | In `haven_pay_x402_quote`, after the cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_submit` before the funding relay (EIP-3009, availability and the estimated block) or before the settlement child is submitted (erc7710, availability; the real block right after the submit). | Before the intent and before the relay or submit: nothing is created or spent (`before_payment`, which on `haven_submit` stands only while the intent is still `pending_signature`, as on settle). After an erc7710 submit: no `payment_header` is returned, so nothing can be redeemed (`unsent`). An EIP-3009 `haven_submit` of the decomposed MCP-tool flow refuses before the relay too, where it used to be decided only after funding by `haven_complete_mcp_tool`. |
 
 ### The machine-readable reason
 
@@ -504,15 +523,16 @@ the fields above on its body, plus `stage` (`before_payment`, `funded`,
 `normalizeError` (`packages/mcp-server/src/tools/support/errors.ts`) answers it
 with the same code and fields, a `phase` per stage and a
 `refusalNextStep({ nextAction: StopAndTellUser })` whose omitted reason is the
-stage's: only `before_payment` says to call again. On the hosted settle leg a
-`before_payment` refusal stands only while the intent is still
-`pending_signature`; a repeated settle of a payment that already moved gets
-the submit's or relay's own answer instead (the settled replay on erc7710), and
-its message there is "Nothing was funded, submitted or sent for this payment",
-since the intent exists. When the payment's state cannot be read, the refusal
-still stands (nothing is spent), with a fourth stage, `state_unknown` (hosted
-`phase: unknown`): it says an earlier settle may already have funded or settled
-the payment, and to check `haven_get_payment_status` before a new purchase.
+stage's: only `before_payment` says to call again. On the hosted settle leg
+and the plain-HTTP `haven_submit` a `before_payment` refusal stands only while
+the intent is still `pending_signature`; a repeated settle or submit of a
+payment that already moved gets the submit's or relay's own answer instead
+(the settled replay on erc7710), and its message there is "Nothing was funded,
+submitted or sent for this payment", since the intent exists. When the
+payment's state cannot be read, the refusal still stands (nothing is spent),
+with a fourth stage, `state_unknown` (hosted `phase: unknown`): it says an
+earlier settle or submit may already have funded or settled the payment, and
+to check `haven_get_payment_status` before a new purchase.
 
 Status 409 because the request conflicts with the owner's current sharing
 state, and repeating it unchanged gets the same answer. It is not a
@@ -575,7 +595,7 @@ Per supported path, whether the values pass through a Haven server:
 | SDK `fetch`, `payX402Quote`, `resumeX402Payment` | No. The SDK builds the answer locally from the backend read and sends it to the merchant. |
 | Local MCP tools | No. They reach the same SDK seam. |
 | Hosted MCP-merchant completion | Yes. Haven's server builds the answer and sends the paid request. It neither stores nor logs the values. |
-| Hosted state-direct | Yes. Haven's server builds the answer into `retry_headers`; the agent sends it. It neither stores nor logs the values. |
+| Hosted state-direct | Yes. Haven's server builds the answer into `retry_headers` (erc7710) or `additional_retry_headers` (EIP-3009) and returns it in the `haven_submit` result, and nowhere else in it; the agent sends it. It neither stores nor logs the values. |
 
 ### What is logged
 

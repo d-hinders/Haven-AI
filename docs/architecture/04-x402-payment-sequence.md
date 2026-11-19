@@ -202,7 +202,12 @@ the fields asked for. These paths pay the EIP-3009 option. On the hosted
 MCP-merchant completion (`haven_settle_mcp_tool`, `haven_complete_mcp_tool`)
 Haven's server attaches the same header to the paid request it sends, on
 either scheme, after the pay tools refused any required field the agent could
-not share before the intent. It is unsigned, goes to the merchant
+not share before the intent. On the hosted plain-HTTP path
+(`haven_pay_x402_quote`, then `haven_submit`) the agent sends the paid retry
+itself: `haven_submit` reads the merchant's request back from the stored
+challenge (`GET /x402/:id/payment-required`), decides before the funding relay
+or the settlement submit, and returns the header for that retry, in
+`retry_headers` on erc7710 and in `additional_retry_headers` on EIP-3009. It is unsigned, goes to the merchant
 only, and is never merged into the echoed `extensions` in `PAYMENT-SIGNATURE`.
 It is decided before `authorizeX402`: a required field this agent cannot share
 refuses the purchase with `CHECKOUT_DETAILS_UNAVAILABLE` before any payment is

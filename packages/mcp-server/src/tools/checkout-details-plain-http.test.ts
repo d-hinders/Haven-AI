@@ -210,6 +210,9 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', reason: 'over_budget', phase: 'not_delivered' })
       expect(JSON.stringify(out)).not.toContain('h'.repeat(64))
       expect(out.next_tool_omitted_reason).toContain('start a new purchase')
+      // This path's own pay tool and leg, not only the MCP-merchant flow's.
+      expect(out.next_tool_omitted_reason).toContain('haven_pay_x402_quote')
+      expect(out.next_tool_omitted_reason).toContain('do not settle or submit this payment again')
     })
 
     it('a REPEATED submit of a payment that already settled, sharing now off: the settled replay, never "nothing moved"', async () => {
@@ -227,6 +230,7 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       const out = fail(await createToolHandlers(haven).haven_submit(SUBMIT))
       expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'unknown' })
       expect(out.message).not.toContain('Nothing was funded')
+      expect(out.next_tool_omitted_reason).toContain('haven_submit')
       expect(submit).not.toHaveBeenCalled()
     })
 

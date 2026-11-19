@@ -154,6 +154,32 @@ last-verified: "2026-11-12"
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
 
+> **Contract change (#4872, part 2b, 2026-11-19): checkout details on the
+> hosted plain-HTTP path.** `packages/mcp-server/src/tools/**` is on this
+> contract's cover list. `haven_pay_x402_quote` refuses a required checkout
+> detail the agent cannot share with the part 2a refusal shape
+> (`CHECKOUT_DETAILS_UNAVAILABLE`, `statusCode: 409`, `missing_fields`,
+> `reason`, `phase`, a `stop_and_tell_user` step) before any intent, in both
+> modes. `haven_submit` with a `payment_id` decides before the funding relay
+> (EIP-3009) or the settlement submit (erc7710; the real header block right
+> after it) and returns the answer for the agent's own retry: erc7710's
+> `retry_headers` gains `X-Checkout-Details`, and an EIP-3009 result gains the
+> optional `additional_retry_headers` (`{ "X-Checkout-Details": … }`), absent
+> on the MCP-tool flow and whenever nothing was asked; its `reason` then says
+> to set them. A challenge that asks for nothing gets today's result. The
+> `unsent` and `state_unknown` next steps now name both legs (settle or
+> submit) and `haven_pay_x402_quote`. New backend read: `GET
+> /x402/:id/payment-required`.
+>
+> **What an installed client sees.** `haven_pay_x402_quote`, `haven_submit` and
+> `haven_resume_x402_payment` gain one sentence each (`tools-list.snapshot.json`
+> regenerated; the description budget is round 36 in
+> `description-size.test.ts`). No tool name, argument, input schema,
+> strict-input list, expected-context version, consent hash or
+> `next-arguments-corpus.json` row changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-plain-http.test.ts`.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4872, part 2a, 2026-11-19): checkout details on the
 > hosted MCP-merchant tools.** `packages/mcp-server/src/tools/**` is on this
 > contract's cover list. `haven_pay_mcp_tool` and

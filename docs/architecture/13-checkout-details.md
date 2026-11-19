@@ -447,7 +447,12 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > be read, the submit proceeds as today and sends no answer (§5, "A path that
 > is not supported"); the pay tool has already refused any required field the
 > agent could not share. On EIP-3009 the answer comes back only once the relay
-> has confirmed: a relay that is still `submitted` returns none.
+> has confirmed: a relay that is still `submitted` returns none, and a later
+> `haven_submit` gets the relay's own answer, not the header. Such a payment is
+> funded but its retry carries no answer, so a merchant that requires the
+> field may refuse it; the recourse is the shipped verify-then-sweep rule
+> (`haven_get_payment_status`, then `haven_sweep_delegate`), as for any funded
+> but undelivered payment (§5).
 
 The census below covers every path the issue names, plus the local MCP tools
 that reach the same SDK seam. "Supported in this epic" means the path answers

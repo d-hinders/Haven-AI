@@ -383,7 +383,7 @@ challenge (402) and no `mcp-session-id`, and the SDK falls back cleanly, at the
 cost of one extra unpaid request against the per-IP limit. A product with an
 `input_schema` and no `model` answers that `initialize` body 400
 `invalid_request_body` instead (section 3), unless its schema admits it, and a
-product that pins a `model` answers it 400 `bad_request`, because the `model`
+product that pins a `model` answers it 400 `model_required`, because the `model`
 check runs first; when listing is built
 (#4887), that probe must still reach its 402, so this answer needs a decision
 there.
@@ -1215,6 +1215,10 @@ The proxy refuses a request whose cap it cannot set, before settlement, with
 400 and `reason: "cap_not_settable"`: the body is not a JSON object, the route
 is not the product's route, or the product has a cap and the body is not a chat
 completions request. It does not forward a request whose cap it could not set.
+A JSON object with no `messages` field at all is the narrower answer
+`messages_required`, with `field: "/messages"` (#4989): the field the cap is set
+on is missing, not the shape of the request. A body that has a `messages` field
+the cap still cannot be set on keeps `cap_not_settable`.
 
 The cap is advisory on the upstream API. When the upstream delivers more than
 was paid for, the merchant absorbs the overage: the price is fixed, the buyer
@@ -1260,17 +1264,58 @@ reserve, the chain read, verify, the upstream slot wait, and settle. An unpaid
 request runs the same body checks before it is given the challenge, so a body
 that fails them is refused before a payment is ever signed.
 
+### A way in, and a wrong method (#4989)
+
+An agent given only the base URL has to be able to find the products. `GET /`
+(unless the products file sells `GET /`) and every unknown path answer 404
+`unknown_route` with `discovery_url`: the absolute URL of the discovery
+document, `<origin>/.well-known/x402`, which is where the products are listed.
+The origin is `PUBLIC_BASE_URL` when set, otherwise the request's `Host`. It is
+still a 404 for an unknown path, and the discovery document is still served
+outside `BASE_PATH`.
+
+A path that is sold, but not with the request's method, is a 405
+`method_not_allowed` with an `Allow` header listing the methods it is sold with,
+and `expected` carrying the same list. `HEAD` is not a sold method (the products
+file's methods are `GET`, `POST`, `PUT`, `PATCH` and `DELETE`), so it gets the
+405 too. `OPTIONS` answers 204 with the same `Allow` and no body. Neither makes
+a facilitator call.
+
+### The shape of a refusal (#4989)
+
+Every refusal body is JSON with `error` (a code) and `message` (words), and may
+add:
+
+| Field | Meaning |
+|---|---|
+| `field` | The field the request got wrong. A JSON pointer into the body (`/messages`, `/model`) for a body refusal; a dotted path into the payment payload (`accepted.amount`, `payload.authorization.value`) for a payment refusal. |
+| `expected` | What would be accepted: the models sold on the route, the quoted value, the methods a path is sold with. |
+| `next` | What to do next, in words. |
+
+Each field carries only what the discovery document or the challenge already
+publishes, so the no-oracle rules below still hold.
+
+The unpaid 402 body is one shape with every other 402: `error` is a code
+(`payment_required`) and `message` is a sentence. The `PAYMENT-REQUIRED` header
+is still encoded from the challenge itself, whose `error` stays the sentence
+"Payment required", so the header is byte-identical to before.
+
 ### Before settlement (unknown key)
 
 | Condition | Status | Body `error` | Challenge? | Haven classification | Buyer recourse |
 |---|---|---|---|---|---|
-| No payment header, route is a product | 402 | the x402 challenge | Yes, in `PAYMENT-REQUIRED` | No payment yet | Pay the challenge |
-| Payment header does not match the challenge (network, asset, `pay_to`, amount, product) | 402 | `payment_mismatch` | Yes | Rejected after funding if the agent had funded | Verify, then sweep the delegate |
+| No payment header, route is a product | 402 | `payment_required`, with `message`; the challenge is in `PAYMENT-REQUIRED` | Yes, in `PAYMENT-REQUIRED` | No payment yet | Pay the challenge |
+| Payment header does not match the challenge (network, asset, `pay_to`, amount, product) | 402 | `payment_mismatch`, with `field` and `expected` when exactly one quoted option shares the payment's method, scheme and network | Yes | Rejected after funding if the agent had funded | Fix the field named; verify, then sweep the delegate |
+| The payment header cannot be read, or decodes without the payload fields | 402 | `payment_invalid`; when it decodes, `field` names the missing field (`payload`, `payload.authorization`, `payload.signature`, `payload.authorization.<field>`) and `next` says what to send | Yes | Rejected after funding if funded | Fix the field named; verify, then sweep the delegate |
 | The facilitator rejects the payment at verify | 402 | `payment_invalid` | Yes | Rejected after funding if funded | Verify, then sweep the delegate |
 | Settle failed and the authorization is unused (the facilitator answered a definite failure, and no transfer is found on the chain) | 402 | `settle_failed` | Yes | Rejected after funding if funded | Verify, then sweep the delegate |
-| Route is not in the products file | 404 | `unknown_route` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Route is not in the products file, including `GET /` | 404 | `unknown_route`, with `discovery_url` | No | Rejected after funding if paid | Read the products at `discovery_url`; verify, then sweep the delegate |
+| The path is sold, but not with this method | 405 | `method_not_allowed`, with `expected` and an `Allow` header | No | Rejected after funding if paid | Retry with a method in `Allow`; verify, then sweep the delegate |
 | The product has an `input_schema` and the body fails it: not JSON, a non-JSON Content-Type, or a schema rule (section 3) | 400 | `invalid_request_body`, with `errors` | No | Rejected after funding if paid | Fix the body named by `errors`; if funded, verify, then sweep the delegate |
-| Body is not JSON, or `model` does not match the product (for the JSON case: the product, or on a shared route any product on it, has no `input_schema`) | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| Body is not JSON (the product, or on a shared route any product on it, has no `input_schema`) | 400 | `bad_request` | No | Rejected after funding if paid | Verify, then sweep the delegate |
+| The route sells by `model` and the body has none | 400 | `model_required`, with `field: "/model"` and `expected` listing the models sold on the route | No | Rejected after funding if paid | Send one of the models in `expected`; verify, then sweep the delegate |
+| The route sells by `model` and the body's `model` is not sold there | 400 | `model_not_sold`, with `field: "/model"` and `expected` listing the models sold on the route | No | Rejected after funding if paid | Send one of the models in `expected`; verify, then sweep the delegate |
+| Product has a cap and the body has no `messages` field | 400 | `messages_required`, with `field: "/messages"` | No | Rejected after funding if paid | Send a chat-completions body; verify, then sweep the delegate |
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Body over 1 MiB | 413 | `body_too_large` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Rate limit: an unpaid request, or an unknown-key payment header from an IP over the limit (section 7) | 429 | `rate_limited` | No | No payment yet; rejected after funding if a Haven agent funded its delegate | Retry after `Retry-After`; verify, then sweep the delegate if funded |
@@ -1278,8 +1323,16 @@ that fails them is refused before a payment is ever signed.
 | No verify capacity (before reserve), or no upstream slot within 10 s after verify (the reservation is released; nothing settled) | 503 | `at_capacity` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 | Proxy not ready (missing upstream key) | 503 | `not_ready` | No | Rejected after funding if paid | Verify, then sweep the delegate |
 
+**Precedence with `input_schema` (#4988, #4989).** The product is picked by
+`model` before its `input_schema` runs, so a missing or unsold `model` answers
+`model_required` / `model_not_sold` whatever the schema says. `messages_required`
+is the other way round: a product whose schema requires `messages` answers
+`invalid_request_body` first, and `messages_required` applies to products
+without a schema.
+
 Every refusal body is JSON with `error`, a human `message`, and, where it
-applies, `retry_after_seconds`. `invalid_request_body` adds `errors`: the
+applies, `retry_after_seconds`, `field`, `expected` and `next` (see *The shape
+of a refusal*). `invalid_request_body` adds `errors`: the
 first failure the validator finds (Ajv's `allErrors` is off, so a large array
 cannot build one error per element), and never more than 10 entries of `{ path, rule }`, each string at most 200 characters, where
 `path` is a JSON pointer into the body (`""` for the body itself, and a

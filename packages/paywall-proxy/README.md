@@ -322,13 +322,18 @@ readable body, so Haven never reads a payment that reached you as rejected.
 
 | Condition | Status | Body `error` |
 |---|---|---|
-| No payment header, route is a product | 402 | the x402 challenge |
-| Payment does not match the challenge | 402 | `payment_mismatch` |
+| No payment header, route is a product | 402 | `payment_required`, with `message`; the challenge is in `PAYMENT-REQUIRED` |
+| Payment does not match the challenge | 402 | `payment_mismatch`, with `field` and `expected` when exactly one quoted option shares the payment's method, scheme and network |
+| The payment header cannot be read, or decodes without the payload fields | 402 | `payment_invalid`; when it decodes, `field` names the missing field (`payload`, `payload.authorization`, `payload.signature`, `payload.authorization.<field>`) and `next` says what to send |
 | The facilitator rejects the payment at verify | 402 | `payment_invalid` |
 | Settle failed and the authorization is unused | 402 | `settle_failed` |
-| Route is not in the products file | 404 | `unknown_route` |
+| Route is not in the products file, including `GET /` | 404 | `unknown_route`, with `discovery_url` |
+| The path is sold, but not with this method | 405 | `method_not_allowed`, with `expected` and an `Allow` header |
 | The product has an `input_schema` and the body fails it (not JSON, not sent as JSON, or a schema rule) | 400 | `invalid_request_body`, with `errors` |
-| Body is not JSON (no `input_schema`), or `model` does not match | 400 | `bad_request` |
+| Body is not JSON (no `input_schema`) | 400 | `bad_request` |
+| The route sells by `model` and the body has none | 400 | `model_required`, with `field: "/model"` and `expected` |
+| The route sells by `model` and the body's `model` is not sold there | 400 | `model_not_sold`, with `field: "/model"` and `expected` |
+| Product has a cap and the body has no `messages` field | 400 | `messages_required`, with `field: "/messages"` |
 | Product has a cap and the body cannot carry it | 400 | `cap_not_settable` |
 | Body over 1 MiB | 413 | `body_too_large` |
 | Too many unpaid or unverified requests from one address | 429 | `rate_limited` |
@@ -338,6 +343,15 @@ readable body, so Haven never reads a payment that reached you as rejected.
 | Same payment after its call was delivered | 200 | `payment_already_delivered` |
 | A retry that needs a `SIGN-IN-WITH-X` proof | 200 | `payment_retry_needs_proof` |
 | Settle outcome not known yet | 503 | `settlement_unknown` |
+
+Every refusal carries `error` (a code) and `message` (words), and may add
+`field` (the field the request got wrong: a JSON pointer into the body such as
+`/messages`, or a dotted path into the payment payload such as
+`accepted.amount`), `expected` (what would be accepted) and `next` (what to do
+next). An unknown path also carries `discovery_url`, the absolute URL of the
+discovery document, so an agent given only your base URL can find the products.
+`OPTIONS` on a sold path answers 204 with the same `Allow` header and makes no
+facilitator call.
 
 The full table, with the buyer's recourse for each, is section 8 of the design.
 

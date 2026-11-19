@@ -71,14 +71,56 @@ export interface Eip3009Authorization {
  */
 export type DecisionReasonCode = 'facilitator_refused' | 'facilitator_retryable'
 
+/**
+ * #4989: the refusal code a merchant answers with when a payment does not
+ * match its quote (`payment_mismatch`) or is not a payment at all
+ * (`payment_invalid`). Carried on the error so a merchant reads a code
+ * instead of matching on the message text.
+ */
+export type PaymentErrorCode = 'payment_mismatch' | 'payment_invalid'
+
+/**
+ * #4989: what a refusal names beyond its message, so an agent can act on it
+ * without parsing prose. Every field is optional and additive: the message
+ * stays byte-identical, so a consumer that only reads `message` is unaffected.
+ */
+export interface PaymentErrorDetails {
+  /** The refusal code the merchant answers with. */
+  code?: PaymentErrorCode
+  /**
+   * The field the payment got wrong, as a dotted path into the payment
+   * payload (`accepted.amount`, `payload.authorization.nonce`).
+   */
+  field?: string
+  /** What would be accepted: the quoted value, or the list of accepted values. */
+  expected?: unknown
+  /** What to do next, in words. */
+  next?: string
+}
+
 export class PaymentError extends Error {
+  /** #4989: the refusal code, when the error is a mismatch with the quote or an invalid payment. */
+  readonly code?: PaymentErrorCode
+  /** #4989: the field the payment got wrong, as a dotted path into the payment payload. */
+  readonly field?: string
+  /** #4989: what would be accepted. */
+  readonly expected?: unknown
+  /** #4989: what to do next, in words. */
+  readonly next?: string
+
   constructor(
     message: string,
     /** #4851: present only on the CDP path's refusals — see `DecisionReasonCode`. */
     readonly reasonCode?: DecisionReasonCode,
+    /** #4989: the machine-readable extras this refusal carries. */
+    details: PaymentErrorDetails = {},
   ) {
     super(message)
     this.name = 'PaymentError'
+    this.code = details.code
+    this.field = details.field
+    this.expected = details.expected
+    this.next = details.next
   }
 }
 
@@ -171,6 +213,66 @@ export function paymentMethod(accepted: PaymentRequirements): string {
   return method
 }
 
+/** The fields a payment's `accepted` option is compared on, in the order a refusal names them. */
+const QUOTED_OPTION_FIELDS = ['method', 'scheme', 'network', 'amount', 'maxTimeoutSeconds', 'payTo', 'asset'] as const
+type QuotedOptionField = (typeof QUOTED_OPTION_FIELDS)[number]
+
+/** The dotted path into the payment payload for one compared field. */
+function quotedOptionPath(field: QuotedOptionField): string {
+  return field === 'method' ? 'accepted.extra.assetTransferMethod' : `accepted.${field}`
+}
+
+/** The quoted value for one compared field, as the refusal's `expected`. */
+function quotedOptionValue(option: PaymentRequirements, field: QuotedOptionField): unknown {
+  return field === 'method' ? paymentMethod(option) : option[field]
+}
+
+/** The first compared field on which `accepted` differs from `quoted`, or undefined when none does. */
+function firstDifferingField(quoted: PaymentRequirements, accepted: PaymentRequirements): QuotedOptionField | undefined {
+  for (const field of QUOTED_OPTION_FIELDS) {
+    if (field === 'payTo' || field === 'asset') {
+      if (!sameAddress(quoted[field], accepted[field])) return field
+    } else if (quotedOptionValue(quoted, field) !== quotedOptionValue(accepted, field)) {
+      return field
+    }
+  }
+  return undefined
+}
+
+/**
+ * #4989: the refusal for a payment whose `accepted` option matches no quoted
+ * option. The message is unchanged; the field is named only when the payment
+ * could have meant exactly one quoted option — when the challenge advertises
+ * several rails (the demo merchant advertises erc7710 and eip3009) and none
+ * shares the payment's method, scheme and network, naming a field would be a
+ * guess.
+ */
+function quotedOptionMismatch(accepted: PaymentRequirements, paymentRequired: PaymentRequired): PaymentError {
+  const method = paymentMethod(accepted)
+  const sameRail = paymentRequired.accepts.filter(
+    (candidate) =>
+      paymentMethod(candidate) === method &&
+      candidate.scheme === accepted.scheme &&
+      candidate.network === accepted.network,
+  )
+  // One option on the payment's rail: name the field that differs. A challenge
+  // with a single option has no ambiguity at all, so the method, scheme and
+  // network are named there too.
+  const candidate = sameRail.length === 1 ? sameRail[0] : paymentRequired.accepts.length === 1 ? paymentRequired.accepts[0] : undefined
+  const field = candidate ? firstDifferingField(candidate, accepted) : undefined
+  if (!candidate || field === undefined) {
+    return new PaymentError('Payment accepted option does not match a quoted settlement method', undefined, {
+      code: 'payment_mismatch',
+    })
+  }
+  return new PaymentError('Payment accepted option does not match a quoted settlement method', undefined, {
+    code: 'payment_mismatch',
+    field: quotedOptionPath(field),
+    expected: quotedOptionValue(candidate, field),
+    next: `Send the quoted option's ${field} in ${quotedOptionPath(field)}; the challenge lists it.`,
+  })
+}
+
 export function selectQuotedPaymentOption(accepted: PaymentRequirements, paymentRequired: PaymentRequired): PaymentRequirements {
   const method = paymentMethod(accepted)
   const option = paymentRequired.accepts.find(
@@ -183,25 +285,48 @@ export function selectQuotedPaymentOption(accepted: PaymentRequirements, payment
       sameAddress(candidate.payTo, accepted.payTo) &&
       sameAddress(candidate.asset, accepted.asset),
   )
-  if (!option) throw new PaymentError('Payment accepted option does not match a quoted settlement method')
+  if (!option) throw quotedOptionMismatch(accepted, paymentRequired)
   return option
 }
 
-export function parseExactEvmPayload(payload: Record<string, unknown>): {
+export function parseExactEvmPayload(payload: unknown): {
   authorization: Eip3009Authorization
   signature: Hex
 } {
+  // #4989: a header that decodes to JSON without the payload object used to
+  // read `.authorization` on `undefined` — a TypeError, answered with the
+  // generic "could not be read" sentence. It is a payment refusal, and it
+  // names the field.
+  if (!isPlainRecord(payload)) {
+    throw new PaymentError('Invalid payment header: missing the payload object', undefined, {
+      code: 'payment_invalid',
+      field: 'payload',
+      next: 'Send the x402 payment payload under "payload", with an EIP-3009 authorization and its signature.',
+    })
+  }
   const authorization = payload.authorization as Partial<Eip3009Authorization> | undefined
   const signature = payload.signature
   if (!authorization || typeof authorization !== 'object') {
-    throw new PaymentError('Invalid payment header: missing EIP-3009 authorization')
+    throw new PaymentError('Invalid payment header: missing EIP-3009 authorization', undefined, {
+      code: 'payment_invalid',
+      field: 'payload.authorization',
+      next: 'Send the EIP-3009 authorization under payload.authorization.',
+    })
   }
   if (typeof signature !== 'string' || !signature.startsWith('0x')) {
-    throw new PaymentError('Invalid payment header: missing EIP-3009 signature')
+    throw new PaymentError('Invalid payment header: missing EIP-3009 signature', undefined, {
+      code: 'payment_invalid',
+      field: 'payload.signature',
+      next: 'Send the payer\'s EIP-3009 signature under payload.signature, as a 0x-prefixed hex string.',
+    })
   }
   for (const field of ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'] as const) {
     if (typeof authorization[field] !== 'string' || authorization[field] === '') {
-      throw new PaymentError(`Invalid payment authorization field: ${field}`)
+      throw new PaymentError(`Invalid payment authorization field: ${field}`, undefined, {
+        code: 'payment_invalid',
+        field: `payload.authorization.${field}`,
+        next: `Send payload.authorization.${field} as a non-empty string.`,
+      })
     }
   }
   return { authorization: authorization as Eip3009Authorization, signature: signature as Hex }
@@ -215,47 +340,94 @@ export function assertPaymentOptionMatches(
   method: string,
   asset: PaymentAsset,
 ): void {
-  if (accepted.scheme !== 'exact') throw new PaymentError(`Unsupported x402 scheme: ${accepted.scheme}`)
-  if (accepted.network !== asset.network) throw new PaymentError(`Unsupported x402 network: ${accepted.network}`)
+  // #4989: every refusal here is a mismatch with the quote, so it carries the
+  // code and the field it names. The messages are unchanged. One throw keeps
+  // `payment_invalid`: the USDC domain-metadata refusal's message never matched
+  // the pre-#4989 `localCheckError` regex, so its code was `payment_invalid`,
+  // and the issue scopes the code migration to the sites that regex matched.
+  const mismatch = (
+    message: string,
+    field: string,
+    expectedValue: unknown,
+    next: string,
+    code: PaymentErrorCode = 'payment_mismatch',
+  ): PaymentError => new PaymentError(message, undefined, { code, field, expected: expectedValue, next })
+  if (accepted.scheme !== 'exact') {
+    throw mismatch(`Unsupported x402 scheme: ${accepted.scheme}`, 'accepted.scheme', 'exact', 'Send the quoted option unchanged in accepted.')
+  }
+  if (accepted.network !== asset.network) {
+    throw mismatch(`Unsupported x402 network: ${accepted.network}`, 'accepted.network', asset.network, 'Send the quoted option unchanged in accepted.')
+  }
   if (accepted.amount !== expectedAmount.toString()) {
-    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${accepted.amount}`)
+    throw mismatch(
+      `Payment amount does not match: expected ${expectedAmount}, got ${accepted.amount}`,
+      'accepted.amount',
+      expectedAmount.toString(),
+      'Sign the authorization for the quoted amount.',
+    )
   }
   if (accepted.amount !== expected.amount) {
-    throw new PaymentError('Payment accepted option does not match the quoted amount')
+    throw mismatch('Payment accepted option does not match the quoted amount', 'accepted.amount', expected.amount, 'Send the quoted option unchanged in accepted.')
   }
   if (!sameAddress(accepted.payTo, merchantAddress) || !sameAddress(accepted.payTo, expected.payTo)) {
-    throw new PaymentError('Payment accepted option does not match merchant recipient')
+    throw mismatch('Payment accepted option does not match merchant recipient', 'accepted.payTo', expected.payTo, 'Send the quoted option unchanged in accepted.')
   }
   if (!sameAddress(accepted.asset, asset.usdcAddress) || !sameAddress(accepted.asset, expected.asset)) {
-    throw new PaymentError('Payment accepted option does not match Base USDC')
+    throw mismatch('Payment accepted option does not match Base USDC', 'accepted.asset', expected.asset, 'Send the quoted option unchanged in accepted.')
   }
   if (accepted.maxTimeoutSeconds !== expected.maxTimeoutSeconds) {
-    throw new PaymentError('Payment accepted option does not match timeout')
+    throw mismatch('Payment accepted option does not match timeout', 'accepted.maxTimeoutSeconds', expected.maxTimeoutSeconds, 'Send the quoted option unchanged in accepted.')
   }
   if (method === ERC7710_TRANSFER_METHOD) {
     if (accepted.extra?.assetTransferMethod !== ERC7710_TRANSFER_METHOD) {
-      throw new PaymentError('Payment accepted option does not echo assetTransferMethod erc7710')
+      throw mismatch(
+        'Payment accepted option does not echo assetTransferMethod erc7710',
+        'accepted.extra.assetTransferMethod',
+        ERC7710_TRANSFER_METHOD,
+        'Echo the challenge\'s extra.assetTransferMethod in accepted.extra.',
+      )
     }
   } else if (method === 'eip3009') {
     const acceptedMethod = accepted.extra?.assetTransferMethod
     if (acceptedMethod !== undefined && acceptedMethod !== 'eip3009') {
-      throw new PaymentError('Payment accepted option does not echo assetTransferMethod eip3009')
+      throw mismatch(
+        'Payment accepted option does not echo assetTransferMethod eip3009',
+        'accepted.extra.assetTransferMethod',
+        'eip3009',
+        'Echo the challenge\'s extra.assetTransferMethod in accepted.extra.',
+      )
     }
     if (
       (accepted.extra?.name ?? null) !== asset.usdcDomainName ||
       (accepted.extra?.version ?? null) !== asset.usdcDomainVersion
     ) {
-      throw new PaymentError('Payment accepted option is missing the expected USDC domain metadata')
+      throw mismatch(
+        'Payment accepted option is missing the expected USDC domain metadata',
+        'accepted.extra',
+        { name: asset.usdcDomainName, version: asset.usdcDomainVersion },
+        'Echo the challenge\'s extra.name and extra.version in accepted.extra.',
+        'payment_invalid',
+      )
     }
   } else {
-    throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
+    throw mismatch(
+      `Unsupported x402 assetTransferMethod: ${method}`,
+      'accepted.extra.assetTransferMethod',
+      [ERC7710_TRANSFER_METHOD, 'eip3009'],
+      'Send one of the settlement methods the challenge advertises.',
+    )
   }
 }
 
 export function assertResourceMatches(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
   if (!payload.resource) return
   if (payload.resource.url !== paymentRequired.resource.url) {
-    throw new PaymentError('Payment resource does not match quoted resource')
+    throw new PaymentError('Payment resource does not match quoted resource', undefined, {
+      code: 'payment_mismatch',
+      field: 'resource.url',
+      expected: paymentRequired.resource.url,
+      next: 'Send the challenge\'s resource.url in the payment payload.',
+    })
   }
 }
 
@@ -284,6 +456,13 @@ export function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired:
   if (payload.x402Version !== paymentRequired.x402Version) {
     throw new PaymentError(
       `Payment x402Version ${String(payload.x402Version)} does not match the challenge's ${String(paymentRequired.x402Version)}`,
+      undefined,
+      {
+        code: 'payment_mismatch',
+        field: 'x402Version',
+        expected: paymentRequired.x402Version,
+        next: 'Send the challenge\'s x402Version in the payment payload.',
+      },
     )
   }
   const advertised = (paymentRequired as { extensions?: unknown }).extensions
@@ -292,11 +471,25 @@ export function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired:
   if (!echoed || typeof echoed !== 'object' || Array.isArray(echoed)) {
     throw new PaymentError(
       'Payment must echo the challenge\'s extensions object (x402 v2 extensions echo rule)',
+      undefined,
+      {
+        code: 'payment_mismatch',
+        field: 'extensions',
+        expected: advertised,
+        next: 'Echo the challenge\'s extensions object in the payment payload, unmodified.',
+      },
     )
   }
   if (!objectContainsSubset(advertised as Record<string, unknown>, echoed as Record<string, unknown>)) {
     throw new PaymentError(
       'Payment extensions must include the challenge\'s extensions unmodified (x402 v2: append-only, never delete or overwrite)',
+      undefined,
+      {
+        code: 'payment_mismatch',
+        field: 'extensions',
+        expected: advertised,
+        next: 'Echo the challenge\'s extensions object in the payment payload, unmodified.',
+      },
     )
   }
 }
@@ -372,9 +565,21 @@ export async function verifyAuthorization(
       'Payment authorization validity window is far longer than the quoted maxTimeoutSeconds',
     )
   }
-  if (!sameAddress(authorization.to, merchantAddress)) throw new PaymentError('Payment is not addressed to this merchant')
+  if (!sameAddress(authorization.to, merchantAddress)) {
+    throw new PaymentError('Payment is not addressed to this merchant', undefined, {
+      code: 'payment_mismatch',
+      field: 'payload.authorization.to',
+      expected: merchantAddress,
+      next: 'Sign the authorization with the challenge\'s payTo as its recipient.',
+    })
+  }
   if (value !== expectedAmount) {
-    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`)
+    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`, undefined, {
+      code: 'payment_mismatch',
+      field: 'payload.authorization.value',
+      expected: expectedAmount.toString(),
+      next: 'Sign the authorization for the quoted amount.',
+    })
   }
 
   let valid = false

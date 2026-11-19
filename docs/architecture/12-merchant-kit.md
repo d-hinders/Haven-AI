@@ -138,8 +138,9 @@ and active at the leg's block time (when legs go to several registered
 addresses, only those to the first one by log index count, so the row's address
 and amount agree). The sale is stored with `held_by: stripe`
 and the address from the registry, never from the record; it writes no
-`inbound_transfers` row, counts in no Haven balance, and the reads show it
-apart ("Received in Stripe"). Every other case, including an address registered
+`inbound_transfers` row, counts in no Haven balance, and the reads mark it
+("Received in Stripe"). It counts in revenue (#4981): a sale is a sale wherever
+the money landed, and the summary splits the figure by where it was received. Every other case, including an address registered
 to another account, answers `no_payment_to_account` exactly as a hash that paid
 nobody.
 
@@ -413,7 +414,10 @@ The summary and the list take the same filters (#4959), each repeatable:
 (an address; a payment from several payers matches when any of its transfers
 is from it, and stays unattributed in `by_payer`) and `q`, a search of at least
 2 characters. Both read one filtered relation, so for a filter set the summary's
-figures, `received_in_stripe` included, agree with the list's rows. The search
+figures agree with the list's rows. Stripe-held sales are in `revenue_raw`,
+`sales` and the breakdowns; `revenue_in_account_raw`, `received_in_stripe` and
+`by_day[].in_stripe_raw` carry the split under the same filters, and a
+several-payer Stripe sale is `unattributed`. The search
 matches a payer by the name the read shows, which comes only from the owner's
 own contacts, accounts and agents, so another Haven user's name never matches.
 It also matches a product by its label or id, the receipt number by substring,

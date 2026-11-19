@@ -369,6 +369,7 @@ function payerView(resolve: PayerResolver, address: string | null) {
 export function emptySummary(): SummaryResult {
   return {
     revenue_raw: ZERO,
+    revenue_in_account_raw: ZERO,
     sales: 0,
     average_sale_raw: ZERO,
     without_product: { count: 0, amount_raw: ZERO },
@@ -390,6 +391,8 @@ export interface SummaryByDay {
   sales: number
   revenue_raw: string
   without_product_raw: string
+  /** #4981: the part of `revenue_raw` received in Stripe. */
+  in_stripe_raw: string
   /** #4959: the day's sales by product, for the products `by_product` names. */
   by_product: Array<{ product_id: string; amount_raw: string }>
   /** The day's sales of the products folded into `by_product_other`. */
@@ -398,6 +401,8 @@ export interface SummaryByDay {
 
 export interface SummaryResult {
   revenue_raw: string
+  /** #4981: the part of `revenue_raw` received in the Haven account. */
+  revenue_in_account_raw: string
   sales: number
   average_sale_raw: string
   without_product: { count: number; amount_raw: string }
@@ -408,7 +413,7 @@ export interface SummaryResult {
   by_payer_other: { payers: number; payments: number; amount_raw: string }
   unattributed: { payments: number; amount_raw: string }
   by_day: SummaryByDay[]
-  /** #4952: sales received at a registered Stripe deposit address, apart from every figure above. */
+  /** #4952: sales received at a registered Stripe deposit address: the Stripe part of `revenue_raw` (#4981), under the same filters. */
   received_in_stripe: { count: number; amount_raw: string }
   /** #4963: today's USDC rate per display currency; null when unread (and in the Sales-off answer). */
   usdc_rates: FiatValues | null
@@ -430,12 +435,14 @@ export async function readSalesSummaryForOwner(
     raw.by_product.map((p) => ({ productId: p.product_id, recordName: p.record_name })),
   )
   const sales = Number(raw.tiles.sales)
+  const payments = sales + Number(raw.tiles.without_product_count)
   return {
     revenue_raw: raw.tiles.revenue_raw,
+    revenue_in_account_raw: raw.tiles.revenue_in_account_raw,
     sales,
-    // The average is over SALES (payments with a product): the without-product
-    // payments are in `revenue_raw` but are not sales.
-    average_sale_raw: sales === 0 ? ZERO : (BigInt(raw.tiles.sales_raw) / BigInt(sales)).toString(),
+    // #4981: the average is the total over EVERY payment counted, sales and
+    // without-product alike, wherever the money landed; rounded down.
+    average_sale_raw: payments === 0 ? ZERO : (BigInt(raw.tiles.revenue_raw) / BigInt(payments)).toString(),
     without_product: {
       count: Number(raw.tiles.without_product_count),
       amount_raw: raw.tiles.without_product_raw,
@@ -473,6 +480,7 @@ export async function readSalesSummaryForOwner(
       sales: Number(d.sales),
       revenue_raw: d.revenue_raw,
       without_product_raw: d.without_product_raw,
+      in_stripe_raw: d.in_stripe_raw,
       by_product: d.by_product,
       other_products_raw: d.other_products_raw,
     })),

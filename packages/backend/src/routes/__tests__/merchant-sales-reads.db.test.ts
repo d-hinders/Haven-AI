@@ -285,7 +285,10 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       // revenue = A + B + C + D + E + I + the last-second payment (10,000).
       expect(summary.revenue_raw).toBe('2360000')
       expect(summary.sales).toBe(3)
-      expect(summary.average_sale_raw).toBe('600000')
+      // #4981: revenue over EVERY payment counted (3 sales + 4 without a product), rounded down.
+      expect(summary.average_sale_raw).toBe('337142')
+      expect(summary.revenue_in_account_raw).toBe('2360000')
+      expect(summary.received_in_stripe).toEqual({ count: 0, amount_raw: '0' })
       expect(summary.without_product).toEqual({ count: 4, amount_raw: '560000' })
       expect(summary.own_moves).toEqual({ count: 2, amount_raw: '1100000' })
 
@@ -408,6 +411,135 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
     })
   })
 
+  describe('Stripe-held sales count in revenue, split by where received (#4981)', () => {
+    async function seedStripe(
+      m: Merchant,
+      s: { tx: string; productId: string; amount: string; payer: string | null; several?: boolean; own?: boolean; time: string },
+    ): Promise<void> {
+      await insertMerchantSale({
+        accountId: m.accountId,
+        userId: m.userId,
+        chainId: CHAIN,
+        txHash: s.tx,
+        recordVersion: 1,
+        productId: s.productId,
+        productName: null,
+        merchantReference: `ref-${s.tx.slice(-6)}`,
+        receiptNumber: null,
+        vatTreatment: null,
+        amountRaw: s.amount,
+        tokenAddress: USDC,
+        payerAddress: s.payer,
+        severalPayers: s.several ?? false,
+        senderIsOwnAddress: s.own ?? false,
+        blockNumber: 100,
+        blockTime: new Date(s.time),
+        heldBy: 'stripe',
+        receivingAddress: addr(),
+      })
+    }
+
+    it("the spec's worked example: 2500 in the account and 10000 in Stripe is revenue 12500, both in the breakdowns", async () => {
+      const m = await seedMerchant()
+      const payerA = addr()
+      const payerB = addr()
+      await seedLeg(m, { tx: hash(0x41), payer: payerA, amount: '2500', time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x41), productId: 'P1', productName: 'Product one', amount: '2500', payer: payerA, time: '2026-11-10T10:00:00Z' })
+      // a Stripe-only day: 11-11 has no account payment at all.
+      await seedStripe(m, { tx: hash(0x42), productId: 'P2', amount: '10000', payer: payerB, time: '2026-11-11T10:00:00Z' })
+
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary).toMatchObject({
+        revenue_raw: '12500',
+        revenue_in_account_raw: '2500',
+        received_in_stripe: { count: 1, amount_raw: '10000' },
+        sales: 2,
+        average_sale_raw: '6250',
+        without_product: { count: 0, amount_raw: '0' },
+        own_moves: { count: 0, amount_raw: '0' },
+        unattributed: { payments: 0, amount_raw: '0' },
+      })
+      expect(BigInt(summary.revenue_in_account_raw) + BigInt(summary.received_in_stripe.amount_raw)).toBe(12500n)
+      expect(summary.by_product.map((p: { product_id: string; sales: number; amount_raw: string }) => [p.product_id, p.sales, p.amount_raw]))
+        .toEqual([['P2', 1, '10000'], ['P1', 1, '2500']])
+      expect(summary.by_payer.map((p: { payer: { address: string }; payments: number; amount_raw: string }) => [p.payer.address, p.payments, p.amount_raw]))
+        .toEqual([[payerB.toLowerCase(), 1, '10000'], [payerA.toLowerCase(), 1, '2500']])
+      // by day sums to revenue, carries in_stripe_raw, and the Stripe-only day is there.
+      expect(summary.by_day).toEqual([
+        { day: '2026-11-10', payments: 1, sales: 1, revenue_raw: '2500', without_product_raw: '0', in_stripe_raw: '0',
+          by_product: [{ product_id: 'P1', amount_raw: '2500' }], other_products_raw: '0' },
+        { day: '2026-11-11', payments: 1, sales: 1, revenue_raw: '10000', without_product_raw: '0', in_stripe_raw: '10000',
+          by_product: [{ product_id: 'P2', amount_raw: '10000' }], other_products_raw: '0' },
+      ])
+      expect(summary.by_day.reduce((n: bigint, d: { revenue_raw: string }) => n + BigInt(d.revenue_raw), 0n)).toBe(12500n)
+    })
+
+    it('without_product and own_moves are unchanged by a Stripe-held sale, and the average counts both kinds of payment', async () => {
+      const m = await seedMerchant()
+      await seedLeg(m, { tx: hash(0x43), payer: addr(), amount: '600', time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x44), payer: addr(), amount: '700', own: true, time: '2026-11-10T11:00:00Z' })
+      const before = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      await seedStripe(m, { tx: hash(0x45), productId: 'P2', amount: '1000', payer: addr(), time: '2026-11-11T10:00:00Z' })
+      const after = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(after.without_product).toEqual(before.without_product)
+      expect(after.without_product).toEqual({ count: 1, amount_raw: '600' })
+      expect(after.own_moves).toEqual(before.own_moves)
+      expect(after.own_moves).toEqual({ count: 1, amount_raw: '700' })
+      expect(after.revenue_raw).toBe('1600')
+      // 1600 over 1 sale + 1 payment without a product.
+      expect(after.average_sale_raw).toBe('800')
+    })
+
+    it('an own-only Stripe row seeded directly stays out of every figure', async () => {
+      const m = await seedMerchant()
+      await seedStripe(m, { tx: hash(0x46), productId: 'P2', amount: '0', payer: addr(), own: true, time: '2026-11-11T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary).toMatchObject({
+        revenue_raw: '0', revenue_in_account_raw: '0', sales: 0, average_sale_raw: '0',
+        without_product: { count: 0 }, own_moves: { count: 0 },
+        received_in_stripe: { count: 0, amount_raw: '0' },
+        by_product: [], by_payer: [], by_day: [],
+      })
+      expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).json().payments).toEqual([])
+    })
+
+    it('a several-payer Stripe sale counts in revenue and the product, and is unattributed by payer', async () => {
+      const m = await seedMerchant()
+      await seedStripe(m, { tx: hash(0x47), productId: 'P2', amount: '4000', payer: null, several: true, time: '2026-11-11T10:00:00Z' })
+      const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).json()
+      expect(summary.revenue_raw).toBe('4000')
+      expect(summary.by_product).toEqual([expect.objectContaining({ product_id: 'P2', amount_raw: '4000' })])
+      expect(summary.by_payer).toEqual([])
+      expect(summary.unattributed).toEqual({ payments: 1, amount_raw: '4000' })
+    })
+
+    it('under each list filter, revenue_raw is the list\'s non-own row sum and the split adds up', async () => {
+      const m = await seedMerchant()
+      const payer = addr()
+      await seedLeg(m, { tx: hash(0x48), payer, amount: '2500', time: '2026-11-10T10:00:00Z' })
+      await seedSale(m, { tx: hash(0x48), productId: 'P1', amount: '2500', payer, time: '2026-11-10T10:00:00Z' })
+      await seedLeg(m, { tx: hash(0x49), payer, amount: '300', time: '2026-11-10T12:00:00Z' })
+      await seedStripe(m, { tx: hash(0x4a), productId: 'P1', amount: '10000', payer, time: '2026-11-11T10:00:00Z' })
+      await seedStripe(m, { tx: hash(0x4b), productId: 'P2', amount: '700', payer: addr(), time: '2026-11-12T10:00:00Z' })
+      for (const filter of ['', '&kind=sale', '&kind=no_product', '&product_id=P1', '&product_id=P2', `&payer=${payer}`, '&q=ref-']) {
+        const summary = (await get(m.userId, `/merchant-sales/summary?${PERIOD}${filter}`)).json()
+        const rows = (await get(m.userId, `/merchant-sales/payments?${PERIOD}&limit=200${filter}`)).json().payments as Array<{
+          kind: string; amount_raw: string; held_by: string
+        }>
+        const sum = (rs: typeof rows) => rs.reduce((n, r) => n + BigInt(r.amount_raw), 0n)
+        const nonOwn = rows.filter((r) => r.kind !== 'own_move')
+        expect(sum(nonOwn).toString(), filter).toBe(summary.revenue_raw)
+        expect(sum(nonOwn.filter((r) => r.held_by === 'account')).toString(), filter).toBe(summary.revenue_in_account_raw)
+        expect(sum(nonOwn.filter((r) => r.held_by === 'stripe')).toString(), filter).toBe(summary.received_in_stripe.amount_raw)
+        expect(summary.by_day.reduce((n: bigint, d: { revenue_raw: string }) => n + BigInt(d.revenue_raw), 0n).toString(), filter)
+          .toBe(summary.revenue_raw)
+      }
+      // the filter reaches the split: product P2 is all Stripe.
+      const p2 = (await get(m.userId, `/merchant-sales/summary?${PERIOD}&product_id=P2`)).json()
+      expect(p2).toMatchObject({ revenue_raw: '700', revenue_in_account_raw: '0', received_in_stripe: { count: 1, amount_raw: '700' } })
+    })
+  })
+
   describe('filters and search (#4959)', () => {
     type Row = { tx_hash: string; kind: string; amount_raw: string; held_by: string; block_time: string }
 
@@ -423,7 +555,9 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(listRes.statusCode, listRes.body).toBe(200)
       const list = listRes.json()
       const rows = list.payments as Row[]
-      const acct = rows.filter((r) => r.held_by === 'account')
+      // #4981: every figure reads the list's rows wherever the money landed;
+      // a Stripe-held sale is a sale, and the split is the one part of it.
+      const acct = rows
       const sum = (rs: Row[]) => rs.reduce((n, r) => n + BigInt(r.amount_raw), 0n)
 
       expect(list.total).toBe(rows.length)
@@ -435,6 +569,13 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(acct.filter((r) => r.kind === 'own_move')).toHaveLength(summary.own_moves.count)
       const stripe = rows.filter((r) => r.held_by === 'stripe' && r.kind !== 'own_move')
       expect(summary.received_in_stripe).toEqual({ count: stripe.length, amount_raw: sum(stripe).toString() })
+      const inAccount = rows.filter((r) => r.held_by === 'account' && r.kind !== 'own_move')
+      expect(summary.revenue_in_account_raw).toBe(sum(inAccount).toString())
+      expect(BigInt(summary.revenue_in_account_raw) + BigInt(summary.received_in_stripe.amount_raw))
+        .toBe(BigInt(summary.revenue_raw))
+      // average: the total over every payment counted, rounded down.
+      const counted = summary.sales + summary.without_product.count
+      expect(summary.average_sale_raw).toBe(counted === 0 ? '0' : (BigInt(summary.revenue_raw) / BigInt(counted)).toString())
 
       const productSum = (summary.by_product as Array<{ amount_raw: string }>).reduce((n, p) => n + BigInt(p.amount_raw), 0n)
       expect(productSum + BigInt(summary.by_product_other.amount_raw) + BigInt(summary.without_product.amount_raw))
@@ -443,7 +584,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       expect(payerSum + BigInt(summary.by_payer_other.amount_raw) + BigInt(summary.unattributed.amount_raw))
         .toBe(BigInt(summary.revenue_raw))
       for (const d of summary.by_day as Array<{
-        day: string; revenue_raw: string; without_product_raw: string; other_products_raw: string
+        day: string; revenue_raw: string; without_product_raw: string; other_products_raw: string; in_stripe_raw: string
         by_product: Array<{ amount_raw: string }>
       }>) {
         const parts = d.by_product.reduce((n, p) => n + BigInt(p.amount_raw), 0n) +
@@ -451,11 +592,12 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
         expect(parts, d.day).toBe(BigInt(d.revenue_raw))
         const dayRows = acct.filter((r) => r.kind !== 'own_move' && r.block_time.slice(0, 10) === d.day)
         expect(sum(dayRows), d.day).toBe(BigInt(d.revenue_raw))
+        expect(sum(dayRows.filter((r) => r.held_by === 'stripe')), d.day).toBe(BigInt(d.in_stripe_raw))
       }
       return { summary, rows }
     }
 
-    /** The agreement fixture, plus a Stripe-held sale of P1 from wallet4 with receipt "STR-77". */
+    /** The agreement fixture, plus a Stripe-held sale of P1 from wallet4 with receipt "STR-77" (#4981: part of the revenue figures). */
     async function seedFilterFixture() {
       const f = await seedAgreementFixture()
       await insertMerchantSale({
@@ -487,7 +629,7 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
     it('each filter alone, two combined and the search: the summary is cut from the same rows as the list', async () => {
       const { m, contact, wallet4 } = await seedFilterFixture()
 
-      // no filter: everything, the Stripe-held sale included and apart.
+      // no filter: everything, the Stripe-held sale included in revenue and split out.
       const all = await agree(m.userId, '')
       expect(all.rows).toHaveLength(10)
       expect(all.summary.received_in_stripe).toEqual({ count: 1, amount_raw: '70000' })
@@ -502,7 +644,8 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
       // product alone: P1's sales only, the Stripe-held one too.
       const p1 = await agree(m.userId, '&product_id=P1')
       expect(txs(p1.rows)).toEqual([hash(0xa), hash(0x8a)].sort())
-      expect(p1.summary.revenue_raw).toBe('1000000')
+      expect(p1.summary.revenue_raw).toBe('1070000')
+      expect(p1.summary.revenue_in_account_raw).toBe('1000000')
       expect(p1.summary.received_in_stripe).toEqual({ count: 1, amount_raw: '70000' })
       // a product id on an own move (G's P9) is not a sale and never matches.
       expect((await agree(m.userId, '&product_id=P9')).rows).toEqual([])
@@ -603,15 +746,15 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
         (summary.by_payer as Array<{ payer: { address: string }; last_paid_at: string }>)
           .find((p) => p.payer.address === a.toLowerCase())?.last_paid_at
       expect(lastOf(contact)).toBe('2026-11-13T10:00:00.000Z') // I, not A or C
-      // wallet4's newest account payment is the last second of the period; its
-      // Stripe-held sale (11-20) is shown apart and is not in by_payer.
+      // wallet4's newest payment is the last second of the period; its
+      // Stripe-held sale (11-20) is in by_payer too (#4981) but is older.
       expect(lastOf(wallet4)).toBe('2026-11-30T23:59:59.000Z')
       // the out-of-period payment of 12-01 is not it either
       const november = (await get(m.userId, '/merchant-sales/summary?from=2026-11-01&to=2026-11-29')).json()
       expect(
         (november.by_payer as Array<{ payer: { address: string }; last_paid_at: string }>)
           .find((p) => p.payer.address === wallet4.toLowerCase())?.last_paid_at,
-      ).toBe('2026-11-12T10:00:00.000Z')
+      ).toBe('2026-11-20T10:00:00.000Z') // the Stripe-held sale of 11-20 is the newest before 11-29
     })
 
     it('the facets name every product and payer of the period, unfiltered, and total counts the filter set', async () => {

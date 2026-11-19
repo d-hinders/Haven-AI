@@ -167,10 +167,18 @@ describe('#4872 hosted: the answer at settle', () => {
   const SIG = '0x' + '11'.repeat(65)
   const STORED_URL = 'http://merchant.test/mcp'
 
-  function settleHaven(request: unknown, details: unknown, opts: { storedUrl?: string; status?: Record<string, unknown> } = {}) {
+  function settleHaven(
+    request: unknown,
+    details: unknown,
+    opts: { storedUrl?: string; status?: Record<string, unknown> | 'unreadable'; relay?: { status: number; body: unknown } } = {},
+  ) {
     stubFetch({
-      ...(opts.status ? { 'GET /machine-payments/pay_x402/status': { status: 200, body: x402PreflightStatus(opts.status) } } : {}),
-      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+      ...(opts.status === 'unreadable'
+        ? { 'GET /machine-payments/pay_x402/status': { status: 500, body: { error: 'boom' } } }
+        : opts.status
+          ? { 'GET /machine-payments/pay_x402/status': { status: 200, body: x402PreflightStatus(opts.status) } }
+          : {}),
+      'POST /payments/pay_x402/sign': opts.relay ?? { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
       [DETAILS_PATH]: { status: 200, body: details },
     })
@@ -232,6 +240,40 @@ describe('#4872 hosted: the answer at settle', () => {
     expect(fundingRelays()).toEqual([])
     expect(complete).not.toHaveBeenCalled()
     for (const marker of VALUE_MARKERS) expect(logs()).not.toContain(marker)
+  })
+
+  it('EIP-3009 repeated settle of a confirmed intent, sharing now off: the relay answers (409), never "Nothing was funded"', async () => {
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, {
+      status: { status: 'confirmed', phase: 'settled', next_action: 'none', tx_hash: '0xfund' },
+      relay: { status: 409, body: { error: 'Payment is not awaiting a signature', code: 'INVALID_STATE', status: 'confirmed' } },
+    })
+    const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(fundingRelays()).toHaveLength(1)
+    expect(result.code).not.toBe('CHECKOUT_DETAILS_UNAVAILABLE')
+    expect(String(result.message)).not.toContain('Nothing was funded')
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('after a skipped pre-spend check, a delivery that is reached decides the details itself as funded (defence in depth)', async () => {
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, {
+      status: { status: 'confirmed', phase: 'funded', tx_hash: '0xfund' },
+    })
+    const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'funded_but_unsettled' })
+    expect(result.message).toContain('funded but was not delivered')
+    expect(complete).not.toHaveBeenCalled()
+  })
+
+  it('the payment state cannot be read: still refused with nothing spent, but never "nothing moved" — check the status first', async () => {
+    const { haven, complete } = settleHaven(ask({ receipt_email: { required: true } }), { available: false, reason: 'disabled' }, { status: 'unreadable' })
+    const result = fail(await createToolHandlers(haven).haven_settle_mcp_tool({ payment_id: 'pay_x402', signature: SIG, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', phase: 'unknown', paymentId: 'pay_x402' })
+    expect(result.message).toContain("could not read this payment's state")
+    expect(result.message).not.toContain('Nothing was funded')
+    expect(result.message).not.toContain('No payment was created')
+    expect(result.next_tool_omitted_reason).toContain('haven_get_payment_status')
+    expect(fundingRelays()).toEqual([])
+    expect(complete).not.toHaveBeenCalled()
   })
 
   it('haven_complete_mcp_tool (already funded): the same answer on the complete leg', async () => {

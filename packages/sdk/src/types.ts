@@ -3187,7 +3187,7 @@ export type CheckoutDetailsRefusalReasonName =
  * - `unsent`: an erc7710 settlement was prepared but never sent to the
  *   merchant, so nothing can be redeemed — start a new purchase once fixed.
  */
-export type CheckoutDetailsRefusalStage = 'before_payment' | 'funded' | 'unsent'
+export type CheckoutDetailsRefusalStage = 'before_payment' | 'funded' | 'unsent' | 'state_unknown'
 
 export class CheckoutDetailsUnavailableError extends HavenApiError {
   readonly checkoutDetailsErrorCode = 'checkout_details_unavailable' as const

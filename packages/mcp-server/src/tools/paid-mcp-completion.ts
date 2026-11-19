@@ -53,6 +53,7 @@ import {
   AgentPaymentNextAction,
   AgentPaymentWarningCode,
   CheckoutDetailsUnavailableError,
+  checkoutDetailsRefusalError,
   FundingConfirmationUnknownError,
   FundingRevertedError,
   HavenApiError,
@@ -68,6 +69,7 @@ import {
   type EvidenceReportOutcome,
   type AgentPaymentWarning,
   type X402McpTransport,
+  type CheckoutDetailField,
   X_CHECKOUT_DETAILS_HEADER,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
@@ -1697,7 +1699,13 @@ export function createPaidMcpCompletionHandlers(
         } catch (err) {
           if (!(err instanceof CheckoutDetailsUnavailableError)) throw err
           const status = await haven.getPaymentStatus(args.payment_id).catch(() => null)
-          if (status === null || status.status === 'pending_signature') throw err
+          if (status?.status === 'pending_signature') throw err
+          // Unreadable state: still refuse (fail closed — skipping would burn
+          // the erc7710 child or fund EIP-3009 first), but never claim that
+          // nothing moved: an earlier settle may already have.
+          if (status === null) {
+            throw checkoutDetailsRefusalError(err.missingFields as CheckoutDetailField[], err.reason, { stateUnknown: true, paymentId: args.payment_id })
+          }
           checkoutDetails = undefined
         }
         // Fast path: fund (relay the signature) then deliver the merchant header
@@ -1751,6 +1759,9 @@ export function createPaidMcpCompletionHandlers(
               noFundingLeg: true,
               context: merchantContext,
               // Undecided (a repeated settle): delivery decides it, as `unsent`.
+              // Defence in depth: today the backend answers a non-pending
+              // intent before any delivery (settled replay or 409), so this
+              // branch is not reached on erc7710; the EIP-3009 twin is pinned.
               ...(checkoutDetails ? { checkoutDetails: { header: checkoutDetailsHeader7710 } } : {}),
             },
           )

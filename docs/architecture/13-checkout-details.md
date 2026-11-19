@@ -498,8 +498,8 @@ created.
 The SDK throws `CheckoutDetailsUnavailableError`, a `HavenApiError` subclass
 with status 409, `failureCause: { kind: 'deterministic' }` and
 `readonly checkoutDetailsErrorCode = 'checkout_details_unavailable'`, carrying
-the fields above on its body, plus `stage` (`before_payment`, `funded` or
-`unsent`, #4872). The hosted tools throw the same SDK error, and the hosted
+the fields above on its body, plus `stage` (`before_payment`, `funded`,
+`unsent` or `state_unknown`, #4872). The hosted tools throw the same SDK error, and the hosted
 `normalizeError` (`packages/mcp-server/src/tools/support/errors.ts`) answers it
 with the same code and fields, a `phase` per stage and a
 `refusalNextStep({ nextAction: StopAndTellUser })` whose omitted reason is the
@@ -508,7 +508,10 @@ stage's: only `before_payment` says to call again. On the hosted settle leg a
 `pending_signature`; a repeated settle of a payment that already moved gets
 the submit's or relay's own answer instead (the settled replay on erc7710), and
 its message there is "Nothing was funded, submitted or sent for this payment",
-since the intent exists.
+since the intent exists. When the payment's state cannot be read, the refusal
+still stands (nothing is spent), with a fourth stage, `state_unknown` (hosted
+`phase: unknown`): it says an earlier settle may already have funded or settled
+the payment, and to check `haven_get_payment_status` before a new purchase.
 
 Status 409 because the request conflicts with the owner's current sharing
 state, and repeating it unchanged gets the same answer. It is not a

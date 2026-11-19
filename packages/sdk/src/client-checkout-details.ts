@@ -98,6 +98,7 @@ export function checkoutDetailsRefusalError(
     unsent = false,
     priorPaymentPossible = false,
     intentExists = false,
+    stateUnknown = false,
     paymentId,
   }: {
     /** The payment is funded (EIP-3009 after the funding leg): it is not delivered. */
@@ -111,11 +112,18 @@ export function checkoutDetailsRefusalError(
     priorPaymentPossible?: boolean
     /** A settle-time refusal before anything was spent: the intent exists, unfunded and unsent. */
     intentExists?: boolean
+    /**
+     * A settle-time refusal whose payment state could not be read: this call
+     * moved nothing, but an earlier settle may already have funded or settled it.
+     */
+    stateUnknown?: boolean
     paymentId?: string
   } = {},
 ): CheckoutDetailsUnavailableError {
   const names = missingFields.map((f) => FIELD_WORDS[f]).join(', ')
-  const outcome = funded
+  const outcome = stateUnknown
+    ? "This call moved nothing, but Haven could not read this payment's state, so it may already have been funded or settled: check its payment status before starting a new purchase."
+    : funded
     ? 'The payment is funded but was not delivered: finish it once the owner has fixed this.'
     : unsent
       ? 'The payment was not sent to the merchant, so nothing was redeemed and no funds moved; start a new purchase once the owner has fixed this.'
@@ -128,7 +136,7 @@ export function checkoutDetailsRefusalError(
     missingFields,
     reason,
     `The merchant requires the ${names}, which this agent cannot share: ${REASON_WORDS[reason]}. ${outcome}`,
-    funded ? 'funded' : unsent ? 'unsent' : 'before_payment',
+    stateUnknown ? 'state_unknown' : funded ? 'funded' : unsent ? 'unsent' : 'before_payment',
     paymentId,
   )
 }

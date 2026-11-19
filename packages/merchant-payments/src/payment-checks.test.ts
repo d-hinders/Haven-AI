@@ -230,4 +230,29 @@ describe('#4989: assertPaymentOptionMatches carries the code and the field', () 
     expect(err.code).toBe('payment_mismatch')
     expect(err.field).toBe('accepted.amount')
   })
+
+  it('missing USDC domain metadata keeps payment_invalid, its code before #4989, and still names accepted.extra', () => {
+    // The pre-#4989 `localCheckError` regex did not match this message, so the
+    // refusal answered `payment_invalid`. #4989 scopes the code migration to
+    // the sites that regex matched; this one keeps its code.
+    const err = (() => {
+      try {
+        assertPaymentOptionMatches(
+          option({ extra: { name: 'USDC', version: '1' } }),
+          option(),
+          PAY_TO as `0x${string}`,
+          10000n,
+          'eip3009',
+          ASSET,
+        )
+      } catch (e) {
+        return e as PaymentError
+      }
+      throw new Error('expected a refusal')
+    })()
+    expect(err.message).toBe('Payment accepted option is missing the expected USDC domain metadata')
+    expect(err.code).toBe('payment_invalid')
+    expect(err.field).toBe('accepted.extra')
+    expect(err.expected).toEqual({ name: 'USDC', version: '2' })
+  })
 })

@@ -324,6 +324,7 @@ readable body, so Haven never reads a payment that reached you as rejected.
 |---|---|---|
 | No payment header, route is a product | 402 | `payment_required`, with `message`; the challenge is in `PAYMENT-REQUIRED` |
 | Payment does not match the challenge | 402 | `payment_mismatch`, with `field` and `expected` when exactly one quoted option shares the payment's method, scheme and network |
+| The payment header cannot be read, or decodes without the payload fields | 402 | `payment_invalid`; when it decodes, `field` names the missing field (`payload`, `payload.authorization`, `payload.signature`, `payload.authorization.<field>`) and `next` says what to send |
 | The facilitator rejects the payment at verify | 402 | `payment_invalid` |
 | Settle failed and the authorization is unused | 402 | `settle_failed` |
 | Route is not in the products file, including `GET /` | 404 | `unknown_route`, with `discovery_url` |

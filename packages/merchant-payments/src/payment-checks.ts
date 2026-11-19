@@ -341,9 +341,17 @@ export function assertPaymentOptionMatches(
   asset: PaymentAsset,
 ): void {
   // #4989: every refusal here is a mismatch with the quote, so it carries the
-  // code and the field it names. The messages are unchanged.
-  const mismatch = (message: string, field: string, expectedValue: unknown, next: string): PaymentError =>
-    new PaymentError(message, undefined, { code: 'payment_mismatch', field, expected: expectedValue, next })
+  // code and the field it names. The messages are unchanged. One throw keeps
+  // `payment_invalid`: the USDC domain-metadata refusal's message never matched
+  // the pre-#4989 `localCheckError` regex, so its code was `payment_invalid`,
+  // and the issue scopes the code migration to the sites that regex matched.
+  const mismatch = (
+    message: string,
+    field: string,
+    expectedValue: unknown,
+    next: string,
+    code: PaymentErrorCode = 'payment_mismatch',
+  ): PaymentError => new PaymentError(message, undefined, { code, field, expected: expectedValue, next })
   if (accepted.scheme !== 'exact') {
     throw mismatch(`Unsupported x402 scheme: ${accepted.scheme}`, 'accepted.scheme', 'exact', 'Send the quoted option unchanged in accepted.')
   }
@@ -398,6 +406,7 @@ export function assertPaymentOptionMatches(
         'accepted.extra',
         { name: asset.usdcDomainName, version: asset.usdcDomainVersion },
         'Echo the challenge\'s extra.name and extra.version in accepted.extra.',
+        'payment_invalid',
       )
     }
   } else {

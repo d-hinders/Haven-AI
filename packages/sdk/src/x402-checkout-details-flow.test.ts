@@ -274,6 +274,9 @@ describe('checkout details on the paid request (#4872)', () => {
       expect(err).toBeInstanceOf(CheckoutDetailsUnavailableError)
       expect((err as Error).message).toContain('funded but was not delivered')
       expect(merchantCallsOf(calls)).toEqual([])
+      // Refused BEFORE the re-sign: the resume's status read (the first thing
+      // `resumeAuthorizedX402` does) never happened, and nothing was signed.
+      expect(havenCallsOf(calls).some((c) => c.url.includes('/machine-payments/pay_4872/status'))).toBe(false)
       expect(havenCallsOf(calls).some((c) => c.url.includes('/sign'))).toBe(false)
     })
   })
@@ -292,6 +295,11 @@ describe('checkout details on the paid request (#4872)', () => {
       expect(traffic, `Haven traffic carries ${marker}`).not.toContain(marker)
       expect(logged, `the log carries ${marker}`).not.toContain(marker)
     }
+    // Nor in their encoded form: the answer header's value is never logged or sent to Haven.
+    const answerValue = new Headers(paidRetry(calls)?.init?.headers).get(X_CHECKOUT_DETAILS_HEADER) ?? ''
+    expect(answerValue.length).toBeGreaterThan(0)
+    expect(logged).not.toContain(answerValue)
+    expect(traffic).not.toContain(answerValue)
     // The echoed `extensions` in the payment header carry the REQUEST, never the answer.
     const paymentHeader = new Headers(paidRetry(calls)?.init?.headers).get('payment-signature') ?? ''
     const echoed = Buffer.from(paymentHeader, 'base64').toString('utf8')

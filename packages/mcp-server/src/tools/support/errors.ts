@@ -549,7 +549,9 @@ export const CHECKOUT_DETAILS_OMITTED_REASON =
  * #4872: the reason per stage. Only `before_payment` may say "retry the same
  * tool": nothing was spent. A FUNDED refusal must never send the agent back to
  * haven_settle_mcp_tool (it would relay funding again); an UNSENT erc7710
- * settlement child is consumed, so only a new purchase works.
+ * settlement child is consumed, so only a new purchase works. A
+ * STATE_UNKNOWN refusal sends the agent to the status read first: an earlier
+ * settle may already have moved the payment.
  */
 const CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string> = {
   before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
@@ -558,7 +560,7 @@ const CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string>
   unsent:
     'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase (haven_pay_mcp_tool or haven_prepare_catalog_purchase); do not call settle again for this payment',
   state_unknown:
-    "Haven could not read this payment's state, so an earlier settle may already have funded or settled it: call haven_get_payment_status with this payment_id first, and start a new purchase only if it shows nothing was funded or settled",
+    "Haven could not read this payment's state, so an earlier settle may already have funded or settled it: call haven_get_payment_status with this payment_id first: if it is still awaiting a signature, call haven_settle_mcp_tool again once the owner has fixed sharing; if it shows funded or settled, do not pay again",
 }
 const CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> = {
   before_payment: 'not_started',

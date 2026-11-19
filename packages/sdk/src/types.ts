@@ -3185,7 +3185,10 @@ export type CheckoutDetailsRefusalReasonName =
  * - `funded`: an EIP-3009 payment is funded but not delivered — finish it once
  *   fixed (resume / complete), or verify then sweep;
  * - `unsent`: an erc7710 settlement was prepared but never sent to the
- *   merchant, so nothing can be redeemed — start a new purchase once fixed.
+ *   merchant, so nothing can be redeemed — start a new purchase once fixed;
+ * - `state_unknown`: a settle-time refusal whose payment state could not be
+ *   read — this call spent nothing, but an earlier settle may already have
+ *   funded or settled it, so check its status before anything else.
  */
 export type CheckoutDetailsRefusalStage = 'before_payment' | 'funded' | 'unsent' | 'state_unknown'
 

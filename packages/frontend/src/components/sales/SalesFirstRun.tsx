@@ -6,7 +6,6 @@ import { Card } from '@/components/ui/Card'
 import { EmptyState } from '@/components/ui/EmptyState'
 import { Icon } from '@/components/ui/Icon'
 import { StepChecklist, type StepChecklistRow } from '@/components/ui/StepChecklist'
-import { SALES_KEY_CANT_SENTENCE } from '@/lib/sales'
 
 /**
  * The first-run state (#4900, approved on #4894): the Sales account has
@@ -46,7 +45,7 @@ export function SalesFirstRun({
       actionable: true,
       number: 2,
       title: 'Create a Sales key',
-      description: `Your kit uses it to tell Haven what each payment was for. ${SALES_KEY_CANT_SENTENCE}`,
+      description: 'Your kit uses it to tell Haven what each payment was for. It can’t move money.',
       action: (
         <Button href={`${setupHref}#sales-keys`} variant="ghost" size="sm" className="w-full sm:w-auto">
           Go to Sales keys

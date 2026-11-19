@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "operator": {
+    "name": "Haven Demo Merchant"
+  },
+  "name": "Haven Demo Merchant",
+  "network": "eip155:84532",
+  "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "pay_to": "0xabCDeF0123456789AbcdEf0123456789aBCDEF01",
+  "products": [
+    {
+      "id": "joke",
+      "name": "Haven Joke",
+      "description": "One joke, delivered at once. Verified and settled by Coinbase's hosted x402 facilitator (CDP).",
+      "price": "10000"
+    },
+    {
+      "id": "field_notes",
+      "name": "Haven Field Notes",
+      "description": "One field note on running agent payments, delivered at once. Paid into a Haven Sales account.",
+      "price": "2500"
+    }
+  ]
+}

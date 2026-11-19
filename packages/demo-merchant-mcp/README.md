@@ -1017,6 +1017,18 @@ the buying agent's delegate, so a sale bought by the Sales account owner's own
 agent is stored as an internal move and shows no revenue. The demo's buying
 agent belongs to a different Haven user from the Sales account's owner.
 
+**The product list for the Sales page (#4987).** With `MERCHANT_SALES_ADDRESS`
+set, `GET /.well-known/x402` serves the merchant kit's discovery document
+(`src/kit-discovery.ts`), which is what the Sales page's Products tab reads
+once the merchant saves this deployment's origin as the kit address. It is a
+reduced version 1 document (`docs/architecture/12-merchant-kit.md` §4): the
+Sales account as `pay_to`, and only the products that report a sale, which are
+Field Notes and, with Stripe recording on, the joke, with atomic prices. The
+joke is paid to the Stripe deposit address, not to `pay_to`; nothing pays from
+this document, and Haven only labels products with it. Without the Sales
+address the path is a 404. This merchant's own discovery document at `/` and
+`/.well-known/haven-demo-merchant` is unchanged.
+
 ## Seller details (#4856)
 
 The seller block comes from configuration. With no `MERCHANT_SELLER_*`

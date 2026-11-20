@@ -118,7 +118,9 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
   // First run: has the account EVER been paid? One payment of the whole
   // history answers it, whatever period the page is on (a quiet period is not a
   // first run).
-  const ever = useSalesPayments(null, { limit: 1 })
+  // #5012: live, so the first payment turns the first-run screen into the
+  // overview without a reload.
+  const ever = useSalesPayments(null, { limit: 1, live: true })
   const firstRun = !ever.loading && !ever.failed && ever.payments.length === 0
 
   // The Receive dialog wants an account object. The Sales account is a real

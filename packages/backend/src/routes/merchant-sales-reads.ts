@@ -38,6 +38,7 @@ import {
   readPaymentsPage,
   readSalesFacets,
   readSalesSummaryForOwner,
+  refreshMerchantAccountIndex,
   resolveSalesScope,
   type SalesFilterInput,
 } from '../modules/transactions/index.js'
@@ -94,6 +95,12 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
     }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return emptySummary()
+    // #5012: the owner is looking at Sales, so refresh the account's index in
+    // the background. It is throttled per account (one refresh per 30 s,
+    // however many tabs poll this read or `/payments`), never throws, and
+    // never delays or changes this answer: a transfer it finds shows on the
+    // page's next poll.
+    void refreshMerchantAccountIndex(scope.accountId, request.log)
     return readSalesSummaryForOwner(scope, period.period, filterInput(request.query))
   })
 
@@ -125,6 +132,10 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
     }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return { payments: [], next_cursor: null, total: 0, usdc_rates: null }
+    // #5012: the same throttled background refresh as `/summary`. The first-run
+    // screen reads only this list, so a merchant's first unreported payment
+    // would otherwise never be looked for.
+    void refreshMerchantAccountIndex(scope.accountId, request.log)
     const limit = Math.min(request.query.limit ?? PAYMENTS_DEFAULT_LIMIT, PAYMENTS_MAX_LIMIT)
     return readPaymentsPage(scope, period.period, { limit, cursor }, filterInput(request.query))
   })

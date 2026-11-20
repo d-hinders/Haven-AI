@@ -23,11 +23,6 @@ const mocks = vi.hoisted(() => ({
   refreshAllMerchantCatalogues: vi.fn(),
   startJobs: vi.fn(),
   startRetrySweep: vi.fn(),
-  runMerchantInboundIndexTick: vi.fn(),
-}))
-
-vi.mock('../modules/transactions/index.js', () => ({
-  runMerchantInboundIndexTick: mocks.runMerchantInboundIndexTick,
 }))
 
 vi.mock('../modules/catalog/index.js', () => ({
@@ -51,7 +46,6 @@ vi.mock('../platform/job-scheduler.js', () => ({
 }))
 
 import { createBackgroundJobs, startBackgroundJobs } from '../background-jobs.js'
-import { config } from '../config.js'
 import { LEADER_LOCK_KEYS } from '../platform/leader-lock.js'
 
 const log = {
@@ -82,7 +76,7 @@ beforeEach(() => {
 })
 
 describe('the background-job table', () => {
-  it('is exactly these twelve jobs — a removed or added row fails', () => {
+  it('is exactly these eleven jobs — a removed or added row fails', () => {
     const rows = createBackgroundJobs({ log, pool })
     expect(rows.map((r) => r.name).sort()).toEqual([
       'catalog ingest',
@@ -90,7 +84,6 @@ describe('the background-job table', () => {
       'delegate balance monitor',
       'feedback sweep',
       'merchant catalogue refresh',
-      'merchant inbound index',
       'outbound bump',
       'passport sweep',
       'rate-limit sweep',
@@ -107,7 +100,6 @@ describe('the background-job table', () => {
       'catalog ingest': 300_000,
       'rate-limit sweep': 300_000,
       'feedback sweep': 300_000,
-      'merchant inbound index': 300_000,
       'delegate balance monitor': 3_600_000,
       'relayer balance monitor': 3_600_000,
       'outbound bump': 60_000,
@@ -127,7 +119,6 @@ describe('the background-job table', () => {
       'catalog ingest': LEADER_LOCK_KEYS.catalogIngest,
       'rate-limit sweep': LEADER_LOCK_KEYS.rateLimitSweep,
       'feedback sweep': LEADER_LOCK_KEYS.feedbackSweep,
-      'merchant inbound index': LEADER_LOCK_KEYS.merchantInboundIndex,
       'delegate balance monitor': LEADER_LOCK_KEYS.delegateBalanceMonitor,
       'relayer balance monitor': undefined,
       'outbound bump': LEADER_LOCK_KEYS.outboundBump,
@@ -149,8 +140,8 @@ describe('the background-job table', () => {
     expect(rows.some((r) => r.lockKey === LEADER_LOCK_KEYS.relayerBalanceMonitor)).toBe(false)
 
     const keys = rows.filter((r) => r.lockKey !== undefined).map((r) => r.lockKey)
-    expect(keys).toHaveLength(11)
-    expect(new Set(keys).size).toBe(11)
+    expect(keys).toHaveLength(10)
+    expect(new Set(keys).size).toBe(10)
   })
 
   it('builds the catalog-ingest monitor ONCE and holds it across ticks (#4407)', async () => {
@@ -169,38 +160,23 @@ describe('the background-job table', () => {
   })
 
   /**
-   * The kill switch (dev Alchemy incident, 2026-11-20): the merchant inbound
-   * index is the largest eth_getLogs consumer, so ops can stop it with
-   * MERCHANT_INBOUND_INDEX_DISABLED=true. Unset, it runs.
+   * #5012: the merchant inbound index is no longer a scheduled row. It runs
+   * only while its owner views Sales (`refreshMerchantAccountIndex`), so the
+   * table must not schedule it again.
    */
-  it('runs the merchant inbound index unless MERCHANT_INBOUND_INDEX_DISABLED is set', async () => {
-    mocks.runMerchantInboundIndexTick.mockResolvedValue({ accounts: 0, indexed: 0, failed: 0, skipped: 0 })
-    const row = createBackgroundJobs({ log, pool }).find((r) => r.name === 'merchant inbound index')
-    expect(row).toBeDefined()
-    // `config` is typed read-only; the flag is flipped here as the env would.
-    const flags = config as { merchantInboundIndexDisabled: boolean }
-    const before = flags.merchantInboundIndexDisabled
-    try {
-      flags.merchantInboundIndexDisabled = false
-      await row!.run()
-      expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
-
-      flags.merchantInboundIndexDisabled = true
-      await row!.run()
-      expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
-    } finally {
-      flags.merchantInboundIndexDisabled = before
-    }
+  it('does not schedule the merchant inbound index (#5012)', () => {
+    const rows = createBackgroundJobs({ log, pool })
+    expect(rows.find((r) => r.name === 'merchant inbound index')).toBeUndefined()
   })
 })
 
 describe('startBackgroundJobs', () => {
-  it('starts all twelve rows and calls startRetrySweep exactly once', () => {
+  it('starts all eleven rows and calls startRetrySweep exactly once', () => {
     startBackgroundJobs({ log, pool })
 
     expect(mocks.startJobs).toHaveBeenCalledTimes(1)
     const [rows, deps] = mocks.startJobs.mock.calls[0]!
-    expect(rows).toHaveLength(12)
+    expect(rows).toHaveLength(11)
     expect(deps.log).toBe(log)
 
     // The thirteenth job is NOT a row: it self-registers inside

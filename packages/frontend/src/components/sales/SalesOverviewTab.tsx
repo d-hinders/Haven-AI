@@ -185,10 +185,12 @@ export function SalesOverviewTab({
   const filterState = controls.state
   const filters = useMemo(() => salesFiltersFromList(filterState), [filterState])
   const filtered = hasSalesFilters(filters)
-  const summary = useSalesSummary(range, filters)
+  // #5012: the period's figures and rows follow new payments while the page is
+  // visible; the previous-period comparison does not need to.
+  const summary = useSalesSummary(range, filters, { live: true })
   const previousRange = previousSalesRange(range)
   const previous = useSalesSummary(previousRange, filters)
-  const list = useSalesPayments(range, { filters })
+  const list = useSalesPayments(range, { filters, live: true })
   const facetsRead = useSalesFacets(range, refreshKey)
   const periodTotal = useSalesPeriodTotal(range, filtered)
   const facets = useMemo(() => salesFacets(facetsRead.data), [facetsRead.data])

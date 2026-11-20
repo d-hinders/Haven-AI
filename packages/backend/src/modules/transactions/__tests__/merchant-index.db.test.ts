@@ -1,5 +1,5 @@
 /**
- * The scheduled merchant inbound index (#4903, epic #4885), on the real
+ * The merchant inbound index (#4903, read on view since #5012), on the real
  * database.
  *
  * What is proven here and nowhere else:
@@ -31,7 +31,9 @@ import { beforeAll, beforeEach, expect, it } from 'vitest'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import db from '../../../db.js'
 import {
+  claimInboundIndexRefresh,
   findInboundIndexCursor,
+  findMerchantAccountRow,
   inboundReceiveBalanceAtomic,
   insertInboundTransfer,
   listMerchantAccounts,
@@ -41,10 +43,14 @@ import {
 } from '../../../infra/repositories/inbound-transfers.js'
 import { ingestInboundTransfers } from '../receive.js'
 import {
+  MAX_BLOCKS_PER_PASS,
   MAX_UNSETTLED_REREAD_BLOCKS,
+  MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS,
+  refreshMerchantAccountIndex,
   runMerchantInboundIndexTick,
   type MerchantIndexDeps,
 } from '../merchant-index.js'
+import { config } from '../../../config.js'
 import type { ChainInboundLeg, ChainRangeReadResult } from '../chain-read.js'
 
 const CHAIN = 84532
@@ -117,9 +123,34 @@ function deps(opts: {
   /** A read that failed part-way: complete through this block, with `legs`. */
   readThroughBlock?: number
   ranges?: Array<[number, number]>
+  /**
+   * #5012: answer through the transfer index (no block cap). Unset, the index
+   * reports itself not configured (null) and the pass reads the range with
+   * `readRange`, as every #4903 test below expects.
+   */
+  viaIndex?: boolean
+  indexRanges?: Array<[number, number]>
 }): MerchantIndexDeps {
+  const answer = (): ChainRangeReadResult => {
+    if (opts.readThroughBlock !== undefined) {
+      return {
+        ok: false,
+        reason: 'rpc_unavailable',
+        partial: { legs: opts.legs ?? [], readThroughBlock: opts.readThroughBlock },
+      }
+    }
+    if (opts.readOk === false) return { ok: false, reason: 'rpc_unavailable', partial: null }
+    return { ok: true, legs: opts.legs ?? [] }
+  }
   return {
     listMerchantAccounts: () => listMerchantAccounts(),
+    findAccount: (accountId) => findMerchantAccountRow(accountId),
+    claimRefresh: (accountId, seconds) => claimInboundIndexRefresh(accountId, seconds),
+    readViaIndex: async (_chainId, _address, fromBlock, toBlock) => {
+      if (!opts.viaIndex) return null
+      opts.indexRanges?.push([fromBlock, toBlock])
+      return answer()
+    },
     findCursor: (accountId) => findInboundIndexCursor(accountId),
     saveCursor: (input) => upsertInboundIndexCursor(input),
     latestBlock: async () => opts.latest ?? 5_000_000,
@@ -127,15 +158,7 @@ function deps(opts: {
     blockAtOrBefore: async () => opts.seedBlock ?? 4_000_000,
     readRange: async (_chainId, _address, fromBlock, toBlock): Promise<ChainRangeReadResult> => {
       opts.ranges?.push([fromBlock, toBlock])
-      if (opts.readThroughBlock !== undefined) {
-        return {
-          ok: false,
-          reason: 'rpc_unavailable',
-          partial: { legs: opts.legs ?? [], readThroughBlock: opts.readThroughBlock },
-        }
-      }
-      if (opts.readOk === false) return { ok: false, reason: 'rpc_unavailable', partial: null }
-      return { ok: true, legs: opts.legs ?? [] }
+      return answer()
     },
     ingest: (account, legs, logger) => ingestInboundTransfers(account, legs, logger),
   }
@@ -545,7 +568,7 @@ describeDb('merchant inbound index (#4903)', () => {
       blockTime: new Date('2026-11-17T00:00:00Z'),
     }
 
-    // The 5-minute pass: the leg with its log index.
+    // The merchant index pass: the leg with its log index.
     const chainRow = await insertInboundTransfer({ ...legInput, logIndex: 3 })
     expect(chainRow).not.toBeNull()
 
@@ -676,5 +699,112 @@ describeDb('merchant inbound index (#4903)', () => {
     expect(rows.rows).toHaveLength(2)
     expect(rows.rows[0]).toMatchObject({ log_index: 3 })
     expect(rows.rows[1]).toMatchObject({ log_index: null })
+  })
+  // ── #5012: read on view, through the transfer index ───────────────────────
+
+  it('reads through the transfer index from the cursor to the pinned head in ONE pass, however far behind', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+    // More than a day of Base blocks behind (43,200), far past MAX_BLOCKS_PER_PASS.
+    const latest = 4_000_000 + 50_000
+    expect(latest - 4_000_000).toBeGreaterThan(MAX_BLOCKS_PER_PASS)
+    const ranges: Array<[number, number]> = []
+    const indexRanges: Array<[number, number]> = []
+
+    // `finalized` lags far behind, so the ceiling is the bounded tail.
+    await runMerchantInboundIndexTick(
+      log,
+      deps({ legs: [], latest, settled: 4_000_000, viaIndex: true, ranges, indexRanges }),
+    )
+
+    expect(indexRanges).toEqual([[4_000_001, latest]])
+    expect(ranges).toEqual([]) // the eth_getLogs range read is not used
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(
+      latest - MAX_UNSETTLED_REREAD_BLOCKS,
+    )
+  })
+
+  it('falls back to the capped eth_getLogs range read when the index is not configured', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+    const ranges: Array<[number, number]> = []
+
+    await runMerchantInboundIndexTick(log, deps({ legs: [], latest: 4_050_000, ranges }))
+
+    expect(ranges).toEqual([[4_000_001, 4_000_000 + MAX_BLOCKS_PER_PASS]])
+  })
+
+  it('claims a refresh at most once per interval, across concurrent callers', async () => {
+    const seeded = await seedAccount()
+    expect(await claimInboundIndexRefresh(seeded.accountId, 30)).toBe('no_cursor')
+
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+    // The cursor was just written: a refresh is due only after the interval.
+    expect(await claimInboundIndexRefresh(seeded.accountId, 30)).toBe('throttled')
+
+    await db.query(
+      `UPDATE inbound_index_cursors SET updated_at = NOW() - INTERVAL '60 seconds' WHERE account_id = $1`,
+      [seeded.accountId],
+    )
+    const claims = await Promise.all(
+      Array.from({ length: 5 }, () => claimInboundIndexRefresh(seeded.accountId, 30)),
+    )
+    expect(claims.filter((c) => c === 'claimed')).toHaveLength(1)
+    expect(claims.filter((c) => c === 'throttled')).toHaveLength(4)
+  })
+
+  it('refreshes the viewed account, then throttles the next view within the interval', async () => {
+    const seeded = await seedAccount()
+    const indexRanges: Array<[number, number]> = []
+
+    const first = await refreshMerchantAccountIndex(
+      seeded.accountId,
+      log,
+      deps({ legs: [leg()], latest: 4_000_500, viaIndex: true, indexRanges }),
+    )
+    expect(first).toEqual({ status: 'indexed', indexed: 1 })
+    expect(await countRows(seeded.accountId)).toBe(1)
+
+    const second = await refreshMerchantAccountIndex(
+      seeded.accountId,
+      log,
+      deps({ legs: [leg()], latest: 4_000_600, viaIndex: true, indexRanges }),
+    )
+    expect(second).toEqual({ status: 'throttled' })
+    expect(indexRanges).toHaveLength(1)
+    expect(MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS).toBe(30)
+  })
+
+  it('refreshes only a merchant account', async () => {
+    const ordinary = await seedAccount({ merchant: false })
+    const indexRanges: Array<[number, number]> = []
+    const result = await refreshMerchantAccountIndex(
+      ordinary.accountId,
+      log,
+      deps({ legs: [leg()], viaIndex: true, indexRanges }),
+    )
+    expect(result).toEqual({ status: 'not_merchant_account' })
+    expect(indexRanges).toEqual([])
+    expect(await countRows(ordinary.accountId)).toBe(0)
+  })
+
+  it('does nothing while MERCHANT_INBOUND_INDEX_DISABLED is set', async () => {
+    const seeded = await seedAccount()
+    const indexRanges: Array<[number, number]> = []
+    const flags = config as { merchantInboundIndexDisabled: boolean }
+    const before = flags.merchantInboundIndexDisabled
+    try {
+      flags.merchantInboundIndexDisabled = true
+      const result = await refreshMerchantAccountIndex(
+        seeded.accountId,
+        log,
+        deps({ legs: [leg()], viaIndex: true, indexRanges }),
+      )
+      expect(result).toEqual({ status: 'disabled' })
+    } finally {
+      flags.merchantInboundIndexDisabled = before
+    }
+    expect(indexRanges).toEqual([])
+    expect(await findInboundIndexCursor(seeded.accountId)).toBeNull()
   })
 })

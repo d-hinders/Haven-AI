@@ -88,7 +88,7 @@ const INSERT_LEG_SQL = `
  * The two partial unique indexes are DISJOINT: a row with `log_index = 3` is
  * invisible to the unknown-case index, so an explorer read that reports no log
  * index would insert a SECOND row for a leg the chain pass already indexed.
- * That is the normal merchant sequence — the 5-minute pass writes the leg with
+ * That is the normal merchant sequence — the merchant index pass writes the leg with
  * its log index, then the owner opens the dashboard and the explorer read
  * (Alchemy reports no log index) writes it again.
  *
@@ -241,7 +241,7 @@ export async function findOwnerUserIdForAccount(accountId: string): Promise<stri
   return result.rows[0]?.user_id ?? null
 }
 
-// ── The scheduled merchant index (#4903) ─────────────────────────────────────
+// ── The merchant index (#4903; read on view since #5012) ─────────────────────
 
 export interface MerchantAccountRow {
   accountId: string
@@ -277,6 +277,75 @@ export async function listMerchantAccounts(db: Executor = pool): Promise<Merchan
     chainId: row.chain_id,
     createdAt: row.created_at,
   }))
+}
+
+/**
+ * One merchant account by id, or null when the id is not a merchant account
+ * (#5012: the on-view refresh indexes the viewer's own Sales account only).
+ */
+export async function findMerchantAccountRow(
+  accountId: string,
+  db: Executor = pool,
+): Promise<MerchantAccountRow | null> {
+  const result = await db.query<{
+    account_id: string
+    user_id: string
+    account_address: string
+    chain_id: number
+    created_at: Date
+  }>(
+    `SELECT id AS account_id, user_id, account_address, chain_id, created_at
+       FROM smart_accounts
+      WHERE id = $1
+        AND is_merchant_account = true`,
+    [accountId],
+  )
+  const row = result.rows[0]
+  if (!row) return null
+  return {
+    accountId: row.account_id,
+    userId: row.user_id,
+    accountAddress: row.account_address,
+    chainId: row.chain_id,
+    createdAt: row.created_at,
+  }
+}
+
+export type InboundIndexRefreshClaim = 'claimed' | 'throttled' | 'no_cursor'
+
+/**
+ * Claim the right to run one on-view index refresh for the account (#5012):
+ * at most one per `minIntervalSeconds`, however many tabs, viewers or
+ * replicas ask. It is ONE conditional UPDATE on the cursor row, so it holds
+ * across replicas: a concurrent second UPDATE waits on the row lock, then
+ * re-checks `updated_at` against the first one's write and matches nothing.
+ *
+ * - `claimed`: the cursor was older than the interval and is now stamped.
+ * - `throttled`: a refresh ran (or saved its cursor) within the interval.
+ * - `no_cursor`: the account has never been indexed. The caller runs the
+ *   first pass, which writes the cursor, so every later call is throttled.
+ *   Two first passes racing each other are correct (the row identity dedupes
+ *   and the cursor only moves forward) and can happen only once per account.
+ */
+export async function claimInboundIndexRefresh(
+  accountId: string,
+  minIntervalSeconds: number,
+  db: Executor = pool,
+): Promise<InboundIndexRefreshClaim> {
+  const claimed = await db.query<{ account_id: string }>(
+    `UPDATE inbound_index_cursors
+        SET updated_at = NOW()
+      WHERE account_id = $1
+        AND updated_at <= NOW() - make_interval(secs => $2)
+      RETURNING account_id`,
+    [accountId, minIntervalSeconds],
+  )
+  if (claimed.rows.length > 0) return 'claimed'
+  const exists = await db.query<{ account_id: string }>(
+    'SELECT account_id FROM inbound_index_cursors WHERE account_id = $1',
+    [accountId],
+  )
+  return exists.rows.length > 0 ? 'throttled' : 'no_cursor'
 }
 
 export interface InboundIndexCursor {

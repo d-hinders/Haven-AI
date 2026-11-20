@@ -32,6 +32,13 @@ vi.mock('../../infra/prices.js', () => ({
   getTokenPrice: async () => ({ usd: 1, eur: 0.92, sek: 10.4 }),
 }))
 
+// #5012: the summary read asks for a background index refresh; recorded,
+// never run, so the timed read measures the database and nothing else.
+vi.mock('../../modules/transactions/merchant-index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/merchant-index.js')>()
+  return { ...actual, refreshMerchantAccountIndex: async () => ({ status: 'throttled' }) }
+})
+
 const merchantSalesReadRoutes = (await import('../merchant-sales-reads.js')).default
 
 const CHAIN = 84532

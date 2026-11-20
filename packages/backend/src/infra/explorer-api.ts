@@ -523,6 +523,99 @@ async function fetchAlchemyTransfers(
   }
 }
 
+/** Rows per page for the inbound-hash discovery read (`maxCount`, Alchemy's maximum). */
+export const ALCHEMY_INBOUND_PAGE_SIZE = 1_000
+
+/**
+ * The most pages one discovery read follows. A guard against a `pageKey` that
+ * never ends, not a page budget: 100 pages is 100,000 inbound transfers in one
+ * range, far past anything a Sales account has. Hitting it is reported as a
+ * part-way failure, so nothing past the last fully read block is claimed.
+ */
+export const ALCHEMY_INBOUND_MAX_PAGES = 100
+
+export type InboundHashDiscovery =
+  /** Every hash with a `tokenAddress` transfer into the address in the range, ascending. */
+  | { ok: true; txHashes: string[] }
+  /**
+   * The read stopped part-way. `txHashes` holds every hash in
+   * `[fromBlock, readThroughBlock]`, complete for that sub-range;
+   * `readThroughBlock` is null when nothing was read in full.
+   */
+  | { ok: false; txHashes: string[]; readThroughBlock: number | null }
+
+/**
+ * Which transactions sent `tokenAddress` into `address` in `[fromBlock,
+ * toBlock]`, from Alchemy's transfer index (#5012), or null when Alchemy is not
+ * configured for the chain (`alchemyHistoryEndpoint`).
+ *
+ * This answers WHICH transactions to look at, and nothing else: the merchant
+ * index reads each one from the chain by hash (`chain-read.ts`) for the payer,
+ * amount, log index and block time, so the chain stays the source of every
+ * fact it records. It is a separate read from the activity feed's
+ * `fetchAlchemyTransfers`, which reads newest first, both directions, and
+ * stops at a page budget: this one reads oldest first, one direction and one
+ * token, and follows `pageKey` to the end, so a burst between two reads is not
+ * cut off.
+ *
+ * A page that fails stops the read there. The block of the last transfer read
+ * may continue on the next page, so `readThroughBlock` is the block before it.
+ */
+export async function discoverInboundTokenTransferHashes(
+  chainId: number,
+  address: string,
+  tokenAddress: string,
+  fromBlock: number,
+  toBlock: number,
+): Promise<InboundHashDiscovery | null> {
+  const endpoint = alchemyHistoryEndpoint(chainId)
+  if (endpoint === null) return null
+  if (fromBlock > toBlock) return { ok: true, txHashes: [] }
+
+  const hashes: string[] = []
+  const seen = new Set<string>()
+  let lastBlock: number | null = null
+  let pageKey: string | undefined
+  let pages = 0
+  try {
+    do {
+      if (pages >= ALCHEMY_INBOUND_MAX_PAGES) {
+        throw new Error(`Alchemy transfers (chain ${chainId}): more than ${ALCHEMY_INBOUND_MAX_PAGES} pages`)
+      }
+      const result = await postAlchemy(chainId, endpoint, {
+        fromBlock: `0x${fromBlock.toString(16)}`,
+        toBlock: `0x${toBlock.toString(16)}`,
+        toAddress: address,
+        contractAddresses: [tokenAddress],
+        category: ['erc20'],
+        excludeZeroValue: true,
+        maxCount: `0x${ALCHEMY_INBOUND_PAGE_SIZE.toString(16)}`,
+        order: 'asc',
+        ...(pageKey ? { pageKey } : {}),
+      })
+      for (const transfer of result.transfers ?? []) {
+        const hash = transfer.hash.toLowerCase()
+        const block = Number(hexToDecimal(transfer.blockNum))
+        if (lastBlock === null || block > lastBlock) lastBlock = block
+        if (!seen.has(hash)) {
+          seen.add(hash)
+          hashes.push(hash)
+        }
+      }
+      pageKey = result.pageKey || undefined
+      pages++
+    } while (pageKey)
+  } catch {
+    if (lastBlock === null) return { ok: false, txHashes: [], readThroughBlock: null }
+    // Every transfer in blocks before `lastBlock` was on a page that was read;
+    // `lastBlock` itself may continue on the page that failed.
+    const readThroughBlock = lastBlock - 1
+    if (readThroughBlock < fromBlock) return { ok: false, txHashes: [], readThroughBlock: null }
+    return { ok: false, txHashes: hashes, readThroughBlock }
+  }
+  return { ok: true, txHashes: hashes }
+}
+
 function alchemyBase(t: AlchemyTransfer) {
   return {
     blockNumber: hexToDecimal(t.blockNum),

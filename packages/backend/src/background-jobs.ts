@@ -18,15 +18,16 @@
  * hoisted; no overlap guard is added to these eleven; the outbound job still
  * iterates per chain inside one tick.
  *
- * The thirteenth job — the accounting retry sweep — is NOT a row. It registers
+ * The twelfth job — the accounting retry sweep — is NOT a row. It registers
  * nothing when `config.accountingEnabled` is off, its interval comes from
  * config, it has an in-process overlap guard, and its leader function is
  * injectable, so it stays self-registering in
  * `modules/accounting/retry-sweep.ts` and `startBackgroundJobs` calls it.
  *
  * #4903 (the merchant inbound index) and #4899 (the merchant catalogue
- * refresh) each added a ROW, so the table is twelve rows and the retry sweep
- * is the thirteenth job.
+ * refresh) each added a ROW; #5012 removed the merchant inbound index row again
+ * (it now runs only while its owner views Sales, `refreshMerchantAccountIndex`),
+ * so the table is eleven rows and the retry sweep is the twelfth job.
  */
 import { config } from './config.js'
 import { deployableChainIds } from './domain/chains.js'
@@ -103,16 +104,6 @@ const OUTBOUND_BUMP_INTERVAL_MS = 60_000
 const RECONCILE_INTERVAL_MS = 60_000
 
 /**
- * The scheduled merchant inbound index (#4903, epic #4885). Five minutes is the
- * stated indexing latency: a payment into a merchant account is indexed within
- * 5 minutes of the next tick, with no dashboard open. The pass reads only the
- * blocks since its cursor (plus a bounded re-read of the unsettled tail), so a
- * quiet tick on a provider serving 500-block ranges is one `eth_getLogs` call.
- * `MERCHANT_INBOUND_INDEX_DISABLED=true` turns it off.
- */
-const MERCHANT_INBOUND_INDEX_INTERVAL_MS = 5 * 60 * 1000
-
-/**
  * Ops webhook, same Slack-compatible `{ text }` shape as the
  * delegate/relayer monitors — via the shared sender (#3345), which checks
  * `res.ok`: a 4xx/5xx or network error logs a warning with the status (never
@@ -137,7 +128,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the twelve rows. A function rather than a module-level constant because
+ * Build the eleven rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -400,28 +391,6 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       },
     },
     {
-      name: 'merchant inbound index',
-      intervalMs: MERCHANT_INBOUND_INDEX_INTERVAL_MS,
-      lockKey: LEADER_LOCK_KEYS.merchantInboundIndex,
-      failureMessage: 'Merchant inbound index tick failed',
-      // The scheduled merchant inbound index (#4903, epic #4885): every account
-      // marked as a merchant account is read from the chain since its last
-      // indexed block, so a payment is indexed without anyone opening a
-      // dashboard. Leader-gated because the RPC scan is the expensive part;
-      // correctness does not depend on it (the row identity is idempotent and
-      // the cursor only moves forward). Indexing continues while merchant
-      // services are off — the account list is the marker, not the setting.
-      run: async () => {
-        // Kill switch (MERCHANT_INBOUND_INDEX_DISABLED=true): the pass is the
-        // largest eth_getLogs consumer, so ops can stop it without a deploy of
-        // new code. Indexing resumes from the cursor when it is turned back on.
-        if (config.merchantInboundIndexDisabled) return
-        const { runMerchantInboundIndexTick } = await import('./modules/transactions/index.js')
-        const tick = await runMerchantInboundIndexTick(log)
-        if (tick.indexed || tick.failed) log.info(tick, 'Merchant inbound index tick')
-      },
-    },
-    {
       name: 'passport sweep',
       intervalMs: PASSPORT_SWEEP_INTERVAL_MS,
       lockKey: LEADER_LOCK_KEYS.passportSweep,
@@ -522,7 +491,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the twelve table rows, then the
+ * The one entry point `index.ts` calls: start the eleven table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

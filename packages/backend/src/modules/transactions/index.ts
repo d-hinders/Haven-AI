@@ -97,8 +97,11 @@ export {
 } from './receive.js'
 export {
   runMerchantInboundIndexTick,
+  refreshMerchantAccountIndex,
   productionMerchantIndexDeps,
   MAX_BLOCKS_PER_PASS,
+  MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS,
+  type MerchantIndexRefreshResult,
   type MerchantIndexDeps,
   type MerchantIndexTickResult,
 } from './merchant-index.js'

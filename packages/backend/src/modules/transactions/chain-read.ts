@@ -10,7 +10,9 @@
  *    a transfer. A transaction that did not pay the account yields an EMPTY
  *    leg list — "there is none" — and never a caller-supplied value.
  * 2. `readInboundTransfersInBlockRange` — every USDC `Transfer` into the
- *    account between two blocks, for the scheduled pass. `eth_getLogs` is the
+ *    account between two blocks, for the merchant index pass when no transfer
+ *    index is configured (#5012 reads through the index first,
+ *    `readInboundTransfersViaIndex`). `eth_getLogs` is the
  *    right primitive here and the explorer is not: the explorer's account
  *    history is newest-first and capped per read, which is exactly how a
  *    merchant's older payments were lost (#4903's premise), while `getLogs`
@@ -51,6 +53,7 @@
 import { ethers } from 'ethers'
 import { settlementTokenForChain } from '../../domain/chains.js'
 import { getProvider } from '../../infra/chain/relayer-reads.js'
+import { discoverInboundTokenTransferHashes } from '../../infra/explorer-api.js'
 import {
   effectiveLogBatchBlocks,
   noteLogScanFailure,
@@ -303,8 +306,8 @@ export async function readInboundTransfersByTxHash(
  * The range read's answer. A failure is never "none", but it may carry the
  * progress made before it: `partial` is every leg in
  * `[fromBlock, partial.readThroughBlock]`, complete for that sub-range, so the
- * scheduled pass can keep it and move its cursor that far instead of throwing
- * the whole range away and asking for all of it again next tick (the dev
+ * merchant index pass can keep it and move its cursor that far instead of
+ * throwing the whole range away and asking for all of it again next time (the dev
  * Alchemy incident, 2026-11-20). `partial` is null when no chunk was read.
  */
 export type ChainRangeReadResult =
@@ -397,6 +400,78 @@ export async function readInboundTransfersInBlockRange(
     ok: false,
     reason: 'rpc_unavailable',
     partial: readThrough >= fromBlock ? { legs, readThroughBlock: readThrough } : null,
+  }
+}
+
+/** The seams `readInboundTransfersViaIndex` reads through; injectable for tests. */
+export interface IndexReadDeps {
+  discover: typeof discoverInboundTokenTransferHashes
+  readByHash: typeof readInboundTransfersByTxHash
+}
+
+const PRODUCTION_INDEX_READ_DEPS: IndexReadDeps = {
+  discover: discoverInboundTokenTransferHashes,
+  readByHash: readInboundTransfersByTxHash,
+}
+
+/**
+ * Every USDC transfer INTO `accountAddress` in `[fromBlock, toBlock]`, found
+ * through Alchemy's transfer index and read from the chain (#5012), or null
+ * when the index is not configured for the chain (the caller then reads the
+ * range with `readInboundTransfersInBlockRange`).
+ *
+ * The index only names the transactions. Each one is then read by hash, the
+ * same read the sales ingest uses, so the payer, amount, block time and the
+ * exact log index of every leg come from the chain's receipt, never from the
+ * index. Two byte-identical legs in one transaction therefore stay two legs
+ * (owner decision on #5012, option (b)). An idle range costs one index call
+ * and no receipt.
+ *
+ * Failure keeps the same shape as the range read: never "none", and `partial`
+ * holds every leg through the last block known complete. A receipt that
+ * cannot be read ends the partial result before that transaction's block.
+ */
+export async function readInboundTransfersViaIndex(
+  chainId: number,
+  accountAddress: string,
+  fromBlock: number,
+  toBlock: number,
+  deps: IndexReadDeps = PRODUCTION_INDEX_READ_DEPS,
+): Promise<ChainRangeReadResult | null> {
+  const tokenAddress = settlementTokenAddress(chainId)
+  if (!tokenAddress) return { ok: true, legs: [] }
+  if (fromBlock > toBlock) return { ok: true, legs: [] }
+
+  const found = await deps.discover(chainId, accountAddress, tokenAddress, fromBlock, toBlock)
+  if (found === null) return null
+
+  // The highest block every leg at or below which is in `legs`.
+  let readThrough = found.ok ? toBlock : found.readThroughBlock ?? fromBlock - 1
+  let failed = !found.ok
+  const legs: ChainInboundLeg[] = []
+  for (const txHash of found.txHashes) {
+    const read = await deps.readByHash(chainId, accountAddress, txHash)
+    if (!read.ok) {
+      // The failed receipt's block is unknown, but hashes arrive oldest
+      // first, so it is at or after the highest block read so far, and may BE
+      // that block: stop just before it. The legs of that block are dropped
+      // below and read again next time (the row identity dedupes).
+      failed = true
+      const highest = legs.reduce((max, leg) => Math.max(max, leg.blockNumber), fromBlock)
+      readThrough = Math.min(readThrough, highest - 1)
+      break
+    }
+    legs.push(...read.legs)
+  }
+
+  // A partial discovery may name a transaction in its unfinished last block;
+  // keep only what lies inside the range this read can vouch for.
+  const kept = legs.filter((leg) => leg.blockNumber <= readThrough)
+  if (!failed) return { ok: true, legs: kept }
+  return {
+    ok: false,
+    reason: 'rpc_unavailable',
+    partial: readThrough >= fromBlock ? { legs: kept, readThroughBlock: readThrough } : null,
   }
 }
 

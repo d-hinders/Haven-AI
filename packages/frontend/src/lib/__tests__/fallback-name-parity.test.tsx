@@ -10,8 +10,8 @@
  * The four sites the issue names:
  *
  *   - `counterpartyLabel` (`lib/transaction-presentation.tsx`) — "New
- *     recipient", "Deposit", "Agent payment", and the templated "From …" /
- *     "Returned from …";
+ *     recipient", "Deposit", "Sale" (#5000), "Agent payment", and the
+ *     templated "From …" / "Returned from …" / "Sale · …";
  *   - `paymentSourceTitle` (`lib/transaction-labels.ts`) — "Agent payment",
  *     "Machine payment";
  *   - `MerchantsTable` / `AgentsTable` — "Unknown recipient", "None in this
@@ -91,6 +91,18 @@ describe('#4932 — the frontend fallback literals are the core list', () => {
       [
         'deposit from an own account',
         counterpartyLabel(row({ direction: 'in' }), undefined, new Map([[`${OWN_ACCOUNT}:8453`, 'Main']]), {
+          noAddress: true,
+        }),
+      ],
+      // #5000: a sale with no recorded product reads "Sale"
+      [
+        'sale without a product',
+        counterpartyLabel(row({ direction: 'in', sale: { productName: null } }), undefined, undefined, { noAddress: true }),
+      ],
+      // #5000: a recorded sale reads "Sale · <product>"
+      [
+        'recorded sale',
+        counterpartyLabel(row({ direction: 'in', sale: { productName: 'Haven Field Notes' } }), undefined, undefined, {
           noAddress: true,
         }),
       ],

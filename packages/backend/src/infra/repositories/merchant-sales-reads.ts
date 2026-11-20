@@ -94,7 +94,9 @@ export const NO_FILTERS: SalesFilters = { kinds: null, productIds: null, payers:
 /**
  * The per-transaction relation. Parameters:
  * $1 account, $2 user, $3 chain, $4 from (inclusive), $5 to (exclusive),
- * $6 one transaction hash (lower-case) or NULL for every transaction,
+ * $6 a list of transaction hashes (lower-case) or NULL for every transaction
+ *    (#5000: a list, so the transactions feed reads its rows in one statement;
+ *    `findPayment` passes a list of one),
  * $7 kinds, $8 product ids, $9 payers (each a text[] or NULL),
  * $10 the search's receipt pattern (NULL: no search), $11 its payers,
  * $12 its product ids, $13 its address-prefix pattern (or NULL).
@@ -125,7 +127,7 @@ const PAYMENTS_CTE = `
        AND t.amount_raw::numeric > 0
        AND t.block_time >= $4::timestamptz
        AND t.block_time < $5::timestamptz
-       AND ($6::text IS NULL OR LOWER(t.tx_hash) = $6::text)
+       AND ($6::text[] IS NULL OR LOWER(t.tx_hash) = ANY($6::text[]))
      GROUP BY LOWER(t.tx_hash)
   ),
   pay AS (
@@ -196,7 +198,7 @@ const PAYMENTS_CTE = `
        AND NOT ms.sender_is_own_address
        AND ms.block_time >= $4::timestamptz
        AND ms.block_time < $5::timestamptz
-       AND ($6::text IS NULL OR LOWER(ms.tx_hash) = $6::text)
+       AND ($6::text[] IS NULL OR LOWER(ms.tx_hash) = ANY($6::text[]))
   ),
   pay_f AS (
     SELECT * FROM pay p
@@ -220,7 +222,7 @@ const NO_BOUND_TO = 'infinity'
 function relationParams(
   scope: SalesScope,
   period: PeriodBounds,
-  txHash: string | null,
+  txHashes: readonly string[] | null,
   filters: SalesFilters,
 ): unknown[] {
   return [
@@ -229,7 +231,7 @@ function relationParams(
     scope.chainId,
     period.from === null ? NO_BOUND_FROM : period.from,
     period.to === null ? NO_BOUND_TO : period.to,
-    txHash,
+    txHashes,
     filters.kinds,
     filters.productIds,
     filters.payers,
@@ -535,9 +537,49 @@ export async function findPayment(
   const result = await db.query<PaymentRow>(
     `WITH ${PAYMENTS_CTE}
      SELECT ${PAYMENT_COLUMNS} FROM pay`,
-    relationParams(scope, { from: null, to: null }, txHash.toLowerCase(), NO_FILTERS),
+    relationParams(scope, { from: null, to: null }, [txHash.toLowerCase()], NO_FILTERS),
   )
   return result.rows[0] ?? null
+}
+
+/** One row of {@link listFeedSaleMarkers}. */
+export interface FeedSaleMarkerRow {
+  /** Lower-case. */
+  tx_hash: string
+  kind: 'sale' | 'no_product'
+  product_id: string | null
+  product_name: string | null
+  receipt_number: string | null
+  merchant_reference: string | null
+}
+
+/**
+ * #5000: which of these transactions the Sales page counts as a sale received
+ * in the account, read from the SAME `pay` relation, so the transactions feed
+ * and the Sales page cannot disagree about what a sale is. Only the `account`
+ * arm (`held_by = 'account'`): a Stripe-held sale never moved through a Haven
+ * account and is never a feed row, even when it shares a hash with one. Own
+ * moves are not returned. An empty list reads nothing.
+ */
+export async function listFeedSaleMarkers(
+  scope: SalesScope,
+  txHashes: readonly string[],
+  db: Executor = pool,
+): Promise<FeedSaleMarkerRow[]> {
+  if (txHashes.length === 0) return []
+  const result = await db.query<FeedSaleMarkerRow>(
+    `WITH ${PAYMENTS_CTE}
+     SELECT tx_hash, kind, product_id, product_name, receipt_number, merchant_reference
+       FROM pay
+      WHERE held_by = 'account' AND kind IN ('sale', 'no_product')`,
+    relationParams(
+      scope,
+      { from: null, to: null },
+      Array.from(new Set(txHashes.map((hash) => hash.toLowerCase()))),
+      NO_FILTERS,
+    ),
+  )
+  return result.rows
 }
 
 export interface PaymentLegRow {

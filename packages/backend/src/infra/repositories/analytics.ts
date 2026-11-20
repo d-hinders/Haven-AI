@@ -807,7 +807,7 @@ function receiptNameCandidate(path: string): string {
  * - **Haven's own fallback words** — an exact match, ASCII case-folded and
  *   whitespace-collapsed, against `HAVEN_FALLBACK_NAMES` (`@haven_ai/core`),
  *   or a name starting with one of `HAVEN_FALLBACK_NAME_PREFIXES` ("From ",
- *   "Returned from ").
+ *   "Returned from ", "Sale · ").
  *
  * This is the ONE place the rule lives: the lookup has one caller
  * (`loadRecipientNameIndex`), so it covers every surface the name reaches —

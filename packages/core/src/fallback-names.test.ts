@@ -12,11 +12,12 @@ import {
 } from './fallback-names.js'
 
 describe('HAVEN_FALLBACK_NAMES', () => {
-  it('is the seven literals the frontend renders for an unnamed counterparty', () => {
+  it('is the eight literals the frontend renders for an unnamed counterparty', () => {
     expect([...HAVEN_FALLBACK_NAMES]).toEqual([
       'New recipient',
       'Unknown recipient',
       'Deposit',
+      'Sale',
       'Agent payment',
       'Machine payment',
       'Moved between your accounts',
@@ -28,7 +29,7 @@ describe('HAVEN_FALLBACK_NAMES', () => {
     expect([...HAVEN_FALLBACK_NAMES]).toEqual(Object.values(HAVEN_FALLBACK_NAME))
   })
 
-  it('carries the two templated prefixes, each with its trailing space', () => {
-    expect([...HAVEN_FALLBACK_NAME_PREFIXES]).toEqual(['From ', 'Returned from '])
+  it('carries the three templated prefixes, each with its trailing space', () => {
+    expect([...HAVEN_FALLBACK_NAME_PREFIXES]).toEqual(['From ', 'Returned from ', 'Sale · '])
   })
 })

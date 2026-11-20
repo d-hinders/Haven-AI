@@ -16,6 +16,13 @@ import type { AggregatedTransaction } from '@/types/transactions'
 vi.mock('@/hooks/useEscapeToClose', () => ({ useEscapeToClose: vi.fn() }))
 vi.mock('@/hooks/useFocusTrap', () => ({ useFocusTrap: vi.fn() }))
 
+// #5000: whether Sales is on, read through the shell's context. Off (null, no
+// provider) unless a test turns it on.
+const merchantServices = vi.hoisted(() => ({ value: null as { enabled: boolean } | null }))
+vi.mock('@/context/MerchantServicesContext', () => ({
+  useOptionalMerchantServicesContext: () => merchantServices.value,
+}))
+
 const ACCOUNT = '0x4444444444444444444444444444444444444444'
 const RESERVE = '0x6666666666666666666666666666666666666666'
 const RECIPIENT = '0x2222222222222222222222222222222222222222'
@@ -337,6 +344,59 @@ describe('TransactionDetailPanel — structure per kind', () => {
     expect(screen.getAllByText('Deposit')).toHaveLength(1)
     expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
     expect(rows(details())).toEqual({ From: 'An outside wallet' })
+  })
+
+  it('a recorded sale (#5000): "Sale · <product>", no kind line, its record rows and a link to Sales', () => {
+    merchantServices.value = { enabled: true }
+    try {
+      renderPanel(
+        tx({
+          direction: 'in',
+          from: SENDER,
+          to: ACCOUNT,
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        }),
+      )
+      expect(screen.getByRole('dialog', { name: 'Sale · Haven Field Notes' })).toBeInTheDocument()
+      // No kind line: "Deposit" would contradict the title.
+      expect(screen.queryByText('Deposit')).not.toBeInTheDocument()
+      expect(within(header()).getByText('Into Main', { exact: false })).toBeInTheDocument()
+      expect(rows(details())).toEqual({
+        From: 'An outside wallet',
+        Product: 'Haven Field Notes',
+        'Receipt number': 'R-1042',
+        'Merchant reference': 'order-77',
+      })
+      expect(screen.getByRole('link', { name: 'View in Sales' })).toHaveAttribute('href', '/sales')
+    } finally {
+      merchantServices.value = null
+    }
+  })
+
+  it('a sale with no recorded product (#5000): "Sale", only the recorded rows, no link while Sales is off', () => {
+    renderPanel(
+      tx({
+        direction: 'in',
+        from: SENDER,
+        to: ACCOUNT,
+        sale: { productName: null, receiptNumber: null, merchantReference: null },
+      }),
+    )
+    expect(screen.getByRole('dialog', { name: 'Sale' })).toBeInTheDocument()
+    expect(screen.getAllByText('Sale')).toHaveLength(1)
+    expect(screen.queryByText('Deposit')).not.toBeInTheDocument()
+    expect(rows(details())).toEqual({ From: 'An outside wallet' })
+    expect(screen.queryByRole('link', { name: 'View in Sales' })).not.toBeInTheDocument()
+  })
+
+  it('a plain deposit never links to Sales, even while Sales is on (#5000)', () => {
+    merchantServices.value = { enabled: true }
+    try {
+      renderPanel(KINDS.deposit)
+      expect(screen.queryByRole('link', { name: 'View in Sales' })).not.toBeInTheDocument()
+    } finally {
+      merchantServices.value = null
+    }
   })
 
   it('an own transfer: the row title, From → To in the header, and an unsigned amount', () => {

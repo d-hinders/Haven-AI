@@ -42,7 +42,7 @@ import {
   type EnrichedTransaction,
   enrichedTransactionIdentityKey,
   enrichTransactionsWithAgents,
-  foldOwnAccountTransfers,
+  foldAndMarkSales,
   fetchAccountTransactions,
   mergeX402Transactions,
   resolveTransactionCurrency,
@@ -752,9 +752,9 @@ export default async function dashboardRoutes(
     // enrichment, because the fold refuses an outbound row with no initiator
     // classification (an enrichment outage) rather than risk hiding an agent
     // payment, and its pairing does not depend on the sort above. Ownership
-    // is this surface's account set (`listDashboardAccounts`, hybrid only),
-    // so a transfer from an account this route does not fetch stays a send.
-    const foldedTransactions = foldOwnAccountTransfers(enrichedTransactions, accounts)
+    // is this surface's account set (`listDashboardAccounts`, hybrid only): a
+    // transfer from an unfetched account stays a send. #5000: then the sale marker.
+    const foldedTransactions = await foldAndMarkSales(sub, enrichedTransactions, accounts, { fold: true, log: request.log })
 
     // #3824: the grouped activity rows — server-side over the SAME feed the
     // preview slices, so the counts are not bounded by any client window.

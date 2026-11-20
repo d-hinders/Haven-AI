@@ -27,7 +27,13 @@ export function isDelegateSweep(tx: Pick<AggregatedTransaction, 'activityType'>)
 export type CounterpartyFields = Pick<
   AggregatedTransaction,
   'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId' | 'recipientName'
->
+> & {
+  /**
+   * #5000: the sale marker — on a `/transactions` row, and on a dashboard
+   * group of sales (which carries the product name alone).
+   */
+  sale?: Pick<NonNullable<AggregatedTransaction['sale']>, 'productName'>
+}
 
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
@@ -141,7 +147,8 @@ function serverName(tx: CounterpartyFields, options: { resolvedName?: string | n
  * falls back to its source title ("Agent payment"), an inbound row reads
  * "Deposit" — or "From <account>" when its sender is another of the user's
  * own accounts (the backend's `resolvedName`, else the chain-keyed
- * `accountNamesByAddress` entry, #4099) — and an address
+ * `accountNamesByAddress` entry, #4099), or "Sale · <product>" / "Sale" when
+ * the backend marked it a sale into the Sales account (#5000) — and an address
  * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
@@ -159,7 +166,9 @@ function serverName(tx: CounterpartyFields, options: { resolvedName?: string | n
  * (host, source title, own account, contact) only stand in when the server
  * named nobody. An incoming row keeps its #4099 rule ("From <account>" or
  * "Deposit"): a server name there is the sender's, and the title names a
- * sender only when it is another of the user's own accounts.
+ * sender only when it is another of the user's own accounts. A sale (#5000)
+ * reads "Sale · <product>", or "Sale" with no recorded product; the
+ * own-account rule runs first, since own money is never a sale.
  *
  * The default mode is byte-identical to the pre-#3810 behaviour. The list
  * rows pass `{ noAddress: true }` (#3811), and so does
@@ -191,11 +200,18 @@ export function counterpartyLabel(
     // <account>", so the title says the money LEFT that account (a bare name
     // reads as the account that received it). Screens without a server name
     // (the account page, /transactions) look the sender up in the own-account
-    // map — chain-keyed only, never a contact. Every other deposit stays
+    // map — chain-keyed only, never a contact. #5000: a sale into the Sales
+    // account reads "Sale · <product>" (or "Sale"). Every other deposit stays
     // "Deposit".
     if (tx.direction === 'in') {
       const sender = ownAccountSenderName(tx, accountNamesByAddress, options.resolvedName)
-      return sender ? `${HAVEN_FALLBACK_NAME_PREFIX.from}${sender}` : HAVEN_FALLBACK_NAME.deposit
+      if (sender) return `${HAVEN_FALLBACK_NAME_PREFIX.from}${sender}`
+      if (tx.sale) {
+        return tx.sale.productName
+          ? `${HAVEN_FALLBACK_NAME_PREFIX.sale}${tx.sale.productName}`
+          : HAVEN_FALLBACK_NAME.sale
+      }
+      return HAVEN_FALLBACK_NAME.deposit
     }
 
     const address = tx.to

@@ -1202,7 +1202,10 @@ preview renders `GET /dashboard/overview`'s `activity` groups — one row per
 group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
 no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
-from another of the user's own accounts — "From <account>" (#4099), "New
+from another of the user's own accounts — "From <account>" (#4099), "Sale" or
+"Sale · <product>" for a group of sales into the Sales account (#5000: its own
+group per day, apart from the day's deposits, naming a product only when
+every member shares it), "New
 recipient" — never a truncated address); the subtitle is the agent's name, plus
 "From <account>" — the account the money left — on a send when the user has
 more than one account and a name came back (#4117); a group of N
@@ -1325,7 +1328,8 @@ Money and risk clarity:
   [`recipient-names.md`](recipient-names.md)), else the merchant's hostname,
   the source title or a browser-resolved name; "Deposit", "From <account>" for a transfer from
   another of the user's own accounts (#4099 — the dashboard reads the server's
-  name, the ledgers the chain-keyed own-account map), or "New recipient". A raw address never
+  name, the ledgers the chain-keyed own-account map), "Sale · <product>" or
+  "Sale" for a sale into the Sales account (#5000), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the address
   lives, shortened under Technical details with copy and an explorer link
   (#4267).

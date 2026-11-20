@@ -14,12 +14,13 @@ import {
   buildAccountTransactionsPage,
   enrichTransactionsWithAccounting,
   filterEnrichedTransactions,
-  foldOwnAccountTransfers,
+  foldAndMarkSales,
   mergeSortDedupeAndEnrich,
   paginateByOffset,
   parseTransactionWindow,
   resolveTransactionCurrency,
   resolveTransactionFilters,
+  saleWire,
   serveTimeAmount,
   transactionsToCsv,
   counterpartyAddressesOf,
@@ -231,10 +232,9 @@ export default async function transactionRoutes(
       aggregateAccountTransactions(accounts, request.log, fresh),
     ])
     const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregate.merged, currency)
-    const folded =
-      request.query.foldOwnTransfers === '1' && !accountFilterId
-        ? foldOwnAccountTransfers(enriched, allAccounts)
-        : enriched
+    const folded = await foldAndMarkSales(sub, enriched, allAccounts, {
+      fold: request.query.foldOwnTransfers === '1' && !accountFilterId, log: request.log,
+    })
     // #4095: names resolve BEFORE filtering, server-side — search matches
     // what the row shows, and the row's names live here now.
     const searchTerm = request.query.search?.trim() ?? ''
@@ -297,7 +297,7 @@ export default async function transactionRoutes(
       // One account name. The `safeName` twin outlived #2914 by exactly one
       // release so `@haven_ai/cli` on `latest` would not print every ACCOUNT
       // cell blank; `latest` is 0.3.0-alpha.0 now and reads `accountName`.
-      transactions: approxPage.map((tx) => ({ ...tx, scope })),
+      transactions: approxPage.map((tx) => ({ ...saleWire(tx), scope })),
       total: filtered.length,
       offset,
       limit,
@@ -443,10 +443,9 @@ export default async function transactionRoutes(
         aggregateAccountTransactions(accounts, request.log, fresh),
       ])
       const enriched = await mergeSortDedupeAndEnrich(sub, accounts, aggregateResult.merged, currency)
-      const folded =
-        request.query.foldOwnTransfers === '1' && !accountFilterId
-          ? foldOwnAccountTransfers(enriched, allAccounts)
-          : enriched
+      const folded = await foldAndMarkSales(sub, enriched, allAccounts, {
+        fold: request.query.foldOwnTransfers === '1' && !accountFilterId, log: request.log,
+      })
 
       // #4095/#4882: the names resolve BEFORE the filter, so a search for a
       // merchant's name finds its rows — the same index names the file's

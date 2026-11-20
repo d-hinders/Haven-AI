@@ -170,6 +170,16 @@ export interface Transaction {
   accounting?: TransactionAccounting
 }
 
+/** The sale marker on a feed row (#5000). */
+export interface TransactionSaleMarker {
+  /** The recorded product id; null on a payment without a product. */
+  productId: string | null
+  /** The Sales page's product label (`labelProducts`); null without a product. */
+  productName: string | null
+  receiptNumber: string | null
+  merchantReference: string | null
+}
+
 /** The `accounting` object on a transaction row (#2870). */
 export interface TransactionAccounting {
   /** Ledger provider key, e.g. `'fortnox'`. The UI maps it to a display name. */
@@ -216,6 +226,14 @@ export interface EnrichedTransaction extends Transaction {
     toAccountName: string
     toAccountAddress: string
   }
+  /**
+   * #5000: present only on an inbound row into the user's Sales account that
+   * the Sales page counts as a sale (`sale-marker.ts`): a recorded sale, or a
+   * payment without a product. The record fields are null when not recorded.
+   * `productId` compares "same product" in a dashboard group and never leaves
+   * the server (`saleWire`).
+   */
+  sale?: TransactionSaleMarker
   /**
    * Which settlement branch moved the money — `'eip3009' | 'erc7710'` — read
    * from the intent's `machine_metadata` JSONB (#1705, epic #1704).

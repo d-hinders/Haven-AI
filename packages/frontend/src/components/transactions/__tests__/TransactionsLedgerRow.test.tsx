@@ -104,6 +104,21 @@ describe('TransactionsLedgerRow — titles and sublines', () => {
     expect(row.textContent).not.toMatch(/You|Unknown/)
   })
 
+  it('a sale (#5000): "Sale · <product>" when recorded, "Sale" when not, and the own-account rule first', () => {
+    const recorded = renderRow({
+      ...deposit,
+      sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1', merchantReference: null },
+    })
+    expect(within(recorded).getByText('Sale · Haven Field Notes')).toBeInTheDocument()
+    expect(within(recorded).queryByText('Deposit')).not.toBeInTheDocument()
+  })
+
+  it('a sale with no recorded product (#5000) reads "Sale"', () => {
+    const row = renderRow({ ...deposit, sale: { productName: null, receiptNumber: null, merchantReference: null } })
+    expect(within(row).getByText('Sale')).toBeInTheDocument()
+    expect(within(row).queryByText('Deposit')).not.toBeInTheDocument()
+  })
+
   it('a sweep: "Returned from <agent>" with the Recovered badge', () => {
     const row = renderRow(sweep)
     expect(within(row).getByText('Returned from Atlas')).toBeInTheDocument()

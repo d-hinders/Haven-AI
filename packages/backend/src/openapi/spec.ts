@@ -15289,6 +15289,17 @@ export const openapiSpec = {
             },
             additionalProperties: false,
           },
+          sale: {
+            type: 'object',
+            description: '#5000: present only on an inbound row into the user\'s Sales account that the Sales page counts as a sale (its own per-transaction rule, `account`-held sales only): a recorded sale, or a payment from anyone other than the owner\'s own accounts or agents without a product. Only while merchant services are on. Never on a folded move (`ownTransfer`) or on a transfer from another of the user\'s own accounts. A Stripe-held sale is never a feed row. Each field is null when not recorded.',
+            required: ['productName', 'receiptNumber', 'merchantReference'],
+            properties: {
+              productName: { type: ['string', 'null'], description: 'The Sales page\'s product label: the catalogue name, else the recorded product name, else the product id. Null on a payment without a product.' },
+              receiptNumber: { type: ['string', 'null'] },
+              merchantReference: { type: ['string', 'null'] },
+            },
+            additionalProperties: false,
+          },
           agentId: uuid,
           scope: { $ref: '#/components/schemas/ListScope' },
         },
@@ -16007,6 +16018,15 @@ export const openapiSpec = {
             },
             additionalProperties: false,
             description: '#4268: present only on a move between two of the user\'s own accounts, its two explorer legs folded into one group (#4265\'s fold, the same one `GET /transactions?foldOwnTransfers=1` applies). Same-day moves between the same two accounts form one group. The group keeps `direction: out`, `merchantName` and `fromAccountName` as an unfolded send would. Not set for an agent-initiated transfer, a self-send, an outbound row whose agent enrichment failed, or a leg whose partner leg was not read; each of those stays the row it was before.',
+          },
+          sale: {
+            type: 'object',
+            required: ['productName'],
+            properties: {
+              productName: { type: ['string', 'null'], description: 'The Sales page\'s product label when every member has the same recorded product; null when the members name different products or none.' },
+            },
+            additionalProperties: false,
+            description: '#5000: present only on a group of sales into the user\'s Sales account (the rows `GET /transactions` marks with `sale`). Sales group apart from the day\'s other deposits, one group per day whichever products they name.',
           },
           activityType: { type: ['string', 'null'], description: "The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments." },
           direction: { type: 'string', enum: ['in', 'out'] },

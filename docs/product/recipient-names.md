@@ -22,7 +22,9 @@ Haven names the other side of a payment in **one order** (#4882, epic
   (payments and refused attempts). An outgoing row's title is the server's
   name; the paid API's host or the browser's own lookups stand in only when
   the server named nobody. An incoming row keeps its rule: "From <account>"
-  for another of your own accounts, else "Deposit".
+  for another of your own accounts, "Sale · <product>" (or "Sale" with no
+  recorded product) for a sale into your Sales account by the Sales page's
+  rule (#5000), else "Deposit".
 - **The analytics kind line** under a name reads "Paid API" for a catalog
   merchant, as for a host-named one.
 - **Search and exports:** transactions search matches every name the order
@@ -64,10 +66,11 @@ The first source that has a name wins:
      or `0X`) or in Haven's own short form (`0xA873…DD35`, `0xa873...dd35`,
      `0xA873 … DD35`);
    - **one of Haven's own fallback words** — "New recipient", "Unknown
-     recipient", "Deposit", "Agent payment", "Machine payment", "Moved
-     between your accounts", "None in this range" — matched exactly after
-     case folding and whitespace collapsing, or any name starting with
-     "From " or "Returned from ", the frontend's templated fallbacks.
+     recipient", "Deposit", "Sale", "Agent payment", "Machine payment",
+     "Moved between your accounts", "None in this range" — matched exactly
+     after case folding and whitespace collapsing, or any name starting with
+     "From ", "Returned from " or "Sale · ", the frontend's templated
+     fallbacks. A seller therefore cannot make a payment read as a sale.
 
    The rule applies to **receipt names only**. Your contacts and your own
    account names are your own words, so they are never refused. The

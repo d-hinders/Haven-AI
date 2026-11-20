@@ -367,8 +367,10 @@ export async function readInboundTransfersInBlockRange(
 
   const legs: ChainInboundLeg[] = []
   const times = new Map<number, Date>()
-  // Logs arrive in block order, chunk by chunk. A block time that cannot be
-  // read stops the walk there: the legs before that block are still complete.
+  // Walk in block order (sorted, not trusted from the provider): a block time
+  // that cannot be read stops the walk there, and every leg in an earlier
+  // block must already have been taken for the partial result to be complete.
+  rawLogs.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index)
   for (const log of rawLogs) {
     let blockTime = times.get(log.blockNumber)
     if (!blockTime) {
@@ -406,8 +408,9 @@ export async function latestBlockNumber(chainId: number): Promise<number> {
 /**
  * A block whose contents will not be reorganised away (`finalized`, else
  * `SETTLED_CHAIN_READ_DEPTH_BLOCKS` below the head), or null when the chain
- * offers none. The merchant index never moves its cursor past it, so the
- * unsettled tail is read again on every pass (#4940 review S1).
+ * offers none. The merchant index keeps its cursor at or below the higher of
+ * this block and `MAX_UNSETTLED_REREAD_BLOCKS` under the head, so the recent
+ * tail is read again on every pass (#4940 review S1).
  */
 export async function settledBlockNumber(chainId: number): Promise<number | null> {
   const { settledReadBlock } = await import('../../infra/chain/settled-read-block.js')

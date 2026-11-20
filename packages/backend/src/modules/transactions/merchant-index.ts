@@ -209,9 +209,10 @@ export async function runMerchantInboundIndexTick(
 
       const toBlock = Math.min(latest, fromBlock + MAX_BLOCKS_PER_PASS - 1)
       // Read BEFORE the range (#4940 review round 2): every block at or below
-      // the cursor saved below must already have been settled when it was
-      // read. Taken after the read, a block replaced by a reorg and finalized
-      // during this pass could be passed over with its pre-reorg contents.
+      // the cursor saved below must, when it was read, already have been
+      // either finalized or at least MAX_UNSETTLED_REREAD_BLOCKS below the
+      // head. Taken after the read, a block replaced by a reorg during this
+      // pass could be passed over with its pre-reorg contents.
       const settled = await deps.settledBlock(account.chainId)
       const read = await deps.readRange(
         account.chainId,
@@ -266,14 +267,16 @@ export async function runMerchantInboundIndexTick(
       // write leaves it where it was, so the next tick re-reads the range. A
       // read that failed part-way moves it no further than the last block read.
       //
-      // And never past the settled block (#4940 review S1), bounded below by
-      // `MAX_UNSETTLED_REREAD_BLOCKS` under the head: the pass reads up to
-      // `latest` so a payment is indexed within a tick, but a block above the
-      // settled one can still be replaced by a reorg. Keeping the cursor at or
-      // below it means the unsettled tail is read again on every pass, so a
-      // payment that lands in a replacement block at a height already walked is
-      // still found. Re-reading is cheap only while the tail is short, hence
-      // the bound. With no settled block known, the cursor does not move.
+      // And never past the cursor ceiling (#4940 review S1, bounded on
+      // 2026-11-20): the higher of the settled block and
+      // `MAX_UNSETTLED_REREAD_BLOCKS` under the head. The pass reads up to
+      // `latest` so a payment is indexed within a tick, but a recent block can
+      // still be replaced by a reorg, so the tail above the ceiling is read
+      // again on every pass and a payment that lands in a replacement block at
+      // a height already walked is still found. When `finalized` lags more than
+      // MAX_UNSETTLED_REREAD_BLOCKS behind the head, the ceiling sits ABOVE the
+      // settled block: a reorg deeper than that is not re-read here (stated on
+      // the constant). With no settled block known, the cursor does not move.
       const cursorCeiling =
         settled === null ? fromBlock - 1 : Math.max(settled, latest - MAX_UNSETTLED_REREAD_BLOCKS)
       const lastIndexedBlock = Math.min(readThroughBlock, cursorCeiling)

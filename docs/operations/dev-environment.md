@@ -495,7 +495,8 @@ Isolation rules that are non-negotiable for a payments product:
   it would at 500, and nothing is lost. Move the primary back to a dedicated
   endpoint that passes every line once the merchant-index fix (this PR's
   `MAX_UNSETTLED_REREAD_BLOCKS` and partial reads) is on dev.
-  `MERCHANT_INBOUND_INDEX_DISABLED=true` stops that job outright.
+  `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`, lower-case; any other
+  value refuses boot) stops that job outright.
 
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over

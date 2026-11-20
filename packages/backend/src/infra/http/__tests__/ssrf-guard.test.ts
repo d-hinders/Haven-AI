@@ -386,7 +386,7 @@ describe('safeGetText', () => {
       resolver: publicResolver,
       transport: transportReturning({ status: 404, location: null, body: 'nope' }),
     })
-    expect(result).toMatchObject({ ok: false, reason: 'http_status' })
+    expect(result).toMatchObject({ ok: false, reason: 'http_status', detail: 'HTTP 404' })
   })
 
   it('passes a byte cap down to the transport', async () => {

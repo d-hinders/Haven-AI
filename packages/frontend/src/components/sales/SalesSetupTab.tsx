@@ -10,12 +10,23 @@ import NetworkPill from '@/components/NetworkPill'
 import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
 import { timeAgo } from '@/lib/format'
 import { catalogueView, type SalesCatalogue } from '@/lib/sales'
+import { MerchantKitSetupPrompt } from './MerchantKitSetupPrompt'
 import { SalesKeysSection } from './SalesKeysSection'
+import { SellerDefinition } from './SellerDefinition'
 import StripeDepositAddressesSection from './StripeDepositAddressesSection'
 
-/** The helper under the kit address: the mockup's first-run copy, then what the last read said. */
-function kitHelper(catalogue: SalesCatalogue | null): string {
-  const base = 'The public address of your kit. Haven reads your product list from it; it never sends anything there.'
+/**
+ * The helper under the product list address: what Haven reads, then what the
+ * last read said. Seller-neutral (#4985): the address belongs to whatever the
+ * merchant runs, not to the merchant kit.
+ */
+function productListHelper(catalogue: SalesCatalogue | null): React.ReactNode {
+  const base = (
+    <>
+      The public address of your seller. Haven reads its product list from{' '}
+      <span className="font-mono">/.well-known/x402</span> there and never sends anything to it.
+    </>
+  )
   if (catalogue === null || catalogue.deployment_url === null) return base
   const view = catalogueView(catalogue)
   const when = catalogue.last_read_at ? ` ${timeAgo(catalogue.last_read_at)}` : ''
@@ -25,18 +36,26 @@ function kitHelper(catalogue: SalesCatalogue | null): string {
 }
 
 /**
- * The Setup tab (#4900, approved on #4894): where a seller is connected to the
+ * The Setup tab (#4900, approved on #4894; the seller definition and the
+ * optional product list address by #4985): where a seller is connected to the
  * Sales account — the receiving address, the Sales keys (a slot #4905 owns),
- * the kit address and, since #4983, the Stripe deposit addresses. One Card,
- * one `Card.Section` per part.
+ * the product list address and, since #4983, the Stripe deposit addresses. One
+ * Card, one `Card.Section` per part.
  *
+ * - **The seller definition** opens the card, before Receiving address, so the
+ *   word "seller" is introduced before any other use of it in this view.
  * - **Receiving address**: opens the Receive dialog the page already holds for
  *   the Sales account; no address is printed here.
  * - **Sales keys**: `SalesKeysSection`.
- * - **Kit address**: saved through `PUT /merchant-catalogue/deployment`, which
- *   stores and reads it at once. A refusal reads as the route words it. The
- *   first-run step "Tell Haven where your kit runs" links here with
- *   `#kit-address`, and the field takes focus.
+ * - **Product list address (optional)**: saved through
+ *   `PUT /merchant-catalogue/deployment`, which stores and reads it at once. A
+ *   refusal reads as the route words it. The first-run step "Add your product
+ *   list (optional)" links here with `#kit-address`, and the field takes focus.
+ *   The `#kit-address` anchor id and the `sales-kit-address*` ids stay: the
+ *   first-run step links to the anchor. "Optional" means it may be left empty;
+ *   removing an address once saved is out of scope (the route has no DELETE).
+ * - **Set up with your coding agent**: `MerchantKitSetupPrompt`, the same
+ *   function the first-run helper uses. Base Sepolia only.
  * - **Stripe deposit addresses**: `StripeDepositAddressesSection`, moved here
  *   from Settings → Business → Sales by #4983 (owner decision 2026-11-19:
  *   "Yes move Stripe deposit address"). It is one more part of this card, so
@@ -48,7 +67,7 @@ export function SalesSetupTab({
   catalogue,
   onShowAddress,
 }: {
-  account: { name: string; chain_id: number }
+  account: { name: string; chain_id: number; account_address: string }
   catalogue: UseMerchantCatalogueResult
   onShowAddress: () => void
 }) {
@@ -77,7 +96,7 @@ export function SalesSetupTab({
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (trimmed === '') {
-      setError('Enter the address of your kit.')
+      setError('Enter your seller’s address.')
       return
     }
     setError(null)
@@ -88,10 +107,12 @@ export function SalesSetupTab({
   return (
     <div className="mt-6" data-testid="sales-setup-tab">
       <Card hover={false} className="p-5 md:p-6">
-        <div id="receiving-address" className="flex flex-wrap items-start justify-between gap-3">
+        <SellerDefinition />
+
+        <div id="receiving-address" className="mt-5 flex flex-wrap items-start justify-between gap-3 border-t border-[var(--v2-border)] pt-5">
           <div className="min-w-0">
             <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Receiving address</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Put this in your kit as the address payments go to.</p>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Put this in your seller as the address payments go to.</p>
             <p className="mt-3 flex flex-wrap items-center gap-2 text-sm text-[var(--v2-ink-2)]">
               {account.name} <NetworkPill chainId={account.chain_id} /> payments in USDC
             </p>
@@ -107,10 +128,10 @@ export function SalesSetupTab({
 
         <Card.Section className="mt-5 pt-5">
           <form id="kit-address" onSubmit={(event) => void submit(event)} noValidate>
-            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Kit address</h2>
-            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Where your kit runs. Haven reads your product list from it.</p>
+            <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Product list address</h2>
+            <p className="mt-1 text-xs text-[var(--v2-ink-3)]">Where your seller runs. Haven reads your product list from it.</p>
             <label htmlFor="sales-kit-address" className="mb-1.5 mt-3 block text-sm font-medium text-[var(--v2-ink)]">
-              Kit address
+              Product list address (optional)
             </label>
             {catalogue.loading && catalogue.data === null ? (
               <Skeleton variant="rect" className="h-9 w-full max-w-xl" />
@@ -123,14 +144,14 @@ export function SalesSetupTab({
                     type="url"
                     inputMode="url"
                     autoComplete="off"
-                    placeholder="https://your-kit.example.com"
+                    placeholder="https://your-seller.example.com"
                     value={value}
                     onChange={(event) => {
                       setValue(event.target.value)
                       setError(null)
                     }}
                     invalid={error !== null}
-                    helperText={error ?? kitHelper(catalogue.data)}
+                    helperText={error ?? productListHelper(catalogue.data)}
                     helperTextId="sales-kit-address-help"
                     aria-describedby="sales-kit-address-help"
                     disabled={catalogue.saving}
@@ -142,6 +163,10 @@ export function SalesSetupTab({
               </div>
             )}
           </form>
+        </Card.Section>
+
+        <Card.Section className="mt-5 pt-5">
+          <MerchantKitSetupPrompt accountAddress={account.account_address} chainId={account.chain_id} />
         </Card.Section>
 
         <StripeDepositAddressesSection chainId={account.chain_id} />

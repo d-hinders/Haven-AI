@@ -175,7 +175,7 @@ Variables, named, with values only for those that are not secret:
 | Variable | Value |
 |---|---|
 | `NETWORK` | `eip155:84532` |
-| `PAY_TO` | the receiving Haven dev account: a Haven dev account until Opper has its own, then Opper's |
+| `PAY_TO` | the receiving Sales account's address: the Sales account the demo reports sales to, so its sales land on that account's Sales page. A Haven dev account until Opper has its own, then Opper's |
 | `OPERATOR_NAME` | `Haven (internal technical demo)` |
 | `ENDPOINT_NAME` | `Haven inference demo (Opper)` |
 | `ENDPOINT_DESCRIPTION` | `Internal technical demo run by Haven on Base Sepolia. Test money only. Not a Haven product and not listed in any directory.` |

@@ -94,7 +94,7 @@ export function SalesKeysSection() {
         <div className="min-w-0 flex-[1_1_16rem]">
           <h2 className="text-sm font-semibold text-[var(--v2-ink)]">Sales keys</h2>
           <p className="mt-1 text-xs text-[var(--v2-ink-3)]">
-            Your kit uses a Sales key to report what each payment was for. {SALES_KEY_CANT_SENTENCE}{' '}
+            Your seller uses a Sales key to report what each payment was for. {SALES_KEY_CANT_SENTENCE}{' '}
             <a
               href={LIMITS_HREF}
               target="_blank"
@@ -117,7 +117,7 @@ export function SalesKeysSection() {
           <p className="text-sm text-[var(--v2-ink-2)]">Your Sales keys could not load. Your payments are unchanged.</p>
         ) : keys.length === 0 ? (
           <p className="text-sm text-[var(--v2-ink-2)]">
-            No Sales keys yet. Your kit needs one to report what each payment was for.
+            No Sales keys yet. Your seller needs one to report what each payment was for.
           </p>
         ) : (
           <DetailList items={items} />
@@ -135,7 +135,7 @@ export function SalesKeysSection() {
         }}
         onConfirm={confirmRevoke}
         title={`Revoke ${revoking ? salesKeyLabel(revoking.key_prefix) : ''}?`}
-        body="Your kit stops being able to report sales with this key straight away. Payments still arrive and count; they show with no product until your kit has a new key."
+        body="Your seller stops being able to report sales with this key straight away. Payments still arrive and count; they show with no product until your seller has a new key."
         confirmLabel="Revoke key"
         busyLabel="Revoking…"
         loading={revokeBusy}

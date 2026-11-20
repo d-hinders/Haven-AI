@@ -122,7 +122,7 @@ describe('create', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Create Sales key' }))
     const dialog = screen.getByRole('dialog', { name: 'Create Sales key' })
 
-    expect(dialog.textContent).toContain('Your kit uses a Sales key to report what each payment was for.')
+    expect(dialog.textContent).toContain('Your seller uses a Sales key to report what each payment was for.')
     expect(dialog.textContent).toContain(
       'A key can’t move money, sign, or see anything but this account’s sales.',
     )
@@ -207,7 +207,7 @@ describe('revoke', () => {
     await renderSection()
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
     const dialog = screen.getByRole('dialog', { name: `Revoke ${LABEL}?` })
-    expect(dialog.textContent).toContain('Your kit stops being able to report sales with this key straight away.')
+    expect(dialog.textContent).toContain('Your seller stops being able to report sales with this key straight away.')
     const reads = mockGet.mock.calls.length
     await userEvent.click(within(dialog).getByRole('button', { name: 'Revoke key' }))
     await waitFor(() => expect(mockDelete).toHaveBeenCalledWith('/merchant-keys/k1'))

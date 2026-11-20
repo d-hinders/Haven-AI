@@ -367,7 +367,7 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
     lines.push({
       key: 'product:none',
       name: 'No product',
-      detail: 'Paid, but your kit sent no sale record',
+      detail: 'Paid, but your seller sent no sale record',
       revenue: salesAmountText(summary.without_product.amount_raw, money),
       count: summary.without_product.count,
       muted: true,
@@ -601,13 +601,37 @@ export function catalogueChainId(network: string | null | undefined): number | u
   return match ? Number(match[1]) : undefined
 }
 
-/** The host of the saved kit address, for "Read from {host}". */
+/** The host of the saved product list address, for "Read from {host}". */
 export function catalogueHost(deploymentUrl: string): string {
   try {
     return new URL(deploymentUrl).host
   } catch {
     return deploymentUrl
   }
+}
+
+/**
+ * Haven's API origin, for the merchant kit's `HAVEN_SALES_URL` (#4985).
+ *
+ * The merchant kit refuses a URL with a path
+ * (`packages/paywall-proxy/src/config.ts`), so this returns an ORIGIN and
+ * nothing else. `NEXT_PUBLIC_API_URL` is the deployment's backend origin — the
+ * same variable `next.config.ts` rewrites `/api` to — and is the only source
+ * that names the backend directly. Without it, the frontend's own origin is the
+ * best available answer: on a deployment where the frontend and backend share
+ * an origin, that origin is where the backend answers.
+ */
+export function havenApiOrigin(): string {
+  const configured = (process.env.NEXT_PUBLIC_API_URL || '').trim()
+  if (configured !== '') {
+    try {
+      return new URL(configured).origin
+    } catch {
+      // A malformed value is not an origin; fall through to the page's own.
+    }
+  }
+  if (typeof window !== 'undefined') return window.location.origin
+  return ''
 }
 
 /**

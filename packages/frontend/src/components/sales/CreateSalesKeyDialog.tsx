@@ -87,7 +87,7 @@ export function CreateSalesKeyDialog({
       >
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Your kit uses a Sales key to report what each payment was for. Haven shows the key once, right after you
+            Your seller uses a Sales key to report what each payment was for. Haven shows the key once, right after you
             create it.
           </p>
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">{SALES_KEY_CANT_SENTENCE}</p>
@@ -121,7 +121,7 @@ export function CreateSalesKeyDialog({
       ) : (
         <div className="space-y-4">
           <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
-            Put it in your kit’s settings. Haven shows it once: after you close this, you’ll see only{' '}
+            Put it in your seller’s settings. Haven shows it once: after you close this, you’ll see only{' '}
             <span className="font-mono text-xs">{salesKeyLabel(created.key_prefix)}</span>
           </p>
           <div>

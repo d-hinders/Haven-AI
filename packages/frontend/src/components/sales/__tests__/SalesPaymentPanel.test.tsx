@@ -180,7 +180,7 @@ describe('the panel, by variant', () => {
     serve({ ...base, kind: 'no_product', product_id: null, product_label: null, merchant_reference: null })
     await open()
     expect(screen.getByRole('dialog', { name: 'No product recorded' })).toBeTruthy()
-    expect(screen.getByText(/Your kit sent no sale record for this payment/)).toBeTruthy()
+    expect(screen.getByText(/Your seller sent no sale record for this payment/)).toBeTruthy()
     expect(within(screen.getByTestId('sales-payment-details')).getByText('Not sent')).toBeTruthy()
     expect(within(screen.getByTestId('sales-payment-header')).getByText('Received')).toBeTruthy()
     expect(screen.queryByRole('button', { name: 'Clear sale record' })).toBeNull()

@@ -9,21 +9,81 @@
 
 /**
  * What a seller is, in one shared constant (#4985, widened by the owner on
- * 2026-11-19: "the kit is one way to sell, not the only one").
+ * 2026-11-19: the merchant kit is one way to sell, not the only one).
  *
  * A merchant's own MCP server or API can be the seller; Haven's merchant kit
  * is one option, never the assumption. #4985 introduces the seller on the
  * Sales page's first-run helper and Setup tab; #4983's Settings description
  * uses the same sentences, so the two surfaces cannot drift. #4985 appends the
- * kit's own sentence ("The merchant kit is a small program you run in front of
- * an API.") where it introduces the kit — that sentence is kit-specific and
- * belongs with the kit, not in the definition every seller reads.
+ * merchant kit's own sentence ("The merchant kit is a small program you run in
+ * front of an API.") where it introduces the merchant kit — that sentence is
+ * kit-specific and belongs with the merchant kit, not in the definition every
+ * seller reads.
  *
  * Exported rather than nested in `en` because it is not a message key: it is
  * one paragraph two surfaces compose into their own sentences.
  */
 export const SELLER_DEFINITION =
   'To sell through Haven, you run a seller: your own MCP server or API, or Haven’s merchant kit. It asks each buyer to pay into your Sales account and tells Haven what each payment was for, using a Sales key.'
+
+/**
+ * The merchant kit's own sentence (#4985). Appended where the merchant kit is
+ * introduced, never folded into `SELLER_DEFINITION`: a merchant running its own
+ * MCP server or API is a seller too, and the definition every seller reads must
+ * not describe the merchant kit.
+ */
+export const MERCHANT_KIT_SENTENCE = 'The merchant kit is a small program you run in front of an API.'
+
+/**
+ * The pilot condition (#4985), stated wherever the merchant kit is offered so
+ * the product UI never reads as a licence. The merchant kit's README says it is
+ * used under written permission from Haven and that this release runs on Base
+ * Sepolia only (`packages/paywall-proxy/README.md` § Licence, § Before you
+ * start).
+ */
+export const MERCHANT_KIT_PILOT_LINE =
+  'During the pilot the merchant kit runs on Base Sepolia only, under written permission from Haven.'
+
+/** The merchant kit's setup guide — the README the definition links to (#4985). */
+export const MERCHANT_KIT_README_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/packages/paywall-proxy/README.md'
+
+/** The architecture doc's "Selling without the kit" section (#4985). */
+export const SELLING_WITHOUT_KIT_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/architecture/12-merchant-kit.md#selling-without-the-kit'
+
+/** The repository the merchant kit is cloned from (#4985). */
+export const MERCHANT_KIT_REPO_URL = 'https://github.com/d-hinders/Haven-AI.git'
+
+/**
+ * The "Set up with your coding agent" prompt (#4985), in the style of the agent
+ * connect flow's prompt: one block a merchant pastes to their coding agent.
+ *
+ * It carries the README URL, the clone instruction, the pilot line, `PAY_TO`
+ * (the Sales account's address), `NETWORK` in the CAIP-2 form the merchant kit
+ * needs and `HAVEN_SALES_URL` (Haven's API origin). It NEVER carries a Sales key
+ * secret or a key prefix: the agent is told to ask the merchant for a key they
+ * create on Sales → Setup → Sales keys, and to paste it into
+ * `HAVEN_MERCHANT_KEY`.
+ *
+ * `salesUrl` must be an origin with no path — the merchant kit refuses a URL
+ * with a path (`packages/paywall-proxy/src/config.ts`). `lib/sales.ts`
+ * `havenApiOrigin()` is the one reading of it.
+ */
+export function merchantKitSetupPrompt(params: { accountAddress: string; salesUrl: string }): string {
+  return [
+    'Set up Haven’s merchant kit so my Sales account can take payments.',
+    '',
+    `1. Clone the repository: git clone ${MERCHANT_KIT_REPO_URL}`,
+    `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
+    `3. ${MERCHANT_KIT_PILOT_LINE}`,
+    '4. Set these in the merchant kit’s environment:',
+    `   PAY_TO=${params.accountAddress}`,
+    '   NETWORK=eip155:84532',
+    `   HAVEN_SALES_URL=${params.salesUrl}`,
+    '5. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into HAVEN_MERCHANT_KEY. Never invent one.',
+  ].join('\n')
+}
 
 export const en = {
   common: {
@@ -574,7 +634,7 @@ export const en = {
       depositAddresses: {
         title: 'Stripe deposit addresses',
         description:
-          'Payments your kit reports as paid to one of these addresses show on the Sales page as received in Stripe. They are never in a Haven balance.',
+          'Payments your seller reports as paid to one of these addresses show on the Sales page as received in Stripe. They are never in a Haven balance.',
         register: 'Register address',
         notice:
           'Registered by you, not verified by Haven. Haven cannot check that a Stripe address is yours, so only register an address Stripe gave you.',
@@ -601,7 +661,7 @@ export const en = {
           working: 'Registering…',
           cancel: 'Cancel',
           doneTitle: 'Address registered',
-          doneBody: 'Sales your kit reports as paid to it now show as received in Stripe.',
+          doneBody: 'Sales your seller reports as paid to it now show as received in Stripe.',
           done: 'Done',
         },
         retireDialog: {

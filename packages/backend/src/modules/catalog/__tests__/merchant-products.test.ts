@@ -138,13 +138,14 @@ async function products(accountId: string) {
 async function source(accountId: string) {
   const rows = await db.query<{
     last_read_status: string
+    last_read_detail: string | null
     last_read_at: Date | null
     mismatch: boolean
     mismatch_reason: string | null
     document_pay_to: string | null
     document_network: string | null
   }>(
-    `SELECT last_read_status, last_read_at, mismatch, mismatch_reason, document_pay_to, document_network
+    `SELECT last_read_status, last_read_detail, last_read_at, mismatch, mismatch_reason, document_pay_to, document_network
      FROM merchant_catalogue_sources WHERE merchant_account_id = $1`,
     [accountId],
   )
@@ -342,6 +343,31 @@ describeDb('the merchant catalogue (#4899)', () => {
     // The last good list survives, and the document identity it came from too.
     expect(await products(accountId)).toHaveLength(2)
     expect(row?.document_pay_to).toBe(ACCOUNT_ADDRESS)
+  })
+
+  it('records a guard 404 as unreachable with the guard’s own detail, which the Products tab keys on (#4985)', async () => {
+    const { accountId } = await seedMerchantAccount()
+    await db.query(
+      `INSERT INTO merchant_catalogue_sources (merchant_account_id, deployment_url) VALUES ($1, $2)`,
+      [accountId, DEPLOYMENT],
+    )
+    await read(accountId, async () => ok(document()))
+
+    // The guard refuses EVERY non-200 answer as `http_status` with detail
+    // `HTTP <n>` (`infra/http/ssrf-guard.ts`), and the catalogue composes
+    // `last_read_detail` as `${reason}: ${detail}`. The Products tab shows its
+    // no-product-list copy only for exactly `http_status: HTTP 404` (or 410),
+    // so this pins the composition the frontend keys on. `merchant-products.ts`
+    // is unchanged: this is a test of the format it already produces.
+    const outcome = await read(accountId, async () => ({ ok: false, reason: 'http_status', detail: 'HTTP 404' }))
+    expect(outcome.status).toBe('unreachable')
+    expect(outcome.detail).toBe('http_status: HTTP 404')
+
+    const row = await source(accountId)
+    expect(row?.last_read_status).toBe('unreachable')
+    expect(row?.last_read_detail).toBe('http_status: HTTP 404')
+    // The last good list survives, as for any unreachable read.
+    expect(await products(accountId)).toHaveLength(2)
   })
 
   it('leaves the last good list in place when the document is malformed', async () => {

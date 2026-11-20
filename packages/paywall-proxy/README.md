@@ -4,7 +4,7 @@ The merchant kit's paywall proxy: x402 in front of any HTTP API, settled through
 the shared merchant payment core. A merchant that sells an HTTP API takes this
 repository, fills in a products file and a few settings, and accepts x402
 payments without changing their own code and without a Stripe account. The money
-lands in the merchant's own Haven account.
+lands in the merchant's own Sales account.
 
 This package is private and is not published. Run it from this repository.
 
@@ -55,7 +55,7 @@ You run:
 - Persistent disk for the sales outbox (`SALES_OUTBOX`), when you report sales.
   It holds the records Haven has not accepted yet, so it belongs on the same
   disk as `PAYMENTS_DB` and is backed up with it.
-- A Haven account that receives the money.
+- A Sales account that receives the money.
 - Your own Coinbase developer (CDP) secret API key.
 - An RPC URL for the network.
 
@@ -81,8 +81,10 @@ You monitor:
 
 ## Before you start
 
-1. A Haven account to receive into. On Base Sepolia, you and the paying agent
-   both use Haven's dev environment (the `dev` deployment; its URLs are in
+1. A Sales account to receive into. Sign in to Haven, turn Sales on
+   (Settings → Business), and use the Sales account's receiving address as
+   `PAY_TO` (Step 1). On Base Sepolia, you and the paying agent both use Haven's
+   dev environment (the `dev` deployment; its URLs are in
    [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)).
    On Base, both use production. This release runs on Base Sepolia only.
 2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
@@ -90,13 +92,16 @@ You monitor:
 3. An upstream HTTP API and its API key.
 4. An RPC URL for Base Sepolia.
 
-## Step 1: create the Haven account that receives the money
+## Step 1: turn Sales on, and copy the Sales account's receiving address
 
-Create an account in Haven's dev environment and copy its address. That address
-is `PAY_TO`.
+Sign in to Haven and turn Sales on: **Settings → Business → Sales**. Haven
+creates the Sales account the money arrives in.
 
-What you should see: the account's address in the Haven dashboard, and its
-balance page. Every payment the proxy settles arrives there as USDC.
+Then open **Sales → Setup → Receiving address** and choose **Show address**.
+Copy that address. It is `PAY_TO`.
+
+What you should see: the Sales account's address in the Receive dialog, and the
+Sales page's Overview. Every payment the proxy settles arrives there as USDC.
 
 ## Step 2: get your Coinbase developer keys
 
@@ -169,7 +174,7 @@ Required:
 | Variable | Meaning |
 |---|---|
 | `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. |
-| `PAY_TO` | The address that receives every payment: your Haven account's address. |
+| `PAY_TO` | The address that receives every payment: your Sales account's receiving address (Step 1). |
 | `OPERATOR_NAME` | Who operates the endpoint. The discovery document shows it. |
 | `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. |
 | `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. |
@@ -221,7 +226,7 @@ unusable Haven origin, or no outbox file refuses startup and names the variable.
 
 | Variable | Meaning |
 |---|---|
-| `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), from your Haven account's Sales settings. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
+| `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), created on **Sales → Setup → Sales keys**. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
 | `HAVEN_SALES_URL` | Haven's API origin, for example `https://api.haven.example`. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
 | `SALES_OUTBOX` | The file the proxy keeps records Haven has not accepted yet in. One proxy process per file, on persistent disk. |
 
@@ -270,12 +275,17 @@ only a Haven agent with an **open budget** can pay: an agent whose budget is
 pinned to one recipient cannot pay an arbitrary merchant, because the pin
 restricts the transfer to that recipient.
 
+**The paying agent must belong to a different Haven user, or be a wallet outside
+Haven.** A payment from the merchant's own agent or account is a move between
+your accounts: Haven shows it as "Moved between your accounts" and it is **not a
+sale**, so it does not appear as revenue on the Sales page.
+
 What you should see:
 
 - The agent gets the upstream API's answer, with a `PAYMENT-RESPONSE` header
   carrying the settlement transaction hash.
 - The proxy logs `payment_settled` and `payment_delivered` for that payment.
-- The USDC arrives in your Haven account, and the transaction is visible on
+- The USDC arrives in your Sales account, and the transaction is visible on
   Base Sepolia.
 - The same payment header presented again gets `payment_already_delivered`: one
   payment buys one call.
@@ -431,7 +441,7 @@ The shape is the one Haven's accounting reads, documented field by field in
 ## Sales reporting
 
 With `HAVEN_MERCHANT_KEY` set, the proxy sends Haven one sale record for each
-settled call, so the sale appears on your Haven account's Sales page. The record
+settled call, so the sale appears on your Sales account's Sales page. The record
 is the one in section 5 of the design: the settlement's transaction hash, the
 chain, the product's `id` and name from the products file, the amount, the payer
 address, the `merchantReference` the proxy reserved for the payment, and — when
@@ -497,7 +507,7 @@ how revocation works, are in
 
 **What you should see.** After a paid call, one `sales_report_accepted` line
 with the transaction hash and the merchant reference, and the sale on your
-Haven account's Sales page. A refused record logs `sales_report_refused` with
+Sales account's Sales page. A refused record logs `sales_report_refused` with
 the status and error code; a record that could not be delivered logs
 `sales_outbox_queued` and then, on a later replay, `sales_outbox_accepted`. No
 line, and no response, ever carries the key.
@@ -535,7 +545,7 @@ To run this demo as your own merchant endpoint, change these:
 | What | Variable | Change it to |
 |---|---|---|
 | Your upstream key | `UPSTREAM_API_KEY` | Your own Opper key (or your own provider's, with its `UPSTREAM_BASE_URL`). |
-| Your receiving account | `PAY_TO` | Your own Haven account's address. |
+| Your receiving account | `PAY_TO` | Your own Sales account's receiving address (Step 1). |
 | Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account (Step 2). |
 | Who you are | `OPERATOR_NAME`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`, and optionally `OPERATOR_CONTACT` | Your own name and description, without the "internal technical demo" wording. |
 | Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL. Haven's deployment references its own backend's provider URL, which you cannot use. |

@@ -72,6 +72,38 @@ payments can run the proxy without the sales settings; the proxy then logs
 The shared payment core (#4890) is not a part the merchant fills in. It is a
 dependency of the proxy, and the demo merchant uses the same core.
 
+### Selling without the kit
+
+The merchant kit is one way to sell through Haven, not the only one. A **seller**
+is whatever asks buyers to pay into the Sales account and reports each sale to
+Haven: the merchant kit, or the merchant's own MCP server or HTTP API. A seller
+that is not the kit does two things.
+
+**1. Post the sale record (§5) with a Sales key.** The record is built by hand,
+because the reporter in `@haven_ai/merchant-payments` is private and not
+published. It is JSON, `POST`ed to `POST /merchant/sales` with
+`Authorization: Bearer <Sales key>` and `Content-Type: application/json`. The
+required fields are `version` (`1`), `tx_hash`, `chain`, `product_id`, `amount`,
+`payer` and `merchant_reference`; `product_name` is optional. `product_id` is the
+seller's own product id — Haven stores it and does not interpret it. When a VAT
+rule applies, the record also carries `receipt_number` and `vat_treatment`.
+`merchant_reference` is the seller's own reference, a `sale_<ULID>` generated
+once per payment and kept, so a retried call or a resent record carries the same
+one. The Sales key is created on Sales → Setup → Sales keys; it is receive-only
+and cannot move money, sign, or change signers, budgets or agents
+([`docs/security/merchant-key-limits.md`](../security/merchant-key-limits.md)).
+
+**2. Optionally serve the reduced version 1 product list (§4).** A seller that
+wants the Sales page's Products tab to name its products serves a version 1
+discovery document at `/.well-known/x402` on its public address, as the demo
+merchant does since #4987. The document names the Sales account as `pay_to` and
+the network, and lists the products with atomic USDC prices. Haven reads it on a
+schedule and never sends anything to it; a seller that serves nothing keeps
+working, and its sales show the product name the record carries.
+
+Neither step needs the kit, and neither is a public developer page: this section
+is the architecture's account of what any seller does.
+
 ## 2. The two new packages
 
 Both are workspace-private packages in this repository. Neither is published

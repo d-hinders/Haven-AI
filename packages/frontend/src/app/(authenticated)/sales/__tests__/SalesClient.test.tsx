@@ -301,14 +301,18 @@ describe('first run', () => {
     await renderPage()
     expect(await screen.findByText('No sales yet')).toBeTruthy()
     const steps = screen.getByTestId('sales-first-run')
-    expect(within(steps).getByText('Put your receiving address in your kit')).toBeTruthy()
+    // #4985: the seller is introduced before any other use of the word.
+    expect(within(steps).getByTestId('seller-definition').textContent).toContain('you run a seller')
+    expect(within(steps).getByText('Put your receiving address in your seller')).toBeTruthy()
     expect(within(steps).getByText('Create a Sales key')).toBeTruthy()
-    expect(within(steps).getByText('Tell Haven where your kit runs')).toBeTruthy()
+    expect(within(steps).getByText('Add your product list (optional)')).toBeTruthy()
     // Step 2 (#4905) links to the keys on the Setup tab as a ghost action;
     // step 1's address is the one primary action; step 3 goes to the Setup tab.
     expect(within(steps).getByRole('link', { name: 'Go to Sales keys' }).getAttribute('href')).toBe('/sales?tab=setup#sales-keys')
     expect(within(steps).queryByText(/is coming/)).toBeNull()
-    expect(within(steps).getByRole('link', { name: 'Add kit address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
+    expect(within(steps).getByRole('link', { name: 'Add product list address' }).getAttribute('href')).toBe('/sales?tab=setup#kit-address')
+    // #4985: no step is done without an observation, and the count says so.
+    expect((await within(steps).findByTestId('sales-first-run-count')).textContent).toBe('0 of 3 done')
     // No figures, no period control, no summary read: a first run is not a quiet period.
     expect(screen.queryByTestId('sales-tiles')).toBeNull()
     expect(screen.queryByRole('button', { name: /Period/ })).toBeNull()

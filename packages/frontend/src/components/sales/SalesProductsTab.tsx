@@ -33,14 +33,14 @@ import {
 
 const CELL = 'px-4 py-3'
 
-/** What the Products description says in every state: Haven reads, the owner edits in the kit. */
-const DESCRIPTION = 'Read from your kit. To change a product, change it in your kit; Haven picks it up on the next read.'
+/** What the Products description says in every state: Haven reads, the owner edits in the seller. */
+const DESCRIPTION = 'Read from your seller. To change a product, change it in your seller; Haven picks it up on the next read.'
 
 function chainName(chainId: number | undefined): string | null {
   return chainId === undefined ? null : (resolveChainOrNull(chainId)?.name ?? null)
 }
 
-/** The warning the mismatch state shows: where the kit's list says payments go, against this account. */
+/** The warning the mismatch state shows: where the seller's list says payments go, against this account. */
 export function mismatchText(
   catalogue: SalesCatalogue,
   account: { name: string; chain_id: number } | null,
@@ -51,7 +51,7 @@ export function mismatchText(
     catalogue.document_pay_to && theirs && ours && account
       ? `Its product list says payments go to ${truncate(catalogue.document_pay_to)} on ${theirs}, not to ${account.name} on ${ours}.`
       : 'Its product list names a different receiving address or network.'
-  return `${where} Haven isn’t using these product names until they match. Update the payment address and network in your kit.`
+  return `${where} Haven isn’t using these product names until they match. Update the payment address and network in your seller.`
 }
 
 /** Sales per product in the period, from the summary's by-product lines; "—" when the summary has no answer for it. */
@@ -196,17 +196,26 @@ function ProductsTable({
 }
 
 /**
- * The Products tab (#4900, approved on #4894): the product list Haven read
- * from the kit's discovery document, prices in exact USDC (a token surface),
- * the network, how each product sold in the page's period, and whether the kit
- * still offers it. Haven does not edit products; the owner changes them in the
- * kit.
+ * The Products tab (#4900, approved on #4894; seller-neutral copy and the 404
+ * case by #4985): the product list Haven read from the seller's discovery
+ * document, prices in exact USDC (a token surface), the network, how each
+ * product sold in the page's period, and whether the seller still offers it.
+ * Haven does not edit products; the owner changes them in the seller.
  *
  * States, from the one catalogue read: no address saved (a bare empty state
- * pointing to Setup); a good list; a mismatch (the kit's document names another
- * receiving address or network, so Haven is not using its names); and a kit
- * that could not be read (the last good list stays, sales keep counting). The
- * freshness line sits in the card header with "Read now".
+ * pointing to Setup); a good list; a mismatch (the seller's document names
+ * another receiving address or network, so Haven is not using its names); and a
+ * seller that could not be read (the last good list stays, sales keep
+ * counting). The freshness line sits in the card header with "Read now".
+ *
+ * **The 404 case has its own copy** (#4985). The guard refuses every non-200
+ * answer as `http_status` with detail `HTTP <n>`, and the catalogue records it
+ * as `unreachable` with `last_read_detail` = `` `${reason}: ${detail}` ``. A
+ * seller that answers 404 or 410 at `/.well-known/x402` has no product list —
+ * that is a mistake to fix, not an outage — so those two exact details get the
+ * no-product-list copy and **Go to Setup**. Every other `unreachable`, a
+ * 502/503 included, keeps the outage copy: a seller that is down must not be
+ * told to fix its address. The detail format is pinned by a backend unit test.
  */
 export function SalesProductsTab({
   catalogue,
@@ -267,14 +276,14 @@ export function SalesProductsTab({
     return (
       <div className="mt-6" data-testid="sales-products-tab">
         <Card hover={false} className="overflow-hidden">
-          <Card.Header as="h2" title="Products" description="Read from your kit. Haven doesn’t edit them." />
+          <Card.Header as="h2" title="Products" description="Read from your seller. Haven doesn’t edit them." />
           <div className="p-5" data-testid="sales-products-none">
             <EmptyState
               bare
               icon={<Icon icon={Package} className="h-full w-full" />}
               tone="brand"
-              title="No kit address yet"
-              body="Add your kit’s address on Setup, and Haven reads your product list from it. Until then, sales show the product name your kit sends."
+              title="No product list address yet"
+              body="The product list is optional. Add your seller’s address on Setup, and Haven reads your product list from it. Until then, sales show the product name your seller reports."
               action={
                 <Button variant="ghost" size="sm" onClick={onOpenSetup}>
                   Go to Setup
@@ -287,23 +296,45 @@ export function SalesProductsTab({
     )
   }
 
-  const warning: { headline: string; text: string } | null =
+  // #4985: a seller that answers 404 or 410 at `/.well-known/x402` has no
+  // product list. The guard records every non-200 as `http_status` with detail
+  // `HTTP <n>`, and the catalogue composes `last_read_detail` as
+  // `${reason}: ${detail}` — so these two exact strings are the no-product-list
+  // case. Every other `unreachable` is an outage and keeps the outage copy.
+  const noProductList =
+    view === 'unreachable' &&
+    (data.last_read_detail === 'http_status: HTTP 404' || data.last_read_detail === 'http_status: HTTP 410')
+
+  const warning: { headline: string; text: string; setup: boolean } | null =
     view === 'mismatch'
-      ? { headline: 'Your kit isn’t set up for this Sales account.', text: mismatchText(data, merchantAccount) }
+      ? {
+          headline: 'Your seller isn’t set up for this Sales account.',
+          text: mismatchText(data, merchantAccount),
+          setup: false,
+        }
       : view === 'unreachable'
-        ? {
-            headline: 'Haven couldn’t read your kit just now.',
-            text: 'The address didn’t answer. This list is from the last good read, and sales keep counting. Haven tries again every 15 minutes.',
-          }
+        ? noProductList
+          ? {
+              headline: 'Haven reached that address, but there is no product list at /.well-known/x402.',
+              text: 'This list is from the last good read, and sales keep counting.',
+              setup: true,
+            }
+          : {
+              headline: 'Haven couldn’t read your seller just now.',
+              text: 'The address didn’t answer. This list is from the last good read, and sales keep counting. Haven tries again every 15 minutes.',
+              setup: false,
+            }
         : view === 'malformed'
           ? {
-              headline: 'Haven couldn’t find a product list at your kit’s address.',
-              text: 'This list is from the last good read, and sales keep counting. Check that the address is where your kit runs.',
+              headline: 'Haven found something at that address, but it isn’t a product list Haven can read.',
+              text: 'This list is from the last good read, and sales keep counting. Check that the address is where your seller runs.',
+              setup: true,
             }
           : view === 'refused'
             ? {
                 headline: 'Haven can’t read that address.',
-                text: 'Use the public https address of your kit, without a port or login. Sales keep counting.',
+                text: 'Use the public https address of your seller, without a port or login. Sales keep counting.',
+                setup: true,
               }
             : null
 
@@ -313,7 +344,7 @@ export function SalesProductsTab({
         <div data-testid={`sales-products-${view}`}>
           <NoticeRow
             action={
-              view === 'refused' || view === 'malformed' ? (
+              warning.setup ? (
                 <Button variant="ghost" size="sm" onClick={onOpenSetup}>
                   Go to Setup
                 </Button>
@@ -345,11 +376,11 @@ export function SalesProductsTab({
               bare
               icon={<Icon icon={Package} className="h-full w-full" />}
               tone="brand"
-              title={view === 'never' ? 'No products read yet' : 'Your kit lists no products'}
+              title={view === 'never' ? 'No products read yet' : 'Your seller lists no products'}
               body={
                 view === 'never'
-                  ? 'Haven reads your kit’s address on a schedule. Press Read now to do it straight away.'
-                  : 'Haven read your kit, and its product list is empty. Add products in your kit; Haven picks them up on the next read.'
+                  ? 'Haven reads your seller’s address on a schedule. Press Read now to do it straight away.'
+                  : 'Haven read your seller, and its product list is empty. Add products in your seller; Haven picks them up on the next read.'
               }
             />
           </div>

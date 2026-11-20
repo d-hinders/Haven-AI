@@ -4,6 +4,8 @@ status: current
 covers:
   - packages/core/src/approx-mark.ts
   - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
+  - packages/frontend/src/components/sales/SalesFirstRun.tsx
+  - packages/frontend/src/components/sales/MerchantKitSetupPrompt.tsx
   - packages/frontend/src/components/connect-agent/CloseGuardPanel.tsx
   - packages/frontend/src/context/MerchantServicesContext.tsx
   - packages/frontend/src/components/sales/SalesOverviewTab.tsx
@@ -979,7 +981,7 @@ hand-rolled chip is gone.
 |---|---|---|---|
 | `received` | **Received** | `success` | `lib/payment-status.ts` `SALES_STATUS` — the detail panel's status for a sale; a ledger row carries no badge |
 | `not_counted` | Not counted | `neutral` | `SALES_STATUS` — a move from the owner's own agent or account, shown on Sales and left out of its figures |
-| `no_longer_offered` | No longer offered | `neutral` | `SALES_STATUS` — a product the kit's products file no longer lists |
+| `no_longer_offered` | No longer offered | `neutral` | `SALES_STATUS` — a product the seller's product list no longer lists |
 
 Approved with the Sales mockup on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894) (2026-11-16) and added by
 [#4908](https://github.com/d-hinders/Haven-AI/issues/4908). None of the three
@@ -990,7 +992,7 @@ no row here goes red, and so does a row here with no map entry.
 **Received is panel-only.** A sale's ledger row carries no badge, by the same
 rule as a confirmed payment (#3897, #4608): the direction is already the
 amount's sign and tone. **Not counted** and **No longer offered** are neutral:
-they are facts about what the figures include and what the kit lists, not
+they are facts about what the figures include and what the seller lists, not
 problems. The table maps the labels and wires nothing; the Sales screens
 (#4900, #4901) read the map. Today the detail panel's fallback labels every
 money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`). **#4900 decided: Sales only.** The
@@ -1977,7 +1979,10 @@ default, which is right only while the value is printed beside the button. Since
 [#3998](https://github.com/d-hinders/Haven-AI/issues/3998) it has a labelled shape (`text`, a
 ghost `Button` reading "Copy prompt" → "Copied" (#4003), the visible words kept at the start of the
 accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
-pass to reveal the value when the clipboard refuses it. `CodeBlock`'s copy button
+pass to reveal the value when the clipboard refuses it. Two callers use that shape: the
+marketplace's offer instruction (#3998) and, since #4985, the Sales page's "Copy setup prompt"
+(`MerchantKitSetupPrompt`, shared by the first-run helper and the Setup tab — the prompt is never
+printed, and `onCopyFailed` reveals it). `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind
 spot of the *check*, which it remains, but it is no longer a shape with nowhere to go.
 
@@ -3246,13 +3251,20 @@ A vertical list in which **each row is both an instruction and its status**:
 a disc, a heading, and the row's own body (a line of copy, a control, or a
 whole sub-flow) beneath it. Use it when one screen walks the user through a
 short sequence they act on in order and the screen itself observes the
-progress. One primitive, two consumers, one stepper family (#4744):
+progress. One primitive, three consumers, one stepper family (#4744, #4985):
 
 - **`ConnectSteps`** — step 3 of the Connect agent modal (copy → paste →
   approve), where the old Waiting → Connected → Approved ticker said where the
   user was without saying what to do. Section-tier `h3` headings.
 - **The first-run guide** (`DashboardOnboardingGuide`) — the dashboard's Get
   started steps. `p` headings, since the card's `h2` is its one heading.
+- **The Sales first-run helper** (`SalesFirstRun`, #4985) — the Sales page's
+  "Get your first sale" steps, shown until the account is first paid. `p`
+  headings, numbered, with "N of 3 done" in the card header's actions slot as
+  the guide does. Its third row is **optional** — the pattern has no
+  optional-row concept, so the title carries "(optional)" and the count stays
+  over three. Each row's state comes from a read (the catalogue and the Sales
+  keys), so a row may un-tick; see the forward-only rule below.
 
 **Numerals: off under a `StepProgress` band, on where the list is the
 counter.** Inside the Connect agent modal the band counts the wizard's steps
@@ -3334,7 +3346,12 @@ Rules:
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can
-  overwrite.
+  overwrite. **Amended by #4985 (owner decision 2026-11-19, "Yes, it can
+  un-tick"):** a **guidance-only checklist that gates nothing** may un-tick when
+  its observed state goes back — the Sales first-run helper's rows come from
+  reads, so a scheduled read that turns `ok` into `unreachable`, or a revoked
+  Sales key, puts the row back to not done. The dashboard guide's existing
+  behaviour is unchanged: its rows still latch forward.
 - **A row that goes done while the user watches plays `Milestone` Step once**
   (#4706). The flag lives ABOVE `ConnectStepShell`'s key, because the shell
   remounts its body on every sub-state change — a mount cannot mean "just
@@ -3371,7 +3388,8 @@ not announce twice (#4706).
 
 The checklist lived in `components/connect-agent/` while every caller was part
 of the connect flow; the first-run guide was its second product use, so #4744
-promoted it to `components/ui/StepChecklist`. `ConnectSteps` stays in
+promoted it to `components/ui/StepChecklist`, and the Sales first-run helper
+(#4985) is its third. `ConnectSteps` stays in
 `connect-agent/` as the flow's thin wrapper (its label and `h3` headings).
 Its `/design-system` specimens are the "ConnectSteps" section, after
 `StepProgress`, and the numbered "StepChecklist" section after it; the guide's

@@ -942,7 +942,7 @@ split these: the joke reports with the key and base URL alone, see
 | Variable | Value |
 |---|---|
 | `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Business → Sales on Haven), checksummed |
-| `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only) |
+| `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only), created on Sales → Setup → Sales keys |
 
 There are three states (#4953):
 
@@ -1021,7 +1021,7 @@ agent belongs to a different Haven user from the Sales account's owner.
 **The product list for the Sales page (#4987).** With `MERCHANT_SALES_ADDRESS`
 set, `GET /.well-known/x402` serves the merchant kit's discovery document
 (`src/kit-discovery.ts`), which is what the Sales page's Products tab reads
-once the merchant saves this deployment's origin as the kit address. It is a
+once the merchant saves this deployment's origin as the product list address. It is a
 reduced version 1 document (`docs/architecture/12-merchant-kit.md` §4): the
 Sales account as `pay_to`, and only the products that report a sale, which are
 Field Notes and, with Stripe recording on, the joke, with atomic prices. The

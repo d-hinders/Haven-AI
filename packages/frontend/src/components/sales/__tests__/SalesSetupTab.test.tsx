@@ -1,10 +1,12 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 /**
- * The Sales Setup tab (#4900, epic #4885): the receiving address action, the
- * kit address that saves through the catalogue route and the Sales keys slot.
+ * The Sales Setup tab (#4900, epic #4885; the seller definition, the optional
+ * product list address and the coding-agent prompt by #4985): the receiving
+ * address action, the product list address that saves through the catalogue
+ * route, the Sales keys slot and the prompt.
  */
 
 const mockGet = vi.fn()
@@ -59,20 +61,28 @@ function catalogue(overrides: Partial<UseMerchantCatalogueResult> = {}): UseMerc
   }
 }
 
-const ACCOUNT = { name: 'Sales', chain_id: 8453 }
+const ACCOUNT = {
+  name: 'Sales',
+  chain_id: 84532,
+  account_address: '0x7Ac3E19b5D0F42c86e1A93b7f0D5c2E48b916Fd2',
+}
+
+const ADDRESS_LABEL = 'Product list address (optional)'
 
 /** Renders the tab and lets the keys read settle, so no state update lands outside the test. */
-async function renderTab(value: UseMerchantCatalogueResult, onShowAddress = vi.fn()) {
+async function renderTab(value: UseMerchantCatalogueResult, onShowAddress = vi.fn(), account = ACCOUNT) {
   render(
     <LocaleProvider>
       <ToastProvider>
-        <SalesSetupTab account={ACCOUNT} catalogue={value} onShowAddress={onShowAddress} />
+        <SalesSetupTab account={account} catalogue={value} onShowAddress={onShowAddress} />
       </ToastProvider>
     </LocaleProvider>,
   )
   await screen.findByText('sk_merchant_aaa…')
   return { onShowAddress }
 }
+
+const originalClipboard = navigator.clipboard
 
 beforeEach(() => {
   mockGet.mockReset().mockImplementation(async (path: string) => {
@@ -85,6 +95,10 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/sales?tab=setup')
 })
 
+afterEach(() => {
+  Object.defineProperty(navigator, 'clipboard', { value: originalClipboard, configurable: true })
+})
+
 describe('the receiving address', () => {
   it('opens the Receive dialog through the page and prints no address', async () => {
     const { onShowAddress } = await renderTab(catalogue())
@@ -94,16 +108,32 @@ describe('the receiving address', () => {
   })
 })
 
-describe('the kit address', () => {
-  it('shows the mockup helper, and saves a trimmed address through the catalogue', async () => {
+describe('the seller definition (#4985)', () => {
+  it('opens the card, before Receiving address', async () => {
+    await renderTab(catalogue())
+    const definition = screen.getByTestId('seller-definition')
+    expect(definition.textContent).toContain('you run a seller')
+    expect(definition.textContent).toContain('The merchant kit is a small program you run in front of an API.')
+    expect(definition.textContent).toContain('During the pilot the merchant kit runs on Base Sepolia only')
+    expect(definition.querySelector('a[href*="paywall-proxy/README.md"]')).toBeTruthy()
+    expect(definition.querySelector('a[href*="12-merchant-kit.md#selling-without-the-kit"]')).toBeTruthy()
+
+    const receiving = screen.getByRole('heading', { name: 'Receiving address', level: 2 })
+    expect(definition.compareDocumentPosition(receiving) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+})
+
+describe('the product list address', () => {
+  it('shows the seller-neutral helper, and saves a trimmed address through the catalogue', async () => {
     const saveDeployment = vi.fn().mockResolvedValue({ ok: true })
     await renderTab(catalogue({ saveDeployment }))
-    expect(
-      screen.getByText('The public address of your kit. Haven reads your product list from it; it never sends anything there.'),
-    ).toBeTruthy()
+    const helper = document.getElementById('sales-kit-address-help')
+    expect(helper?.textContent).toContain('The public address of your seller.')
+    expect(helper?.textContent).toContain('/.well-known/x402')
+    expect(helper?.textContent).toContain('never sends anything to it.')
     const save = screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement
     expect(save.disabled).toBe(true)
-    await userEvent.type(screen.getByLabelText('Kit address'), '  https://inference.example.com ')
+    await userEvent.type(screen.getByLabelText(ADDRESS_LABEL), '  https://inference.example.com ')
     await userEvent.click(save)
     expect(saveDeployment).toHaveBeenCalledWith('https://inference.example.com')
   })
@@ -114,7 +144,7 @@ describe('the kit address', () => {
         data: { ...EMPTY, deployment_url: 'https://inference.example.com', last_read_status: 'ok', last_read_at: new Date().toISOString() },
       }),
     )
-    expect((screen.getByLabelText('Kit address') as HTMLInputElement).value).toBe('https://inference.example.com')
+    expect((screen.getByLabelText(ADDRESS_LABEL) as HTMLInputElement).value).toBe('https://inference.example.com')
     expect((screen.getByRole('button', { name: 'Save' }) as HTMLButtonElement).disabled).toBe(true)
     expect(screen.getByText(/^Last read just now/)).toBeTruthy()
   })
@@ -124,7 +154,7 @@ describe('the kit address', () => {
       .fn()
       .mockResolvedValue({ ok: false, message: 'Haven cannot read that address: only https addresses are read' })
     await renderTab(catalogue({ saveDeployment }))
-    const input = screen.getByLabelText('Kit address') as HTMLInputElement
+    const input = screen.getByLabelText(ADDRESS_LABEL) as HTMLInputElement
     await userEvent.type(input, 'http://inference.example.com')
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Haven cannot read that address: only https addresses are read')).toBeTruthy()
@@ -139,10 +169,10 @@ describe('the kit address', () => {
     await renderTab(
       catalogue({ saveDeployment, data: { ...EMPTY, deployment_url: 'https://inference.example.com', last_read_status: 'ok' } }),
     )
-    const input = screen.getByLabelText('Kit address')
+    const input = screen.getByLabelText(ADDRESS_LABEL)
     await userEvent.clear(input)
     await userEvent.click(screen.getByRole('button', { name: 'Save' }))
-    expect(screen.getByText('Enter the address of your kit.')).toBeTruthy()
+    expect(screen.getByText('Enter your seller’s address.')).toBeTruthy()
     expect(saveDeployment).not.toHaveBeenCalled()
   })
 
@@ -158,12 +188,12 @@ describe('the kit address', () => {
   it('takes focus when the first-run step links to #kit-address', async () => {
     window.history.replaceState(null, '', '/sales?tab=setup#kit-address')
     await renderTab(catalogue())
-    expect(document.activeElement).toBe(screen.getByLabelText('Kit address'))
+    expect(document.activeElement).toBe(screen.getByLabelText(ADDRESS_LABEL))
   })
 
   it('shows the field as busy while it saves', async () => {
     await renderTab(catalogue({ saving: true }))
-    expect((screen.getByLabelText('Kit address') as HTMLInputElement).disabled).toBe(true)
+    expect((screen.getByLabelText(ADDRESS_LABEL) as HTMLInputElement).disabled).toBe(true)
     expect(screen.getByRole('button', { name: 'Saving…' })).toBeTruthy()
   })
 })
@@ -175,6 +205,45 @@ describe('the Sales keys section', () => {
     expect(mockGet).toHaveBeenCalledWith('/merchant-keys')
     expect(section.textContent).toContain('sk_merchant_bbb…')
     expect(screen.getByRole('button', { name: 'Create Sales key' })).toBeTruthy()
+  })
+})
+
+describe('the coding-agent prompt (#4985)', () => {
+  it('copies a prompt with the README URL, the Sales account address and eip155:84532, and no key prefix', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await renderTab(catalogue())
+    await userEvent.click(screen.getByRole('button', { name: 'Copy setup prompt' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).toContain('https://github.com/d-hinders/Haven-AI/blob/dev/packages/paywall-proxy/README.md')
+    expect(copied).toContain(ACCOUNT.account_address)
+    expect(copied).toContain('eip155:84532')
+    expect(copied).toContain('HAVEN_SALES_URL=')
+    expect(copied).not.toContain('sk_merchant_')
+    // The prompt is not printed: only the labelled copy control is on screen.
+    expect(screen.queryByTestId('merchant-kit-setup-prompt-text')).toBeNull()
+  })
+
+  it('reveals the prompt when the clipboard refuses it', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    })
+    await renderTab(catalogue())
+    await userEvent.click(screen.getByRole('button', { name: 'Copy setup prompt' }))
+    const revealed = await screen.findByTestId('merchant-kit-setup-prompt-text')
+    expect(revealed.textContent).toContain(ACCOUNT.account_address)
+    expect(revealed.textContent).not.toContain('sk_merchant_')
+  })
+
+  it('on a Base Sales account offers no prompt, and shows the Base Sepolia pilot line', async () => {
+    await renderTab(catalogue(), vi.fn(), { ...ACCOUNT, chain_id: 8453 })
+    expect(screen.queryByTestId('merchant-kit-setup-prompt')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Copy setup prompt' })).toBeNull()
+    expect(screen.getByTestId('merchant-kit-setup-pilot-only').textContent).toContain(
+      'During the pilot the merchant kit runs on Base Sepolia only',
+    )
   })
 })
 

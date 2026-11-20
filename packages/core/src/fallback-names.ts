@@ -16,8 +16,8 @@
  * fallback titles and labels the frontend renders for an unnamed counterparty:
  *
  * - `counterpartyLabel` (`lib/transaction-presentation.tsx`) — "New
- *   recipient", "Deposit", "Agent payment", and the templated "From …" /
- *   "Returned from …";
+ *   recipient", "Deposit", "Sale" (#5000), "Agent payment", and the templated
+ *   "From …" / "Returned from …" / "Sale · …";
  * - `paymentSourceTitle` (`lib/transaction-labels.ts`) — "Agent payment",
  *   "Machine payment";
  * - `MerchantsTable` / `AgentsTable` — "Unknown recipient", "None in this
@@ -44,6 +44,11 @@ export const HAVEN_FALLBACK_NAME = {
   unknownRecipient: 'Unknown recipient',
   /** `counterpartyLabel`'s inbound fallback when the sender is not one of your accounts. */
   deposit: 'Deposit',
+  /**
+   * #5000: `counterpartyLabel`'s inbound title for a sale into the Sales
+   * account (the Sales page's rule) with no recorded product.
+   */
+  sale: 'Sale',
   /** `paymentSourceTitle('x402')`, and `counterpartyLabel`'s machine-payment fallback. */
   agentPayment: 'Agent payment',
   /** `paymentSourceTitle('mpp_demo')`. */
@@ -66,9 +71,9 @@ export const HAVEN_FALLBACK_NAMES: readonly HavenFallbackName[] = Object.values(
 
 /**
  * The templated fallbacks, by the surface that renders them: `counterpartyLabel`
- * renders "From <account>" for a deposit from another of your own accounts and
- * "Returned from <agent>" for a sweep. A receipt seller name that STARTS with
- * either is refused too — the rest of the string is merchant-written, so the
+ * renders "From <account>" for a deposit from another of your own accounts,
+ * "Returned from <agent>" for a sweep and "Sale · <product>" for a recorded sale
+ * (#5000). A receipt seller name that STARTS with any of them is refused too — the rest of the string is merchant-written, so the
  * row would read as Haven's own template. The trailing space is part of the
  * prefix: a seller named "Fromage AB" is a real name and stays.
  */
@@ -77,6 +82,8 @@ export const HAVEN_FALLBACK_NAME_PREFIX = {
   from: 'From ',
   /** `counterpartyLabel`'s sweep template. */
   returnedFrom: 'Returned from ',
+  /** #5000: `counterpartyLabel`'s recorded-sale template, before the product label. */
+  sale: 'Sale · ',
 } as const
 
 /** One of the templated fallback prefixes. */

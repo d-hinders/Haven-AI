@@ -11,6 +11,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
+import { useOptionalMerchantServicesContext } from '@/context/MerchantServicesContext'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
 import { formatDateTime, truncate } from '@/lib/format'
@@ -276,6 +277,8 @@ export default function TransactionDetailPanel({
   resolveAddress,
   accountNamesByAddress,
 }: Props) {
+  // #5000: the "View in Sales" link exists only while the Sales page does.
+  const salesEnabled = useOptionalMerchantServicesContext()?.enabled === true
   if (!tx) return null
 
   const kind = rowKind(tx)
@@ -342,6 +345,14 @@ export default function TransactionDetailPanel({
         value={savedName(tx, tx.from, resolveAddress, accountNamesByAddress) ?? 'An outside wallet'}
       />,
     )
+    // #5000: a sale's record, only the fields that were recorded.
+    if (tx.sale?.productName) details.push(<DetailRow key="product" label="Product" value={tx.sale.productName} />)
+    if (tx.sale?.receiptNumber) {
+      details.push(<DetailRow key="receipt-number" label="Receipt number" value={tx.sale.receiptNumber} />)
+    }
+    if (tx.sale?.merchantReference) {
+      details.push(<DetailRow key="merchant-reference" label="Merchant reference" value={tx.sale.merchantReference} />)
+    }
   } else if (kind === 'move') {
     // "You" only for a recorded owner send; otherwise the wallet set (#2097).
     details.push(
@@ -469,8 +480,10 @@ export default function TransactionDetailPanel({
       onClose={onClose}
       leading={leading}
       title={title}
-      // "Deposit" titles a deposit already; the kind would only repeat it.
-      subtitle={kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
+      // "Deposit" titles a deposit already; the kind would only repeat it. A
+      // sale (#5000) has none: "Deposit" under "Sale · …" would contradict the
+      // title, and "Sale" would only repeat it.
+      subtitle={tx.sale || kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
       footer={
         explorerUrl ? (
           // `-ml-3.5` cancels the button's own padding: the label starts on
@@ -522,6 +535,13 @@ export default function TransactionDetailPanel({
       </div>
 
       <dl data-testid="transaction-detail-details">{details}</dl>
+      {tx.sale && salesEnabled ? (
+        // #5000: the Sales page has no URL for one payment, so the link opens
+        // the page itself. `-ml-3.5` puts the label on the content edge.
+        <Button variant="tertiary" size="sm" href="/sales" className="-ml-3.5 mt-2">
+          View in Sales
+        </Button>
+      ) : null}
 
       <details data-testid="transaction-technical-details" className="group mt-5 border-t border-[var(--v2-border)] pt-3">
         <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded py-1 text-sm font-medium text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 [&::-webkit-details-marker]:hidden">

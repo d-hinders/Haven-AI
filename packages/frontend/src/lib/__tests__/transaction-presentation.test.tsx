@@ -416,6 +416,30 @@ describe('shared screens adopt the no-address rules (#3811)', () => {
     // The merchant's hostname, through the same mode the lists read.
     expect(label).toBe('api.vendor.com')
   })
+
+  it('#5000: an agent\u2019s activity row never carries a sale marker, so it never reads "Sale"', () => {
+    // A sale is inbound to the Sales account from a non-own sender; the agent
+    // feed (`activityCounterparty`, `AgentActivityTab`'s rows) is outbound
+    // payments only, and its mapping has no sale field to fill.
+    const fields = activityCounterparty({
+      type: 'payment',
+      id: 'payment-2',
+      agent_name: 'Research agent',
+      token: 'USDC',
+      amount: '0.10',
+      to: UNKNOWN,
+      status: 'confirmed',
+      tx_hash: null,
+      source: undefined,
+      x402_resource_url: null,
+      chain_id: 8453,
+      explorer_url: null,
+      created_at: '2026-05-08T11:49:00Z',
+    } as Parameters<typeof activityCounterparty>[0])
+    expect(fields).not.toHaveProperty('sale')
+    expect(fields.direction).toBe('out')
+    expect(counterpartyLabel(fields, undefined, undefined, { noAddress: true })).not.toMatch(/^Sale/)
+  })
 })
 
 /**

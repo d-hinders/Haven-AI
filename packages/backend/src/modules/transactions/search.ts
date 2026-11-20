@@ -4,7 +4,8 @@
  * The rule: search matches WHAT THE ROW SHOWS — the counterparty's resolved
  * names (another of the user's own accounts, an address-book contact, the
  * catalog merchant, the receipt seller — #4882's naming sources), the agent
- * name, and the counterparty address itself. Name
+ * name, the product label of a recorded sale (#5000: the row reads
+ * "Sale · <product>"), and the counterparty address itself. Name
  * resolution therefore happens BEFORE filtering, on the server, for both
  * endpoints: the browser used to resolve names for display only, so a search
  * for a contact's name could never find the row in memory.
@@ -67,6 +68,7 @@ export function transactionMatchesSearch(
   if (foldedTerm === '') return true
   const haystacks = resolvedCounterpartyNames(tx, index).map(foldForSearch)
   if (tx.agentName) haystacks.push(foldForSearch(tx.agentName))
+  if (tx.sale?.productName) haystacks.push(foldForSearch(tx.sale.productName))
   haystacks.push(counterpartyAddressOf(tx).toLowerCase())
   return haystacks.some((haystack) => haystack.includes(foldedTerm))
 }

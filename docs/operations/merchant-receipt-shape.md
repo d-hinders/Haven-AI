@@ -12,7 +12,7 @@ covers:
   - packages/merchant-payments/src/receipt.ts
   - packages/paywall-proxy/src/receipt.ts
   - packages/sdk/src/merchant-completion.ts
-last-verified: "2026-11-19"
+last-verified: "2026-11-20"
 ---
 
 # The merchant receipt shape Haven reads
@@ -62,10 +62,11 @@ older usable receipt, then to the flat `merchant_name`):
   or Haven's own short form (`0xA873…DD35`, `0xa873...dd35`,
   `0xA873 … DD35`);
 - **one of Haven's own fallback words** — "New recipient", "Unknown
-  recipient", "Deposit", "Agent payment", "Machine payment", "Moved between
-  your accounts", "None in this range" — matched exactly after ASCII case
-  folding and whitespace collapsing, or any name starting with "From " or
-  "Returned from ".
+  recipient", "Deposit", "Sale", "Agent payment", "Machine payment", "Moved
+  between your accounts", "None in this range" — matched exactly after ASCII
+  case folding and whitespace collapsing, or any name starting with "From ",
+  "Returned from " or "Sale · " (#5000: a seller cannot make a payment read
+  as a sale).
 
 **The accounting underlag is the exception.** `sellerFromMerchantReceipt`
 quotes the invoice's seller as written, refusals included: a pinned underlag

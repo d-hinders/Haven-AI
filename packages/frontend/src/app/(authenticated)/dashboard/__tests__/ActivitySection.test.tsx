@@ -214,6 +214,22 @@ describe('ActivitySection (#3810)', () => {
     expect(screen.queryByText(MERCHANT)).not.toBeInTheDocument()
   })
 
+  it('#5000: a group of sales reads "Sale" apart from the day\u2019s deposits, and names one shared product', () => {
+    const inbound = { direction: 'in' as const, agentId: null, agentName: null, source: null, x402ResourceUrl: null }
+    renderSection({
+      activity: [
+        group({ ...inbound, count: 3, sale: { productName: null } }),
+        group({ ...inbound, sale: { productName: 'Haven Field Notes' }, latestAt: new Date(Date.now() - 30_000).toISOString() }),
+        group({ ...inbound, latestAt: new Date(Date.now() - 60_000).toISOString() }),
+      ],
+    })
+
+    expect(screen.getByText('Sale')).toBeInTheDocument()
+    expect(screen.getByText('×3')).toBeInTheDocument()
+    expect(screen.getByText('Sale · Haven Field Notes')).toBeInTheDocument()
+    expect(screen.getByText('Deposit')).toBeInTheDocument()
+  })
+
   it('shows the agent as the subtitle with one account, and drops the "From <account>" half', () => {
     renderSection({ activity: [group({ fromAccountName: 'Savings' })], accountCount: 1 })
 

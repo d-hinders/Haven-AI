@@ -4065,7 +4065,8 @@ own account, contact, catalog merchant, receipt seller, resource host —
 the agent ledger's `counterparty_name`), else the merchant's site for x402
 or the browser's own-account and contact lookups, "Deposit" for
 inbound — or "From <account>" for money that came from another of the user's
-own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
+own accounts (#4099), or "Sale · <product>" / "Sale" for a row the backend
+marks a sale into the Sales account (`sale`, #5000) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
 subtitle is the agent's name; on a send it adds "From <account>", the account
 the money left (#4117), only when the user has more than one account and a
@@ -4103,7 +4104,11 @@ pattern, and it leads with the answer:
    is the ledger row's title (`counterpartyLabel` no-address mode, or "Moved
    between your accounts"), the subtitle the kind in words ("Paid request",
    "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
-   only repeat the title, as on a deposit). Below it: `Amount
+   only repeat the title, as on a deposit, and on a sale, #5000, where
+   "Deposit" would contradict "Sale · …"). A sale adds Product, Receipt number
+   and Merchant reference Details rows (only those recorded) and, while
+   merchant services are on, a tertiary `Button href="/sales"` "View in
+   Sales" under them. Below it: `Amount
    size="lg"` with the token amount beside it (a move passes no sign), the
    `StatusBadge` from `transactionRowBadge(tx)` with "Sent" as the panel's
    own fallback (the same word `PAYMENT_STATUS.confirmed` uses, #4567 — the

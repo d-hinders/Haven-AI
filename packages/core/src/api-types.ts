@@ -7138,6 +7138,13 @@ export type components = {
                 /** @example 0x1111111111111111111111111111111111111111 */
                 toAccountAddress: string;
             };
+            /** @description #5000: present only on an inbound row into the user's Sales account that the Sales page counts as a sale (its own per-transaction rule, `account`-held sales only): a recorded sale, or a payment from anyone other than the owner's own accounts or agents without a product. Only while merchant services are on. Never on a folded move (`ownTransfer`) or on a transfer from another of the user's own accounts. A Stripe-held sale is never a feed row. Each field is null when not recorded. */
+            sale?: {
+                /** @description The Sales page's product label: the catalogue name, else the recorded product name, else the product id. Null on a payment without a product. */
+                productName: string | null;
+                receiptNumber: string | null;
+                merchantReference: string | null;
+            };
             /** Format: uuid */
             agentId?: string;
             scope?: components["schemas"]["ListScope"];
@@ -7671,6 +7678,11 @@ export type components = {
                 fromAccountName: string;
                 /** @description The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address. */
                 toAccountName: string;
+            };
+            /** @description #5000: present only on a group of sales into the user's Sales account (the rows `GET /transactions` marks with `sale`). Sales group apart from the day's other deposits, one group per day whichever products they name. */
+            sale?: {
+                /** @description The Sales page's product label when every member has the same recorded product; null when the members name different products or none. */
+                productName: string | null;
             };
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;

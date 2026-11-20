@@ -28,6 +28,15 @@ export function MerchantServicesProvider({ children }: { children: ReactNode }) 
   return <MerchantServicesContext.Provider value={value}>{children}</MerchantServicesContext.Provider>
 }
 
+/**
+ * #5000: the same answer, or null outside the provider. For a component that
+ * also renders where the shell is absent (a component test, a showcase) and
+ * only needs to know whether Sales is on; everything else uses the strict hook.
+ */
+export function useOptionalMerchantServicesContext(): MerchantServices | null {
+  return useContext(MerchantServicesContext)
+}
+
 export function useMerchantServicesContext(): MerchantServices {
   const ctx = useContext(MerchantServicesContext)
   if (!ctx) {

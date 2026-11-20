@@ -744,6 +744,35 @@ describe('AccountActivityTab — the facet set (#4130)', () => {
     expect(row).not.toHaveTextContent('Deposit')
     expect(row).not.toHaveTextContent(/→/)
   })
+  it('#5000: on the Sales account\u2019s ledger a sale reads "Sale · <product>" and an unrecorded one "Sale"', () => {
+    const buyer = '0x' + 'be'.repeat(20)
+    feedMock.mockImplementation(() => ({
+      ...DEFAULT_FEED,
+      transactions: [
+        tx({
+          hash: '0x51',
+          direction: 'in',
+          from: buyer,
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1', merchantReference: null },
+        }),
+        tx({
+          hash: '0x52',
+          direction: 'in',
+          from: buyer,
+          timestamp: 1_778_240_000,
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        }),
+      ],
+      total: 2,
+    }))
+    renderTab()
+    const [recorded, unrecorded] = ledgerRows()
+    expect(recorded).toHaveTextContent('Sale · Haven Field Notes')
+    expect(unrecorded).toHaveTextContent('Sale')
+    expect(unrecorded).not.toHaveTextContent('Sale ·')
+    expect(recorded).not.toHaveTextContent('Deposit')
+    expect(unrecorded).not.toHaveTextContent('Deposit')
+  })
 })
 
 describe('AccountActivityTab — CSV export (#4098)', () => {

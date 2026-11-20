@@ -43,6 +43,7 @@ export { fetchAccountTransactions } from './aggregate.js'
 export { fetchLastOutgoingAt } from './last-outgoing.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
+export { attachSaleMarkers, foldAndMarkSales, saleWire } from './sale-marker.js'
 export { serveTimeAmount, serveTimeAmountTriple } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,

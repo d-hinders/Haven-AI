@@ -741,7 +741,8 @@ const RECEIPT_NAME_FALLBACK_LIST_SQL = HAVEN_FALLBACK_NAMES.map(
  * #4932: a cleaned candidate is refused when it is address-shaped (full or
  * Haven's short form) or when it is one of Haven's own fallback words — an
  * exact match after ASCII case folding and whitespace collapse, or a name
- * starting with one of the templated prefixes ("From ", "Returned from ").
+ * starting with one of the templated prefixes ("From ", "Returned from ",
+ * "Sale · ").
  * The check runs on the CLEANED value, so a zero-width character inside an
  * address cannot slip it past. A refused name is "no usable name", exactly
  * like an empty or oversized one: the `DISTINCT ON` falls back to an older
@@ -807,7 +808,7 @@ function receiptNameCandidate(path: string): string {
  * - **Haven's own fallback words** — an exact match, ASCII case-folded and
  *   whitespace-collapsed, against `HAVEN_FALLBACK_NAMES` (`@haven_ai/core`),
  *   or a name starting with one of `HAVEN_FALLBACK_NAME_PREFIXES` ("From ",
- *   "Returned from ").
+ *   "Returned from ", "Sale · ").
  *
  * This is the ONE place the rule lives: the lookup has one caller
  * (`loadRecipientNameIndex`), so it covers every surface the name reaches —

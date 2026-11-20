@@ -20,7 +20,7 @@ import { ConfigError } from './config.js'
 import { startProxy } from './main.js'
 import { ProductsFileError } from './products.js'
 import { runReportSaleCommand } from './report-sale.js'
-import { StoreLockedError } from './sqlite-store.js'
+import { StoreLockedError, StorePermissionError } from './sqlite-store.js'
 
 const USAGE =
   'Usage: haven-paywall-proxy [check | report-sale <tx-hash> [--vat-treatment SE_25|REVERSE_CHARGE] [--new-reference]]'
@@ -45,7 +45,12 @@ async function run(): Promise<void> {
   try {
     proxy = await startProxy(process.env)
   } catch (err) {
-    if (err instanceof ConfigError || err instanceof ProductsFileError || err instanceof StoreLockedError) {
+    if (
+      err instanceof ConfigError ||
+      err instanceof ProductsFileError ||
+      err instanceof StoreLockedError ||
+      err instanceof StorePermissionError
+    ) {
       console.error(err.message)
     } else {
       // The class only: an upstream or driver message is not ours to print next to a key.

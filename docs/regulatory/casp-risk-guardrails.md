@@ -115,6 +115,7 @@ covers:
   - scripts/release-version-order.mjs
   - scripts/release-version-constants.mjs
   - .github/workflows/publish.yml
+  - .github/workflows/publish-paywall-proxy-image.yml
   - packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:

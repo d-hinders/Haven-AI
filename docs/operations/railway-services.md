@@ -161,6 +161,23 @@ Haven as an internal technical demo on Base Sepolia (#4892, owner decision
 2026-11-16: the owner accepted the added running cost). It exists in **dev
 only**: it is created in the dev environment and never in production.
 
+**Why it keeps building from source, and does not run the published image
+(#5007).** The kit's image is published to
+`ghcr.io/d-hinders/haven-paywall-proxy`, and it sets
+`PRODUCTS_FILE=/config/products.json` — the merchant's own file, mounted
+read-only. This demo's products file is
+`packages/paywall-proxy/demo/opper-products.json`, a file in the repository, and
+the image deliberately does not carry it: the published image is the kit, not
+Haven's demo configuration. Railway cannot mount a single repository file into a
+container (a volume mounts a directory, and copying the file onto it by hand
+would take it out of version control), so running the image here would mean
+either baking Haven's demo config into every merchant's image or maintaining an
+unversioned copy on a volume. The source build reads the file from the
+repository root, which is what the service already does. When the demo is
+created, if Railway gains a way to mount a repository file, moving it to the
+image is a one-row change: the same `/data` volume, and `PRODUCTS_FILE` pointing
+at the mounted file.
+
 | Setting | Value |
 |---|---|
 | Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first); watch `/packages/paywall-proxy/**`, `/packages/merchant-payments/**`, `/packages/sdk/**`, so an unrelated push to `dev` does not restart it |

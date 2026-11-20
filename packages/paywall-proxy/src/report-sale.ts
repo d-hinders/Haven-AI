@@ -33,7 +33,7 @@ import { ConfigError, loadConfig, type ProxyConfig } from './config.js'
 import { loadProductsFile, ProductsFileError, type Product } from './products.js'
 import { buildReceiptForPayment } from './receipt.js'
 import { saleRecordFor } from './sales.js'
-import { openSqliteConsumedPaymentStore, StoreLockedError } from './sqlite-store.js'
+import { openSqliteConsumedPaymentStore, StoreLockedError, StorePermissionError } from './sqlite-store.js'
 
 /** The states a payment can be in and still be re-reported: it settled. */
 const SETTLED_STATES = ['settled', 'forwarding', 'delivered', 'failed', 'exhausted'] as const
@@ -203,7 +203,7 @@ export async function runReportSaleCommand(
   } catch (err) {
     if (err instanceof ReportSaleError || err instanceof ConfigError || err instanceof ProductsFileError) {
       console.error(err.message)
-    } else if (err instanceof StoreLockedError) {
+    } else if (err instanceof StoreLockedError || err instanceof StorePermissionError) {
       console.error(err.message)
     } else {
       // The class only: a driver or network message is not ours to print next to a key.

@@ -343,6 +343,22 @@ jobs:
       - name: Build paywall proxy
         run: npm run build -w packages/paywall-proxy
 
+      # #5007: the container image. `push: false` — this job only proves the
+      # Dockerfile builds from the repository root, so a broken one is red on the
+      # PR. Publishing is publish-paywall-proxy-image.yml's job, on dev and main.
+      # Same pattern as the MCP-server job's build below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker build (paywall proxy) — catches a broken Dockerfile before publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/paywall-proxy/Dockerfile
+          push: false
+          load: false
+          tags: haven-paywall-proxy:ci
+
   core_checks:
     name: Core checks
     needs: changes

@@ -1,10 +1,15 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { chmodSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { MAX_FORWARDS_PER_PAYMENT } from '@haven_ai/merchant-payments'
-import { StoreLockedError, openSqliteConsumedPaymentStore, type SqliteConsumedPaymentStore } from './sqlite-store.js'
+import {
+  StoreLockedError,
+  StorePermissionError,
+  openSqliteConsumedPaymentStore,
+  type SqliteConsumedPaymentStore,
+} from './sqlite-store.js'
 
 const TAKEOVER_MS = 210_000
 const T0 = '2026-11-17T10:00:00.000Z'
@@ -210,6 +215,46 @@ describe('sqlite consumed-payment store (real database)', () => {
   it('reports writability', () => {
     const store = open()
     expect(store.isWritable()).toBe(true)
+  })
+
+  // #5007: the container image runs as a non-root user, so a host directory bind
+  // mounted at `/data` can be unwritable. The CLI must say so in words instead of
+  // printing "The proxy cannot start (Error)."
+  it('names a missing store directory instead of the driver message', () => {
+    const missing = join(dir, 'no-such-directory', 'payments.sqlite')
+    let caught: unknown
+    try {
+      openSqliteConsumedPaymentStore(missing, { takeoverAfterMs: TAKEOVER_MS })
+    } catch (err) {
+      caught = err
+    }
+    expect(caught).toBeInstanceOf(StorePermissionError)
+    const error = caught as StorePermissionError
+    expect(error.reason).toBe('missing')
+    expect(error.directory).toBe(join(dir, 'no-such-directory'))
+    expect(error.message).toContain('does not exist')
+  })
+
+  it('says the store directory is not writable when the filesystem refuses the open', () => {
+    // Root ignores the mode bits, so the probe would succeed and the test would
+    // assert nothing. CI and a developer machine both run unprivileged.
+    if (process.getuid?.() === 0) return
+    chmodSync(dir, 0o555)
+    try {
+      let caught: unknown
+      try {
+        openSqliteConsumedPaymentStore(join(dir, 'payments.sqlite'), { takeoverAfterMs: TAKEOVER_MS })
+      } catch (err) {
+        caught = err
+      }
+      expect(caught).toBeInstanceOf(StorePermissionError)
+      const error = caught as StorePermissionError
+      expect(error.reason).toBe('not-writable')
+      expect(error.message).toContain('is not writable')
+      expect(error.message).toContain(dir)
+    } finally {
+      chmodSync(dir, 0o755)
+    }
   })
 })
 

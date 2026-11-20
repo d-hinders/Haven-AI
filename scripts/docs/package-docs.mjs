@@ -677,6 +677,12 @@ export const GOVERNED_PACKAGE_DOCS = [
       'packages/paywall-proxy/package.json',
       'packages/paywall-proxy/products.example.json',
       'packages/paywall-proxy/.env.example',
+      // #5007: the container image. The README's run step is the image's
+      // `docker run`, so a Dockerfile change re-checks the prose that tells a
+      // merchant how to run it — the paths it sets, the volume, the non-root
+      // user and the one-process-per-store rule.
+      'packages/paywall-proxy/Dockerfile',
+      'packages/paywall-proxy/Dockerfile.dockerignore',
     ],
     // Registered with the README's first version (#4891): the settings table,
     // the discovery document's fields and the answer table were written against
@@ -690,6 +696,12 @@ export const GOVERNED_PACKAGE_DOCS = [
     // (`RPC_URL` on Base Sepolia, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`,
     // `SALES_OUTBOX`) and what they are, and the `started` line's `rpc` field
     // is documented.
+    // Re-verified 2026-11-20 (#5007): § "Run it as a container" is new and was
+    // written against packages/paywall-proxy/Dockerfile and
+    // Dockerfile.dockerignore — the two paths the image sets, the `/data`
+    // volume, the non-root user, the one-process-per-store rule and the backup
+    // rule. The rest of the README was not re-read in this pass; #5009
+    // restructures it.
     'last-verified': '2026-11-20',
   },
   {

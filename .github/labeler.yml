@@ -50,6 +50,7 @@
           - ".github/CODEOWNERS"
           - ".github/money-path-globs.json"
           - ".github/workflows/dev-gate.yml"
+          - ".github/workflows/publish-paywall-proxy-image.yml"
           - ".github/workflows/publish.yml"
           - ".github/workflows/qa-dev.yml"
           - "packages/backend/src/db/migrations/**"

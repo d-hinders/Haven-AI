@@ -223,11 +223,15 @@ describe('readInboundTransfersInBlockRange (#4903)', () => {
    * now keeps the chunks read before it, complete through their last block.
    */
   it('keeps the chunks read before a failed chunk, complete through the last block read', async () => {
-    const provider = providerWith({})
-    provider.getLogs
-      .mockResolvedValueOnce([transferLog({ index: 2, blockNumber: 120 })])
-      .mockResolvedValueOnce([transferLog({ index: 5, blockNumber: 730 })])
-      .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+    // Keyed on the chunk asked for: [1..500] and [501..1000] answer, [1001..] fails.
+    const provider = {
+      ...providerWith({}),
+      getLogs: vi.fn(async (filter: { fromBlock: number }) => {
+        if (filter.fromBlock === 1) return [transferLog({ index: 2, blockNumber: 120 })]
+        if (filter.fromBlock === 501) return [transferLog({ index: 5, blockNumber: 730 })]
+        throw new Error('429 Too Many Requests')
+      }),
+    }
     mocks.getProvider.mockReturnValue(provider)
 
     const read = await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 1_200)
@@ -241,15 +245,19 @@ describe('readInboundTransfersInBlockRange (#4903)', () => {
   })
 
   it('stops the partial result before a block whose time cannot be read', async () => {
-    const provider = providerWith({
-      logs: [
-        transferLog({ index: 0, blockNumber: 100 }),
-        transferLog({ index: 1, blockNumber: 140 }),
-      ],
-    })
-    provider.getBlock
-      .mockResolvedValueOnce({ timestamp: 1_790_000_000 })
-      .mockRejectedValueOnce(new Error('rpc down'))
+    // Block 100's time reads; block 140's does not.
+    const provider = {
+      ...providerWith({
+        logs: [
+          transferLog({ index: 0, blockNumber: 100 }),
+          transferLog({ index: 1, blockNumber: 140 }),
+        ],
+      }),
+      getBlock: vi.fn(async (blockNumber: number) => {
+        if (blockNumber === 140) throw new Error('rpc down')
+        return { timestamp: 1_790_000_000 }
+      }),
+    }
     mocks.getProvider.mockReturnValue(provider)
 
     const read = await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 400)

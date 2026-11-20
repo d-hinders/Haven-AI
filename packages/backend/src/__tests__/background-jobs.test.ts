@@ -177,17 +177,19 @@ describe('the background-job table', () => {
     mocks.runMerchantInboundIndexTick.mockResolvedValue({ accounts: 0, indexed: 0, failed: 0, skipped: 0 })
     const row = createBackgroundJobs({ log, pool }).find((r) => r.name === 'merchant inbound index')
     expect(row).toBeDefined()
-    const before = config.merchantInboundIndexDisabled
+    // `config` is typed read-only; the flag is flipped here as the env would.
+    const flags = config as { merchantInboundIndexDisabled: boolean }
+    const before = flags.merchantInboundIndexDisabled
     try {
-      config.merchantInboundIndexDisabled = false
+      flags.merchantInboundIndexDisabled = false
       await row!.run()
       expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
 
-      config.merchantInboundIndexDisabled = true
+      flags.merchantInboundIndexDisabled = true
       await row!.run()
       expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
     } finally {
-      config.merchantInboundIndexDisabled = before
+      flags.merchantInboundIndexDisabled = before
     }
   })
 })

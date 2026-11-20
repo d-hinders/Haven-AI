@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-11-18"
+last-verified: "2026-11-20"
 ---
 
 # Dev environment
@@ -460,12 +460,12 @@ Isolation rules that are non-negotiable for a payments product:
   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10   # QA_RPC_URL_BASE_SEPOLIA only
   ```
 
-  **The dev arrangement since 2026-10-01 (#3489, #3456):**
+  **The dev arrangement since 2026-11-20 (the merchant-index Alchemy incident):**
 
   | Variable | Where | Provider | Burst of 20 | `--logs-range` |
   |---|---|---|---|---|
-  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) | 500, the default (the sweepers' batch). Not yet probed with the `eth_getLogs` line; expected ✗ on the free tier's 10-block cap (#4118) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below), so its logs line is covered by the fallback exception below. Re-probe at the default 500 only if it is ever promoted to primary |
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | the public node, `https://sepolia.base.org` | 20/20 answered; 5 of 6 checks pass (2026-11-20) | ✗ at 500: the node serves **200** blocks per call (HTTP 413, `-32614 eth_getLogs is limited to a 200 range`), which `log-range-limit.ts` parses and narrows to. Accepted as a temporary exception, below |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Alchemy, the dev app (the primary until 2026-11-20) | 20/20 answered, all 5 checks pass (2026-10-01) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below) |
   | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed | **10**: the harness reads 10-block windows (`GET_LOGS_MAX_RANGE`, PR #4086) and never asks for more |
 
   **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
@@ -481,6 +481,21 @@ Isolation rules that are non-negotiable for a payments product:
 
   Every Alchemy app draws on one account-wide monthly compute-unit allowance,
   prod's app included. An Alchemy burn-alert email reopens #3489.
+
+  **What changed on 2026-11-20, and why.** From 2026-11-19 the merchant inbound
+  index (#4903) held dev's Alchemy app at ~1M compute units an hour, 99%
+  `eth_getLogs` at the free plan's 10 blocks per call, and used 27.3M of the
+  shared 30M monthly allowance. The primary was swapped to the Infura key
+  first; within minutes Infura answered every request, even a single
+  `eth_blockNumber`, with HTTP 429 (`-32005`), and that key is also prod's
+  `RPC_URL_BASE_FALLBACK`. So dev moved to the public node, which shares no
+  quota with prod, and Alchemy became dev's fallback. **Temporary exception:**
+  the public node fails the 500-block logs line (it serves 200). Every log
+  scanner learns that limit from the refusal, so a scan costs 2.5× the calls
+  it would at 500, and nothing is lost. Move the primary back to a dedicated
+  endpoint that passes every line once the merchant-index fix (this PR's
+  `MAX_UNSETTLED_REREAD_BLOCKS` and partial reads) is on dev.
+  `MERCHANT_INBOUND_INDEX_DISABLED=true` stops that job outright.
 
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over

@@ -115,6 +115,12 @@ describe('the seller definition (#4985)', () => {
     expect(definition.textContent).toContain('you run a seller')
     expect(definition.textContent).toContain('The merchant kit is a small program you run in front of an API.')
     expect(definition.textContent).toContain('During the pilot the merchant kit runs on Base Sepolia only')
+    // #5009: the licence wording (owner decision (b) on #5005) — the pilot
+    // merchant's permission, no written step.
+    expect(definition.textContent).toContain(
+      'A merchant in the pilot may run and modify it to evaluate Haven, but not redistribute it.',
+    )
+    expect(definition.textContent).not.toContain('written permission')
     expect(definition.querySelector('a[href*="paywall-proxy/README.md"]')).toBeTruthy()
     expect(definition.querySelector('a[href*="12-merchant-kit.md#selling-without-the-kit"]')).toBeTruthy()
 

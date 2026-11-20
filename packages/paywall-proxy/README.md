@@ -26,8 +26,9 @@ Read it before changing behaviour; this README is the merchant's path through it
 
 ## Licence
 
-The kit has no licence yet. During the pilot it is used under written permission
-from Haven. Do not redistribute it.
+The kit has no licence yet. A merchant in Haven's pilot may run and modify the
+kit to evaluate Haven. Do not redistribute it. A licence comes before general
+availability.
 
 ## The parts
 

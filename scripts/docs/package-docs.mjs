@@ -693,6 +693,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Re-verified 2026-11-20 (#5008): the README gains the `check` section
     // (one line per check, what each line means, and that it runs with the
     // proxy stopped), and Step 5 points at it before the proxy starts.
+    // Re-verified 2026-11-20 (#5009, licence paragraph only): § Licence gives
+    // a pilot merchant permission to run and modify the kit to evaluate Haven,
+    // with no written step; `package.json` still says "UNLICENSED".
     'last-verified': '2026-11-20',
   },
   {

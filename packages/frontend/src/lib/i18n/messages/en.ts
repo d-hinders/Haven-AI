@@ -85,6 +85,55 @@ export function merchantKitSetupPrompt(params: { accountAddress: string; salesUr
   ].join('\n')
 }
 
+/**
+ * The worked example for a seller that runs its own MCP server or HTTP API
+ * (#5010) — the doc the second setup prompt links to.
+ */
+export const OWN_SERVER_WORKED_EXAMPLE_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/selling-with-your-own-server.md'
+
+/**
+ * The second setup prompt's visible label (#5010). It lives here, not in the
+ * component, so the label is copy-linted with the rest of the catalog and
+ * `git grep "Set up your own server"` never matches a surface file.
+ */
+export const OWN_SERVER_SETUP_PROMPT_LABEL = 'Set up your own server with your coding agent'
+
+/**
+ * The second setup prompt's copy control (#5010). Its own accessible name, so
+ * the kit prompt's "Copy setup prompt" queries stay unambiguous.
+ */
+export const OWN_SERVER_SETUP_PROMPT_COPY = 'Copy own-server prompt'
+
+/**
+ * The "Set up your own server with your coding agent" prompt (#5010), beside
+ * `merchantKitSetupPrompt` and built the same way: one block a merchant pastes
+ * to their coding agent.
+ *
+ * It carries the worked example's URL, `payTo` (the Sales account's address),
+ * `NETWORK` in the CAIP-2 form the x402 challenge needs and `HAVEN_SALES_URL`
+ * (Haven's API origin). It NEVER carries a Sales key secret or a key prefix:
+ * the agent is told to ask the merchant for a key they create on Sales → Setup
+ * → Sales keys, and never to invent one.
+ *
+ * `salesUrl` must be an origin with no path — `lib/sales.ts` `havenApiOrigin()`
+ * is the one reading of it, as for the kit prompt.
+ */
+export function ownServerSetupPrompt(params: { accountAddress: string; salesUrl: string }): string {
+  return [
+    'Set up my own server to sell through Haven, so my Sales account can take payments.',
+    '',
+    `1. Read the worked example: ${OWN_SERVER_WORKED_EXAMPLE_URL}`,
+    '2. Ask each buyer to pay into my Sales account with an x402 challenge:',
+    `   payTo=${params.accountAddress}`,
+    '   NETWORK=eip155:84532',
+    `   HAVEN_SALES_URL=${params.salesUrl}`,
+    '3. After each payment settles, report the sale to Haven:',
+    `   POST ${params.salesUrl}/merchant/sales`,
+    '4. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into the Authorization header. Never invent one.',
+  ].join('\n')
+}
+
 export const en = {
   common: {
     comingSoon: 'Coming soon',

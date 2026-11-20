@@ -83,8 +83,10 @@ that is not the kit does two things.
 because the reporter in `@haven_ai/merchant-payments` is private and not
 published. It is JSON, `POST`ed to `POST /merchant/sales` with
 `Authorization: Bearer <Sales key>` and `Content-Type: application/json`. The
-required fields are `version` (`1`), `tx_hash`, `chain`, `product_id`, `amount`,
-`payer` and `merchant_reference`; `product_name` is optional. `product_id` is the
+required fields are `tx_hash`, `chain`, `product_id`, `amount`, `payer` and
+`merchant_reference`; `version` is optional and absent means `1` (the spec's
+`MerchantSaleRecord`), so a record sends `1` explicitly; `product_name` is
+optional. `product_id` is the
 seller's own product id — Haven stores it and does not interpret it. When a VAT
 rule applies, the record also carries `receipt_number` and `vat_treatment`.
 `merchant_reference` is the seller's own reference, a `sale_<ULID>` generated
@@ -103,6 +105,10 @@ working, and its sales show the product name the record carries.
 
 Neither step needs the kit, and neither is a public developer page: this section
 is the architecture's account of what any seller does.
+
+A worked example of both steps — the `402` answer and the `POST /merchant/sales`
+request, with the answers to expect — is
+[`docs/product/selling-with-your-own-server.md`](../product/selling-with-your-own-server.md).
 
 ## 2. The two new packages
 

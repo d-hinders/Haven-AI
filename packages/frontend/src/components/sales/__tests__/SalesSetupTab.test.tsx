@@ -208,8 +208,8 @@ describe('the Sales keys section', () => {
   })
 })
 
-describe('the coding-agent prompt (#4985)', () => {
-  it('copies a prompt with the README URL, the Sales account address and eip155:84532, and no key prefix', async () => {
+describe('the coding-agent prompts (#4985, #5010)', () => {
+  it('copies the kit prompt with the README URL, the Sales account address and eip155:84532, and no key prefix', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
     Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
     await renderTab(catalogue())
@@ -222,7 +222,25 @@ describe('the coding-agent prompt (#4985)', () => {
     expect(copied).toContain('HAVEN_SALES_URL=')
     expect(copied).not.toContain('sk_merchant_')
     // The prompt is not printed: only the labelled copy control is on screen.
-    expect(screen.queryByTestId('merchant-kit-setup-prompt-text')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-kit-prompt-text')).toBeNull()
+  })
+
+  it('copies the own-server prompt with the account address, the network, the API origin and the worked example, and no key', async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true })
+    await renderTab(catalogue())
+    await userEvent.click(screen.getByRole('button', { name: 'Copy own-server prompt' }))
+    await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1))
+    const copied = writeText.mock.calls[0][0] as string
+    expect(copied).toContain(ACCOUNT.account_address)
+    expect(copied).toContain('eip155:84532')
+    expect(copied).toContain(window.location.origin)
+    expect(copied).toContain('docs/product/selling-with-your-own-server.md')
+    expect(copied).toContain('Sales → Setup → Sales keys')
+    // No Sales key, no key prefix, no value shaped like one (#5010).
+    expect(copied).not.toContain('sk_merchant_')
+    expect(copied).not.toMatch(/sk_merchant_[A-Za-z0-9]/)
+    expect(screen.queryByTestId('seller-setup-own-server-prompt-text')).toBeNull()
   })
 
   it('reveals the prompt when the clipboard refuses it', async () => {
@@ -232,16 +250,33 @@ describe('the coding-agent prompt (#4985)', () => {
     })
     await renderTab(catalogue())
     await userEvent.click(screen.getByRole('button', { name: 'Copy setup prompt' }))
-    const revealed = await screen.findByTestId('merchant-kit-setup-prompt-text')
+    const revealed = await screen.findByTestId('seller-setup-kit-prompt-text')
     expect(revealed.textContent).toContain(ACCOUNT.account_address)
     expect(revealed.textContent).not.toContain('sk_merchant_')
   })
 
-  it('on a Base Sales account offers no prompt, and shows the Base Sepolia pilot line', async () => {
+  it('reveals the own-server prompt when the clipboard refuses it', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: vi.fn().mockRejectedValue(new Error('denied')) },
+      configurable: true,
+    })
+    await renderTab(catalogue())
+    await userEvent.click(screen.getByRole('button', { name: 'Copy own-server prompt' }))
+    const revealed = await screen.findByTestId('seller-setup-own-server-prompt-text')
+    expect(revealed.textContent).toContain(ACCOUNT.account_address)
+    expect(revealed.textContent).not.toContain('sk_merchant_')
+    // The kit prompt stays unprinted: each reveal is its own.
+    expect(screen.queryByTestId('seller-setup-kit-prompt-text')).toBeNull()
+  })
+
+  it('on a Base Sales account offers neither prompt, and shows the Base Sepolia pilot line', async () => {
     await renderTab(catalogue(), vi.fn(), { ...ACCOUNT, chain_id: 8453 })
-    expect(screen.queryByTestId('merchant-kit-setup-prompt')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-prompts')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-kit-prompt')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-own-server-prompt')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Copy setup prompt' })).toBeNull()
-    expect(screen.getByTestId('merchant-kit-setup-pilot-only').textContent).toContain(
+    expect(screen.queryByRole('button', { name: 'Copy own-server prompt' })).toBeNull()
+    expect(screen.getByTestId('seller-setup-pilot-only').textContent).toContain(
       'During the pilot the merchant kit runs on Base Sepolia only',
     )
   })

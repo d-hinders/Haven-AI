@@ -7307,7 +7307,7 @@ export const SCENARIOS = {
         })
         return {
           transactions: [recorded, unrecorded],
-          total: FIXTURE_TXS.length + 2,
+          total: 2,
           offset: 0,
           limit: 100,
           hasMore: false,
@@ -7357,7 +7357,7 @@ export const SCENARIOS = {
         const inbound = [recorded, unrecorded, ...FIXTURE_TXS.filter((row) => row.direction === 'in')]
         return {
           transactions: inbound,
-          total: FIXTURE_TXS.length + 2,
+          total: inbound.length,
           offset: 0,
           limit: 100,
           hasMore: false,

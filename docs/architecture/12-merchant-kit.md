@@ -177,6 +177,7 @@ nobody.
 | `products[].input_example` | No | An example request body for this product, carried into the challenge's directory block when listing is on (section 4). It must pass the proxy's own checks (the route, `model`, a settable cap, and its `input_schema`, checked at startup), because a directory probes the route with it. Without it a directory can list the product but an agent cannot build a valid call from the listing. |
 | `products[].input_schema` | No | A JSON Schema (draft 2020-12) the request body must pass before the proxy quotes or settles (#4988), also carried into the same block. See *The input schema* below. |
 | `products[].output_example` | No | An example response body, for the same block. |
+| `products[].output_schema` | No | A JSON object describing the shape of the answer (#4990). Carried into the discovery document only: it is served, never enforced. A value that is not a JSON object is refused at startup, naming the product. |
 
 ### The input schema
 
@@ -249,12 +250,42 @@ route, or refused when it is not a product route.
   "name": "Haven inference demo",
   "description": "Opper inference paid per call on Base Sepolia.",
   "network": "eip155:84532",
+  "network_name": "Base Sepolia testnet",
+  "testnet": true,
   "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "asset_symbol": "USDC",
+  "asset_decimals": 6,
   "pay_to": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
   "settlement": {
     "scheme": "exact",
     "facilitator": "coinbase-cdp",
     "methods": ["eip3009"]
+  },
+  "terms": {
+    "one_payment_one_call": true,
+    "replay": {
+      "code": "payment_already_delivered",
+      "statement": "The same payment header does not buy a second call: once the call is delivered, presenting it again answers payment_already_delivered."
+    },
+    "payment_response": {
+      "header": "PAYMENT-RESPONSE",
+      "statement": "Every answer after settlement carries a PAYMENT-RESPONSE header with the settlement transaction hash."
+    },
+    "upstream_answered": {
+      "code": "upstream_answered",
+      "statement": "A 3xx or 4xx from the upstream is wrapped into a 200 upstream_answered and the payment is used for that call; 401, 402, 403 and 407 are upstream_auth_refused, and 408, 429 and 5xx are failures."
+    },
+    "on_failure_after_settlement": {
+      "code": "upstream_failed_after_settlement",
+      "statement": "The payment settled and the call failed: the answer is a 200 upstream_failed_after_settlement with the transaction hash, and the merchant's contact for what happens next is https://haven.example/merchant-kit.",
+      "contact": "https://haven.example/merchant-kit"
+    }
+  },
+  "payment": {
+    "headers": ["PAYMENT-SIGNATURE", "X-PAYMENT"],
+    "preferred_header": "PAYMENT-SIGNATURE",
+    "x402_version": 2,
+    "spec": "https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md"
   },
   "products": [
     {
@@ -263,6 +294,7 @@ route, or refused when it is not a product route.
       "route": "POST /v3/compat/chat/completions",
       "model": "openai/gpt-6-sol",
       "price": "10000",
+      "price_usdc": "0.01",
       "output_token_cap": 1000,
       "description": "One chat completion on openai/gpt-6-sol, up to 1,000 output tokens."
     }
@@ -278,13 +310,75 @@ route, or refused when it is not a product route.
 | `operator.contact` | No | A URL or address a reader can use to reach the operator: `OPERATOR_CONTACT`. |
 | `name`, `description` | Yes | Human identification of the endpoint: `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. The proxy refuses to start without them. |
 | `network` | Yes | CAIP-2 identifier. The same value the challenge advertises. |
+| `network_name` | Yes | The chain's display name from `chains.ts`: `Base mainnet` or `Base Sepolia testnet`. For a reader that does not know CAIP-2 ids. |
+| `testnet` | Yes | Whether that chain is a test network, from `chains.ts`. |
 | `asset` | Yes | The USDC contract address on that network. |
+| `asset_symbol` | Yes | `USDC`. |
+| `asset_decimals` | Yes | `6`. |
 | `pay_to` | Yes | The receiving address. One setting of the deployment; every product is paid to it. |
 | `settlement.scheme` | Yes | `exact`. The kit does not offer `upto` or `batch-settlement`. |
 | `settlement.facilitator` | Yes | `coinbase-cdp`, the only value for the pilot: the #4890 core is Coinbase's client. |
 | `settlement.methods` | Yes | `["eip3009"]`. The kit advertises EIP-3009 only; ERC-7710 is later work (#4887). |
-| `products[]` | Yes | The same product objects as the products file: `id`, `name`, `route`, `model`, `price`, `output_token_cap`, `description`. |
+| `terms` | Yes | The rules of the sale, stated by the kit and true for every product. See *The rules of the sale* below. |
+| `payment` | Yes | How to pay: the accepted headers, the x402 version and the specification. See *How to pay* below. |
+| `products[]` | Yes | The same product objects as the products file: `id`, `name`, `route`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
+| `products[].price_usdc` | Yes | The same price as a decimal USDC string with no trailing zeros: `"0.01"` for `"10000"`, `"0.018"` for `"18000"`, `"0.0001"` for `"100"`. `price` stays the atomic string, unchanged. |
+| `products[].output_schema` | No | The shape of the answer, when the products file carries one beside `output_example`. Served only, never enforced. |
 | `updated` | No | RFC 3339 timestamp of the last change, for caches. |
+
+Every field #4990 adds is optional for readers: a reader that knows version 1
+reads the fields it knows and ignores the rest, and `price` is byte-identical to
+what it was.
+
+### The rules of the sale
+
+`terms` is the merchant's own plain statement about its own endpoint, true for
+every product (owner decision 1, 2026-11-19). Each entry is a short
+machine-readable code plus one sentence, and says only what the handler does:
+
+- `one_payment_one_call: true`.
+- `replay.code` is `payment_already_delivered`: the same payment header does not
+  buy a second call, and once the call is delivered it answers that code
+  (`handler.ts`).
+- `payment_response.header` is `PAYMENT-RESPONSE`: every answer after settlement
+  carries it with the settlement transaction hash, not only a success
+  (`answerSettled`).
+- `upstream_answered.code` is `upstream_answered`: a 3xx or 4xx from the upstream
+  is wrapped into a 200 and the payment is used. 401, 402, 403 and 407 are
+  `upstream_auth_refused`; 408, 429 and 5xx are failures (`forward.ts`).
+- `on_failure_after_settlement.code` is `upstream_failed_after_settlement`: the
+  payment settled and the call failed, answered as a 200 with the transaction
+  hash and the merchant's contact (`operator.contact`, when the merchant set
+  one; the statement says the merchant published none when it did not).
+
+`terms` says nothing about retries or the payer-signed `SIGN-IN-WITH-X` proof:
+that recourse policy is an open owner question on the epic (#4884, owner
+decision 2, 2026-11-19). A test asserts the absence.
+
+### How to pay
+
+`payment` tells a wallet that is not Haven's which header to send and where the
+payload's shape is specified:
+
+- `headers`: `["PAYMENT-SIGNATURE", "X-PAYMENT"]`, the two the proxy accepts
+  (`handler.ts`), with `preferred_header: "PAYMENT-SIGNATURE"`.
+- `x402_version: 2`.
+- `spec`: the x402 v2 specification,
+  <https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md>.
+  The payload is x402 v2 `exact`, an EIP-3009 `transferWithAuthorization` signed
+  over the `extra` domain in the challenge.
+
+The challenge is unchanged: `extra` carries the USDC signing domain a buyer's
+signature is made over, and adding keys there is a compatibility risk for every
+x402 client. The discovery document is where the rules live.
+
+### What the document is built from
+
+The document is built from the products file, the deployment's settings, and the
+kit's own constants. `terms` and `payment` are constants: they describe what the
+handler does for every product and are not products-file content. Everything
+else is either a field of the products file or a setting of the deployment —
+there is no field the kit invents per product.
 
 The document starts from the one the demo merchant serves today
 (`packages/demo-merchant-mcp/src/http.ts`, built from
@@ -293,10 +387,12 @@ superset. It drops the demo's MCP and environment fields (`mcp_url`,
 `current_base_url`, `hosted_urls`, `routing`, `environment`, `chain_id`,
 `settlement_methods`, `default_settlement_method`, and per product `category`,
 `tools`, `settlement_methods`, `default_settlement_method` and the conditional
-`qa_fixture`). It replaces the
-demo's human-decimal `price_usdc` with atomic `price`, keeps `network`, and
-adds `version`, `operator`, `asset`, `pay_to`, `settlement` and per product `route`
-and `description`. The demo merchant keeps serving its own document,
+`qa_fixture`). It keeps the demo's human-decimal `price_usdc` — the same
+no-trailing-zero form, `formatUsdc` in the demo's `products.ts` — beside the
+atomic `price`, keeps `network`, and adds `version`, `operator`, `asset`,
+`pay_to`, `settlement`, `network_name`, `testnet`, `asset_symbol`,
+`asset_decimals`, `terms`, `payment`, and per product `route`, `description` and
+the optional `output_schema`. The demo merchant keeps serving its own document,
 unchanged, at its own paths.
 
 ### The demo merchant's reduced kit document (#4987)
@@ -321,6 +417,13 @@ It lists only the products that report a sale to Haven: Field Notes, and the
 joke when Stripe recording is on. The joke is paid to the Stripe deposit
 address, not to `pay_to`: a kit document has one `pay_to`, and nothing pays
 from this document (the SDK never reads this path).
+
+The fields #4990 adds (`price_usdc`, `network_name`, `testnet`, `asset_symbol`,
+`asset_decimals`, `terms`, `payment`, per-product `output_schema`) are optional
+for readers, so this reduced document does not adopt them. There is no name
+clash: the demo's own `/` document already serves a decimal `price_usdc` in the
+same no-trailing-zero form (`formatUsdc` in its `products.ts`), so `price_usdc`
+here keeps that meaning and format.
 
 ### Fields for Coinbase's directory
 

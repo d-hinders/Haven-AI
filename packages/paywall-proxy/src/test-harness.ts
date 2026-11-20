@@ -238,6 +238,7 @@ export interface ProductFixture {
   input_example?: unknown
   input_schema?: unknown
   output_example?: unknown
+  output_schema?: unknown
 }
 
 export const CHAT_PRODUCT: ProductFixture = {

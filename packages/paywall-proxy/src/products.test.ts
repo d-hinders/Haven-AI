@@ -33,8 +33,16 @@ describe('products file (design 12 section 3)', () => {
   })
 
   it('keeps the optional directory fields', () => {
-    const [p] = parseProducts(file([{ ...product, input_example: { a: 1 }, input_schema: { type: 'object' }, output_example: { b: 2 } }]))
-    expect(p).toMatchObject({ inputExample: { a: 1 }, inputSchema: { type: 'object' }, outputExample: { b: 2 } })
+    const [p] = parseProducts(file([{ ...product, input_example: { a: 1 }, input_schema: { type: 'object' }, output_example: { b: 2 }, output_schema: { type: 'object' } }]))
+    expect(p).toMatchObject({ inputExample: { a: 1 }, inputSchema: { type: 'object' }, outputExample: { b: 2 }, outputSchema: { type: 'object' } })
+  })
+
+  it('refuses an output_schema that is not a JSON object, naming the product (#4990)', () => {
+    for (const bad of ['{"type":"object"}', ['type', 'object'], null, 3]) {
+      expect(problems(file([{ ...product, output_schema: bad }]))).toEqual([
+        `product "${product.id}": "output_schema" must be a JSON object`,
+      ])
+    }
   })
 
   it('refuses an unknown version, a missing or empty product list and a non-object file', () => {

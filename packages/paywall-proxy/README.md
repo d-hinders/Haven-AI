@@ -127,6 +127,7 @@ product and the field.
 | `products[].input_example` | No | An example request body, carried into the discovery document. It must pass the proxy's own checks, because a directory probes the route with it. |
 | `products[].input_schema` | No | A JSON Schema (draft 2020-12) the request body must pass before the proxy quotes or settles. Also carried into the discovery document. |
 | `products[].output_example` | No | An example response body, for the same block. |
+| `products[].output_schema` | No | A JSON object describing the shape of the answer. Carried into the discovery document only: it is served, never enforced. A value that is not a JSON object is refused at startup, naming the product. |
 
 The network is one setting of the deployment, not a field per product. A
 products file that names a network is refused at startup.
@@ -287,12 +288,19 @@ proof yet: a Haven buyer whose call failed after settlement has paid for
 nothing, and your log is where you see it. This is an open owner question on the
 epic.
 
+These are the rules of the sale, and the discovery document states them in its
+`terms` object, so a buyer's agent can read them before it pays. `terms` is the
+one place they are written for the buyer; this section is the merchant's view of
+the same facts.
+
 ## The discovery document
 
-`GET /.well-known/x402` returns the document. It is built from the products file
-and the deployment's settings, and answering it verifies nothing, settles
-nothing and makes no facilitator call. Changing the products file changes the
-document when the proxy restarts.
+`GET /.well-known/x402` returns the document. It is built from the products file,
+the deployment's settings, and the kit's own constants (`terms` and `payment`,
+which describe what the handler does for every product and are not products-file
+content). Answering it verifies nothing, settles nothing and makes no
+facilitator call. Changing the products file changes the document when the proxy
+restarts.
 
 | Field | Meaning |
 |---|---|
@@ -301,12 +309,28 @@ document when the proxy restarts.
 | `operator.contact` | Your `OPERATOR_CONTACT`, when set. |
 | `name`, `description` | Your `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. |
 | `network` | The CAIP-2 id, the same value the challenge advertises. |
+| `network_name` | The chain's display name: `Base mainnet` or `Base Sepolia testnet`. |
+| `testnet` | Whether that chain is a test network. |
 | `asset` | The USDC contract address on that network. |
+| `asset_symbol` | `USDC`. |
+| `asset_decimals` | `6`. |
 | `pay_to` | Your receiving address. Every product is paid to it. |
 | `settlement` | `{"scheme":"exact","facilitator":"coinbase-cdp","methods":["eip3009"]}`. |
-| `products[]` | Every product in the products file: `id`, `name`, `route`, `model`, `price`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema` and `output_example`. |
+| `terms` | The rules of the sale, true for every product: `one_payment_one_call`, `replay`, `payment_response`, `upstream_answered`, `on_failure_after_settlement`. Each entry is a code the handler answers with plus one sentence. |
+| `payment` | How to pay: `headers` (`PAYMENT-SIGNATURE`, preferred, and `X-PAYMENT`), `preferred_header`, `x402_version: 2`, and `spec`, the x402 v2 specification. |
+| `products[]` | Every product in the products file: `id`, `name`, `route`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
+| `products[].price_usdc` | The same price as a decimal USDC string with no trailing zeros: `"0.01"` for `"10000"`, `"0.018"` for `"18000"`, `"0.0001"` for `"100"`. `price` stays the atomic string. |
+| `products[].output_schema` | The shape of the answer, when the products file carries one beside `output_example`. Served only, never enforced. |
 | `updated` | The products file's last change, an RFC 3339 timestamp. |
 | `icon_url` | Your `ICON_URL`, when set. |
+
+`terms` says nothing about retries or the payer-signed `SIGN-IN-WITH-X` proof:
+that recourse policy is an open owner question on the epic. `on_failure_after_settlement`
+names your `OPERATOR_CONTACT` when you set one, and says you published none when
+you did not.
+
+Every field above is optional for readers: a reader that knows version 1 reads
+the fields it knows and ignores the rest, and `price` is unchanged.
 
 It is not the demo merchant's document. The demo merchant serves
 `/.well-known/haven-demo-merchant` and `/`, and names an `mcp_url`; Haven's SDK

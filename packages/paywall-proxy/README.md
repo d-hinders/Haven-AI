@@ -57,7 +57,8 @@ You run:
   disk as `PAYMENTS_DB` and is backed up with it.
 - A Sales account that receives the money.
 - Your own Coinbase developer (CDP) secret API key.
-- An RPC URL for the network.
+- An RPC URL for the network, unless you run on Base Sepolia: there the proxy
+  uses the public `https://sepolia.base.org` when `RPC_URL` is unset.
 
 You monitor:
 
@@ -90,7 +91,7 @@ You monitor:
 2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
    created in the Coinbase Developer Platform. Haven does not offer its key.
 3. An upstream HTTP API and its API key.
-4. An RPC URL for Base Sepolia.
+4. An RPC URL for Base Sepolia, unless you use the public default (Step 4).
 
 ## Step 1: turn Sales on, and copy the Sales account's receiving address
 
@@ -176,20 +177,20 @@ Required:
 | `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. |
 | `PAY_TO` | The address that receives every payment: your Sales account's receiving address (Step 1). |
 | `OPERATOR_NAME` | Who operates the endpoint. The discovery document shows it. |
-| `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. |
-| `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. |
 | `PRODUCTS_FILE` | The products file from Step 3. |
 | `PAYMENTS_DB` | The consumed-payment store. One proxy process per file. |
 | `UPSTREAM_BASE_URL` | Where paid calls are forwarded. |
 | `UPSTREAM_API_KEY` | The key paid calls are forwarded with. |
 | `CDP_API_KEY_ID` | Your Coinbase developer key id. |
 | `CDP_API_KEY_SECRET` | Your Coinbase developer key secret. |
-| `RPC_URL` | An RPC URL for the network. |
 
 Optional:
 
 | Variable | Meaning |
 |---|---|
+| `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. Default `OPERATOR_NAME`. |
+| `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. Default: a sentence built from the products file and the network, for example "Pay-per-call API by Acme: 2 products, paid in USDC on Base Sepolia testnet." |
+| `RPC_URL` | An RPC URL for the network. Default on Base Sepolia: the public `https://sepolia.base.org`. Required on Base mainnet, where real money would rest on a rate-limited public node. |
 | `OPERATOR_CONTACT` | A URL or address a reader can use to reach you. |
 | `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
@@ -221,18 +222,21 @@ starts with a warning and sends no receipt.
 
 Sales reporting (optional). With no `HAVEN_MERCHANT_KEY` the proxy reports
 nothing and starts exactly as without it. With the key set, reporting is on and
-all three settings are required: a key that is not a Sales key, a missing or
-unusable Haven origin, or no outbox file refuses startup and names the variable.
+the key and Haven's origin are required: a key that is not a Sales key, or a
+missing or unusable Haven origin, refuses startup and names the variable.
 
 | Variable | Meaning |
 |---|---|
 | `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), created on **Sales → Setup → Sales keys**. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
 | `HAVEN_SALES_URL` | Haven's API origin, for example `https://api.haven.example`. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
-| `SALES_OUTBOX` | The file the proxy keeps records Haven has not accepted yet in. One proxy process per file, on persistent disk. |
+| `SALES_OUTBOX` | The file the proxy keeps records Haven has not accepted yet in. One proxy process per file, on persistent disk. Default `sales-outbox.jsonl` in the same directory as `PAYMENTS_DB`. |
 
 What you should see: the proxy starts and logs one JSON line per event. The
 first is `started`, with `port`, `network`, `network_label`, `pay_to`,
-`operator`, `products`, `base_path`, `sales_reporting` (`"on"` or
+`operator`, `products`, `base_path`, `rpc` (`"default (public Base Sepolia)"`
+when `RPC_URL` is unset on Base Sepolia, otherwise `"configured"` — the line
+never prints the URL itself, because a provider URL can embed a key),
+`sales_reporting` (`"on"` or
 `"off (no HAVEN_MERCHANT_KEY)"`), `sales_outbox_depth` when reporting is on, and
 `receipt` (`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A
 missing or invalid setting refuses startup and names every problem at once,
@@ -317,7 +321,7 @@ restarts.
 | `version` | The kit document version. `1` is the only version. |
 | `operator.name` | Who operates the endpoint: your `OPERATOR_NAME`. |
 | `operator.contact` | Your `OPERATOR_CONTACT`, when set. |
-| `name`, `description` | Your `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. |
+| `name`, `description` | Your `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. Defaults: the name is your `OPERATOR_NAME`; the description is a sentence built from the products file and the network, for example "Pay-per-call API by Acme: 2 products, paid in USDC on Base Sepolia testnet." |
 | `network` | The CAIP-2 id, the same value the challenge advertises. |
 | `network_name` | The chain's display name: `Base mainnet` or `Base Sepolia testnet`. |
 | `testnet` | Whether that chain is a test network. |
@@ -548,7 +552,7 @@ To run this demo as your own merchant endpoint, change these:
 | Your receiving account | `PAY_TO` | Your own Sales account's receiving address (Step 1). |
 | Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account (Step 2). |
 | Who you are | `OPERATOR_NAME`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`, and optionally `OPERATOR_CONTACT` | Your own name and description, without the "internal technical demo" wording. |
-| Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL. Haven's deployment references its own backend's provider URL, which you cannot use. |
+| Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL, or unset it to use the public `https://sepolia.base.org`. Haven's deployment references its own backend's provider URL, which you cannot use. |
 | Where you run it | `PUBLIC_BASE_URL`, `CLIENT_IP_HEADER`, `PAYMENTS_DB` | Your own `https` origin, the client-address header your own host's edge sets (or unset), and a path on your own persistent disk. |
 | Your receipt | `VAT_RULE`, `SELLER_*` | Your own legal details, or unset `VAT_RULE` for no receipt. |
 | Your products | `PRODUCTS_FILE` | Your own copy of the demo file, with your prices and descriptions. |

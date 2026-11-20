@@ -1,12 +1,13 @@
 'use client'
 
 /**
- * The Sales catalogue (#4900, epic #4885): the kit deployment's address, the
- * outcome of Haven's last read of it, and the product list.
+ * The Sales catalogue (#4900, epic #4885; seller-neutral by #4985): the
+ * seller's product list address, the outcome of Haven's last read of it, and
+ * the product list.
  *
  * One read for the page, held by `SalesClient` and handed to the Products and
  * Setup tabs, so the tab's count and warning dot, the products table and the
- * kit-address field all describe the SAME answer.
+ * product list address field all describe the SAME answer.
  *
  * - `GET /merchant-catalogue`: the state (empty when no address is saved).
  * - `PUT /merchant-catalogue/deployment`: saves the address AND reads it, and
@@ -81,7 +82,7 @@ export function useMerchantCatalogue(): UseMerchantCatalogueResult {
       setData(await api.post<SalesCatalogue>(`${PATH}/refresh`))
       return { ok: true }
     } catch (err) {
-      return { ok: false, message: messageOf(err, 'Haven could not read your kit just now. Try again.') }
+      return { ok: false, message: messageOf(err, 'Haven could not read your seller just now. Try again.') }
     } finally {
       setReading(false)
     }

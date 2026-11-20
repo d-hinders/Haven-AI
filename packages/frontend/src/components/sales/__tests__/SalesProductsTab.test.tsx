@@ -106,11 +106,12 @@ beforeEach(() => {
 })
 
 describe('the Products tab', () => {
-  it('says there is no kit address yet, and goes to Setup', async () => {
+  it('says there is no product list address yet, and goes to Setup', async () => {
     const { onOpenSetup } = await renderTab(
       catalogue({ data: { ...OK, deployment_url: null, last_read_at: null, last_read_status: 'never', products: [] } }),
     )
-    expect(screen.getByText('No kit address yet')).toBeTruthy()
+    expect(screen.getByText('No product list address yet')).toBeTruthy()
+    expect(screen.getByText(/The product list is optional\./)).toBeTruthy()
     expect(screen.queryByTestId('sales-products-freshness')).toBeNull()
     await userEvent.click(screen.getByRole('button', { name: 'Go to Setup' }))
     expect(onOpenSetup).toHaveBeenCalled()
@@ -141,7 +142,7 @@ describe('the Products tab', () => {
     expect(within(freshness).getByRole('button', { name: 'Read now' })).toBeTruthy()
   })
 
-  it('warns on a mismatch, dims the list and says which address and network the kit named', async () => {
+  it('warns on a mismatch, dims the list and says which address and network the seller named', async () => {
     await renderTab(
       catalogue({
         data: {
@@ -154,23 +155,63 @@ describe('the Products tab', () => {
       }),
     )
     const notice = screen.getByTestId('sales-products-mismatch')
-    expect(notice.textContent).toContain('Your kit isn’t set up for this Sales account.')
+    expect(notice.textContent).toContain('Your seller isn’t set up for this Sales account.')
     expect(notice.textContent).toContain('0x12D9…e4Ab on Base Sepolia, not to Sales on Base')
     expect(notice.textContent).toContain('Haven isn’t using these product names until they match.')
   })
 
-  it('warns when the kit cannot be read: the last good list stays, and Haven retries every 15 minutes', async () => {
+  it('warns when the seller cannot be read: the last good list stays, and Haven retries every 15 minutes', async () => {
     await renderTab(catalogue({ data: { ...OK, last_read_status: 'unreachable' } }))
     const notice = screen.getByTestId('sales-products-unreachable')
-    expect(notice.textContent).toContain('Haven couldn’t read your kit just now.')
+    expect(notice.textContent).toContain('Haven couldn’t read your seller just now.')
     expect(notice.textContent).toContain('Haven tries again every 15 minutes.')
     expect(screen.getByTestId('sales-products-table')).toBeTruthy()
     expect(screen.getByTestId('sales-products-freshness').textContent).toContain('Last tried 4m ago · inference.example.com')
   })
 
-  it('says a kit with no product list is not one Haven can use, and points to Setup', async () => {
+  it('gives a 404 its own copy and Go to Setup, not the outage copy (#4985)', async () => {
+    const { onOpenSetup } = await renderTab(
+      catalogue({ data: { ...OK, last_read_status: 'unreachable', last_read_detail: 'http_status: HTTP 404' } }),
+    )
+    const notice = screen.getByTestId('sales-products-unreachable')
+    expect(notice.textContent).toContain('Haven reached that address, but there is no product list at /.well-known/x402.')
+    expect(notice.textContent).not.toContain('Haven couldn’t read your seller just now.')
+    await userEvent.click(within(notice).getByRole('button', { name: 'Go to Setup' }))
+    expect(onOpenSetup).toHaveBeenCalled()
+  })
+
+  it('gives a 410 the same no-product-list copy (#4985)', async () => {
+    await renderTab(
+      catalogue({ data: { ...OK, last_read_status: 'unreachable', last_read_detail: 'http_status: HTTP 410' } }),
+    )
+    const notice = screen.getByTestId('sales-products-unreachable')
+    expect(notice.textContent).toContain('there is no product list at /.well-known/x402')
+    expect(within(notice).getByRole('button', { name: 'Go to Setup' })).toBeTruthy()
+  })
+
+  it('keeps the outage copy for a 503 and a timeout, with no Go to Setup (#4985)', async () => {
+    for (const detail of ['http_status: HTTP 503', 'timeout: the read timed out']) {
+      const { unmount } = render(
+        <SalesProductsTab
+          catalogue={catalogue({ data: { ...OK, last_read_status: 'unreachable', last_read_detail: detail } })}
+          range={RANGE}
+          onOpenSetup={vi.fn()}
+        />,
+      )
+      await act(async () => {})
+      const notice = screen.getByTestId('sales-products-unreachable')
+      expect(notice.textContent).toContain('Haven couldn’t read your seller just now.')
+      expect(notice.textContent).not.toContain('there is no product list')
+      expect(within(notice).queryByRole('button', { name: 'Go to Setup' })).toBeNull()
+      unmount()
+    }
+  })
+
+  it('says a seller with no product list is not one Haven can use, and points to Setup', async () => {
     const { onOpenSetup } = await renderTab(catalogue({ data: { ...OK, last_read_status: 'malformed', products: [] } }))
-    expect(screen.getByTestId('sales-products-malformed').textContent).toContain('couldn’t find a product list')
+    expect(screen.getByTestId('sales-products-malformed').textContent).toContain(
+      'Haven found something at that address, but it isn’t a product list Haven can read.',
+    )
     await userEvent.click(within(screen.getByTestId('sales-products-malformed')).getByRole('button', { name: 'Go to Setup' }))
     expect(onOpenSetup).toHaveBeenCalled()
   })

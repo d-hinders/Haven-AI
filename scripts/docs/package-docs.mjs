@@ -681,7 +681,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Registered with the README's first version (#4891): the settings table,
     // the discovery document's fields and the answer table were written against
     // src/config.ts, src/discovery.ts and src/handler.ts in the same PR.
-    'last-verified': '2026-11-18',
+    // Re-verified 2026-11-20 (#4985): Step 1 now turns Sales on and takes the
+    // Sales account's receiving address, the key row names Sales → Setup →
+    // Sales keys, Step 6 says a payment from the merchant's own agent is not a
+    // sale, and .env.example carries the same corrections.
+    'last-verified': '2026-11-20',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

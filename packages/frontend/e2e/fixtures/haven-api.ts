@@ -1457,6 +1457,7 @@ export async function serveSalesKeys(page: Page) {
 export type SalesScenario =
   | 'overview'
   | 'first-run'
+  | 'first-run-progressed'
   | 'products-ok'
   | 'products-mismatch'
   | 'products-unreachable'
@@ -1467,17 +1468,25 @@ export type SalesScenario =
  * Turn Sales ON and serve its reads for one scenario. Registered AFTER
  * `mockHavenApi`, so it answers first (Playwright runs the latest route first)
  * and everything it does not name falls through to the shell's fixtures.
+ *
+ * `first-run-progressed` (#4985) is the first-run screen with progress: the
+ * account has still never been paid, but a Sales key exists and the product
+ * list address reads `ok`, so all three steps are done and the card says the
+ * seller is connected. `first-run` serves neither.
  */
 export async function serveSales(page: Page, scenario: SalesScenario) {
   const catalogue =
-    scenario === 'products-ok' || scenario === 'overview' || scenario === 'overview-stripe'
+    scenario === 'products-ok' ||
+    scenario === 'overview' ||
+    scenario === 'overview-stripe' ||
+    scenario === 'first-run-progressed'
       ? salesCatalogueOk
       : scenario === 'products-mismatch'
         ? salesCatalogueMismatch
         : scenario === 'products-unreachable'
           ? salesCatalogueUnreachable
           : salesCatalogueNone
-  const paid = scenario !== 'first-run'
+  const paid = scenario !== 'first-run' && scenario !== 'first-run-progressed'
   const stripe = scenario === 'overview-stripe'
   const summary = stripe ? salesSummaryWithStripe : salesSummary
   const payments = stripe ? salesPaymentsWithStripe : salesPayments

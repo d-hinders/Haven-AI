@@ -8,7 +8,7 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Six scenarios × two viewports (× the two schemes the projects run) =
+ * Seven scenarios × two viewports (× the two schemes the projects run) =
  * `sales-<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/sales.visual.spec.ts/`:
  *
@@ -24,8 +24,12 @@
  *     (`salesSummaryWithStripe`).
  *   - `payment-stripe` — one of those sales opened: the mark beside the
  *     status, "to your Stripe address", and the Stripe notice (#4954).
- *   - `first-run` — the account has never been paid: "No sales yet" and the
- *     three setup steps.
+ *   - `first-run` — the account has never been paid: the seller definition,
+ *     "No sales yet" and the three setup steps, none done.
+ *   - `first-run-progressed` (#4985) — the same screen with progress: a Sales
+ *     key exists and the product list address reads `ok`, so all three steps
+ *     are done, the count reads "3 of 3 done" and the card says the seller is
+ *     connected. Still unpaid, so the first-run screen is still what shows.
  *   - `products` — the catalogue read OK: the table with exact USDC prices, the
  *     network, sales in the period and the freshness line.
  *
@@ -80,7 +84,7 @@ const PIXEL_THRESHOLD = 0.02
 const ANCHOR_TIMEOUT_MS = 60_000
 
 interface Scenario {
-  name: 'overview' | 'overview-sek' | 'overview-stripe' | 'payment-stripe' | 'first-run' | 'products'
+  name: 'overview' | 'overview-sek' | 'overview-stripe' | 'payment-stripe' | 'first-run' | 'first-run-progressed' | 'products'
   serve: SalesScenario
   /** Serve the SEK user (the converted Overview, #4963). */
   sek?: boolean
@@ -162,6 +166,23 @@ const SCENARIOS: Scenario[] = [
     async assert(page) {
       await expect(page.getByTestId('sales-first-run')).toHaveCount(1)
       await expect(page.getByText('No sales yet')).toHaveCount(1)
+      await expect(page.getByTestId('sales-tiles')).toHaveCount(0)
+      // #4985: the seller is introduced first, and no step is done without an
+      // observation.
+      await expect(page.getByTestId('seller-definition')).toHaveCount(1)
+      await expect(page.getByTestId('sales-first-run-count')).toHaveText('0 of 3 done')
+    },
+  },
+  {
+    // #4985: the first-run screen with progress — a key and a product list
+    // address reading `ok`, still unpaid.
+    name: 'first-run-progressed',
+    serve: 'first-run-progressed',
+    path: '/sales',
+    async assert(page) {
+      await expect(page.getByTestId('sales-first-run')).toHaveCount(1)
+      await expect(page.getByTestId('sales-first-run-count')).toHaveText('3 of 3 done')
+      await expect(page.getByText('Your seller is connected. Sales appear here when someone pays.')).toHaveCount(1)
       await expect(page.getByTestId('sales-tiles')).toHaveCount(0)
     },
   },

@@ -200,7 +200,12 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
             <RouteLoading />
           </div>
         ) : firstRun ? (
-          <SalesFirstRun onShowAddress={() => setReceiveOpen(true)} setupHref="/sales?tab=setup" />
+          <SalesFirstRun
+            catalogue={catalogue}
+            account={account}
+            onShowAddress={() => setReceiveOpen(true)}
+            setupHref="/sales?tab=setup"
+          />
         ) : (
           <SalesOverviewTab
             range={range}

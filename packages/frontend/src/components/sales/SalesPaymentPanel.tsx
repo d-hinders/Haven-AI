@@ -385,7 +385,7 @@ function OpenPanel({
             </NoticeRow>
           ) : detail.kind === 'no_product' ? (
             <NoticeRow className="mt-4">
-              Your kit sent no sale record for this payment. It still counts as revenue.
+              Your seller sent no sale record for this payment. It still counts as revenue.
             </NoticeRow>
           ) : null}
         </div>
@@ -416,8 +416,8 @@ function OpenPanel({
           <div className="space-y-3">
             <p className="text-[var(--v2-ink-2)]">
               {stripe
-                ? 'This sale was received in Stripe, so its record is all Sales has of it: it leaves this page until your kit reports it again. Nothing changes in Stripe.'
-                : 'The payment stays and still counts as revenue. It shows with no product until your kit reports it again.'}
+                ? 'This sale was received in Stripe, so its record is all Sales has of it: it leaves this page until your seller reports it again. Nothing changes in Stripe.'
+                : 'The payment stays and still counts as revenue. It shows with no product until your seller reports it again.'}
             </p>
             <NoticeRow
               action={

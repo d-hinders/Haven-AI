@@ -140,7 +140,7 @@ function OverviewSkeleton() {
 }
 
 const WITHOUT_PRODUCT_HINT =
-  'A payment your kit sent no sale record for. It still counts as revenue; the product is what is missing.'
+  'A payment your seller sent no sale record for. It still counts as revenue; the product is what is missing.'
 
 /**
  * The Sales Overview tab (#4900): totals, the by-day chart, the two
@@ -379,7 +379,7 @@ function OverviewFigures({
         <StatTile
           label="Without a product"
           value={String(data.without_product.count)}
-          footnote="Paid, but your kit sent no sale record"
+          footnote="Paid, but your seller sent no sale record"
           hint={
             <Tooltip label={WITHOUT_PRODUCT_HINT} side="bottom">
               <span

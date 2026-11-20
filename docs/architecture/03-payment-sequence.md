@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/routes/merchant-catalogue.ts
   - packages/backend/src/modules/catalog/merchant-products.ts
   - packages/backend/src/infra/repositories/merchant-catalogue.ts
-last-verified: "2026-11-18"
+last-verified: "2026-11-20"
 ---
 
 # Haven — Payment Execution Sequence
@@ -349,21 +349,36 @@ every leg is indexed. The match path carries the same rule: a row whose
 matched again, so a replayed receipt drop cannot count one on-chain transfer
 twice. Zero-value transfers are left out for every account.
 
-**The scheduled pass (#4903).** A merchant account that nobody browses used to
-be unindexed, and one that received more payments between reads than the
-explorer's page cap lost the older ones. `modules/transactions/merchant-index.ts`
-runs every 5 minutes (`background-jobs.ts`, leader-locked on
-`LEADER_LOCK_KEYS.merchantInboundIndex`) over every account marked
-`is_merchant_account`, and reads every USDC transfer into it since the last
-indexed block straight from the chain (`eth_getLogs`, `chain-read.ts`) — no
-explorer page cap, and the exact log index for each leg. A per-account cursor
-(`inbound_index_cursors`) records the highest fully indexed block; the first
-pass seeds it at the block carrying the account's creation time. A payment is
-therefore indexed **within 5 minutes** of the next tick with no dashboard open.
-The pass is idempotent and safe with two replicas: the job is leader-gated, and
-the writes converge regardless (the row identity dedupes, the cursor only moves
-forward). Indexing continues while merchant services are turned off — the
-account list is the marker, not the setting — so the history stays complete.
+**The merchant index pass (#4903, read on view since #5012).** One merchant
+account that received more payments between reads than the explorer's page cap
+lost the older ones. `modules/transactions/merchant-index.ts` reads every USDC
+transfer into an account marked `is_merchant_account` since its last indexed
+block, with no page cap. Where Alchemy's transfer index is configured for the
+chain (`ALCHEMY_HISTORY_API_KEY`), the index names the transactions, oldest
+first and paged to the end, and each one is read from the chain by hash
+(`readInboundTransfersViaIndex`, `chain-read.ts`), so the payer, amount, block
+time and exact log index of each leg come from the receipt. Otherwise the range
+is read with `eth_getLogs` (`readInboundTransfersInBlockRange`). A per-account
+cursor (`inbound_index_cursors`) records the highest fully indexed block; the
+first pass seeds it at the block carrying the account's creation time.
+
+**When it runs.** Only while the owner is looking: there is no scheduled pass
+since #5012 (it scanned on a clock and, on a 10-block `eth_getLogs` plan, held
+dev at ~1M Alchemy compute units an hour). The Sales payments read, which
+every Sales screen makes and nothing outside Sales does, asks for a background refresh of the owner's own account
+(`refreshMerchantAccountIndex`), at most once per 30 s per account across
+replicas (`claimInboundIndexRefresh`, one conditional UPDATE on the cursor
+row), and the Sales page re-reads every 10 s while visible. A payment nobody
+reported therefore shows on an open Sales page within about a minute when the
+transfer index is configured. On the `eth_getLogs` fallback a refresh walks at
+most 10,000 blocks (about 5.5 hours of Base), so after a longer quiet spell
+the page catches up over several refreshes. With nobody looking, a payment is
+indexed the next time the owner opens Sales. A sale the merchant reports is
+recorded at once by its own by-hash read (#4897) either way. The writes are
+idempotent and converge under concurrent refreshes (the row identity dedupes,
+the cursor only moves forward). While merchant services are off the Sales
+reads answer nothing, so no refresh runs; the next view continues from the
+cursor.
 Each row records `sender_is_own_address`, decided at index time against the
 owner's own addresses (the set #4897 defines).
 

@@ -471,11 +471,12 @@ export const config = {
   igdrasilClientSecret: process.env.IGDRASIL_CLIENT_SECRET ?? '',
   igdrasilRedirectUri: process.env.IGDRASIL_REDIRECT_URI ?? '',
 
-  // The scheduled merchant inbound index (#4903) is ON unless this is "true".
-  // A kill switch, not a feature flag: the pass reads the chain every 5 minutes
-  // for every merchant account, and on a provider that serves 10 blocks per
-  // eth_getLogs call that can use up a shared compute-unit quota (dev,
-  // 2026-11-20). Turning it off stops indexing; nothing else reads it.
+  // The merchant inbound index (#4903) is ON unless this is "true". A kill
+  // switch, not a feature flag: since #5012 the index refreshes a merchant
+  // account while its owner views Sales (at most once per 30 s per account),
+  // reading Alchemy's transfer index or eth_getLogs. Turning it off stops that
+  // refresh. It does not stop the dashboard feed's own ingest of transfers it
+  // reads (`aggregate.ts`), nor a merchant's reported sales (#4897).
   merchantInboundIndexDisabled: parseBooleanFlag(
     'MERCHANT_INBOUND_INDEX_DISABLED',
     process.env.MERCHANT_INBOUND_INDEX_DISABLED,

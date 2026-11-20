@@ -45,6 +45,14 @@ vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
   }
 })
 
+// #5012: the sales reads ask for a background index refresh; recorded, never
+// run, so these tests make no RPC or index call (the refresh is proven in
+// merchant-index.db.test.ts).
+vi.mock('../../modules/transactions/merchant-index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/merchant-index.js')>()
+  return { ...actual, refreshMerchantAccountIndex: async () => ({ status: 'throttled' }) }
+})
+
 const depositRoutes = (await import('../merchant-deposit-addresses.js')).default
 const salesRoutes = (await import('../merchant-sales.js')).default
 const salesReadRoutes = (await import('../merchant-sales-reads.js')).default

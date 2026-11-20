@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { notFound } from 'next/navigation'
 import { QrCode } from 'lucide-react'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
@@ -118,7 +118,15 @@ function SalesPage({ account }: { account: NonNullable<ReturnType<typeof useMerc
   // First run: has the account EVER been paid? One payment of the whole
   // history answers it, whatever period the page is on (a quiet period is not a
   // first run).
-  const ever = useSalesPayments(null, { limit: 1 })
+  // #5012: live until the account has been paid, so the first payment turns
+  // the first-run screen into the overview without a reload. Once paid, the
+  // answer cannot change back, so it stops polling.
+  const [awaitingFirstPayment, setAwaitingFirstPayment] = useState(true)
+  const ever = useSalesPayments(null, { limit: 1, live: awaitingFirstPayment })
+  const everPaid = ever.payments.length > 0
+  useEffect(() => {
+    if (everPaid) setAwaitingFirstPayment(false)
+  }, [everPaid])
   const firstRun = !ever.loading && !ever.failed && ever.payments.length === 0
 
   // The Receive dialog wants an account object. The Sales account is a real

@@ -21,7 +21,11 @@ import {
   readInboundTransactionByTxHash,
   readInboundTransfersByTxHash,
   readInboundTransfersInBlockRange,
+  readInboundTransfersViaIndex,
   resetBlockTimeCache,
+  type ChainInboundLeg,
+  type ChainTransactionRead,
+  type IndexReadDeps,
 } from '../chain-read.js'
 
 const CHAIN = 84532
@@ -374,6 +378,111 @@ describe('readInboundTransactionByTxHash (#4897)', () => {
       mocks.getProvider.mockReturnValue(providerWith({ receipt: { hash: TX, blockNumber: 100, logs: logs() } }))
       const read = await readInboundTransactionByTxHash(CHAIN, ACCOUNT, TX)
       expect(read.ok && 'otherLegs' in read).toBe(false)
+    })
+  })
+})
+
+describe('readInboundTransfersViaIndex (#5012)', () => {
+  function chainLeg(txHash: string, logIndex: number, blockNumber: number): ChainInboundLeg {
+    return {
+      txHash,
+      logIndex,
+      payerAddress: PAYER.toLowerCase(),
+      tokenAddress: USDC.toLowerCase(),
+      amountRaw: '1000000',
+      blockNumber,
+      blockTime: new Date(1_790_000_000 * 1000),
+    }
+  }
+  const H1 = '0x' + '01'.repeat(32)
+  const H2 = '0x' + '02'.repeat(32)
+
+  /** A receipt the chain has, carrying `legs`, in `blockNumber`. */
+  function mined(blockNumber: number, legs: ChainInboundLeg[]): ChainTransactionRead {
+    return { ok: true, receiptFound: true, blockNumber, latestBlock: 10_000, legs }
+  }
+
+  function depsWith(
+    discover: IndexReadDeps['discover'],
+    byHash: Record<string, ChainTransactionRead>,
+  ): IndexReadDeps & { readByHash: ReturnType<typeof vi.fn> } {
+    const readByHash = vi.fn(async (_chain: number, _account: string, txHash: string) => byHash[txHash]!)
+    return { discover, readByHash }
+  }
+
+  it('costs one index call and no receipt for an idle range', async () => {
+    const discover = vi.fn(async () => ({ ok: true as const, txHashes: [] }))
+    const deps = depsWith(discover, {})
+    expect(await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)).toEqual({ ok: true, legs: [] })
+    expect(discover).toHaveBeenCalledTimes(1)
+    expect(deps.readByHash).not.toHaveBeenCalled()
+  })
+
+  it('reads each found transaction from the chain: two byte-identical legs stay two legs, each with its log index', async () => {
+    const discover = vi.fn(async () => ({ ok: true as const, txHashes: [H1] }))
+    const deps = depsWith(discover, { [H1]: mined(150, [chainLeg(H1, 2, 150), chainLeg(H1, 5, 150)]) })
+
+    const read = await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)
+
+    expect(read?.ok).toBe(true)
+    if (!read?.ok) return
+    expect(read.legs.map((leg) => leg.logIndex)).toEqual([2, 5])
+    expect(deps.readByHash).toHaveBeenCalledTimes(1)
+    // The index is asked for the settlement token by address, never a caller value.
+    expect(discover).toHaveBeenCalledWith(CHAIN, ACCOUNT, USDC.toLowerCase(), 100, 400)
+  })
+
+  it('answers null when the index is not configured, so the caller reads the range instead', async () => {
+    const deps = depsWith(vi.fn(async () => null), {})
+    expect(await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)).toBeNull()
+  })
+
+  it('keeps a part-way discovery to the blocks it vouches for', async () => {
+    const discover = vi.fn(async () => ({ ok: false as const, txHashes: [H1, H2], readThroughBlock: 139 }))
+    const deps = depsWith(discover, {
+      [H1]: mined(120, [chainLeg(H1, 0, 120)]),
+      [H2]: mined(140, [chainLeg(H2, 0, 140)]),
+    })
+
+    const read = await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)
+
+    expect(read).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+      partial: { legs: [chainLeg(H1, 0, 120)], readThroughBlock: 139 },
+    })
+  })
+
+  it('stops before the block of a receipt it could not read, never claiming that block', async () => {
+    const discover = vi.fn(async () => ({ ok: true as const, txHashes: [H1, H2] }))
+    const deps = depsWith(discover, {
+      [H1]: mined(150, [chainLeg(H1, 0, 150)]),
+      [H2]: { ok: false, reason: 'rpc_unavailable' },
+    })
+
+    const read = await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)
+
+    // H2 may be in block 150 too, so nothing at or after 150 is claimed.
+    expect(read).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+      partial: { legs: [], readThroughBlock: 149 },
+    })
+  })
+
+  it('treats a receipt the chain does not have as a failure, never as "none" (the index named it)', async () => {
+    const discover = vi.fn(async () => ({ ok: true as const, txHashes: [H1, H2] }))
+    const deps = depsWith(discover, {
+      [H1]: mined(150, [chainLeg(H1, 0, 150)]),
+      [H2]: { ok: true, receiptFound: false, legs: [] },
+    })
+
+    const read = await readInboundTransfersViaIndex(CHAIN, ACCOUNT, 100, 400, deps)
+
+    expect(read).toEqual({
+      ok: false,
+      reason: 'rpc_unavailable',
+      partial: { legs: [], readThroughBlock: 149 },
     })
   })
 })

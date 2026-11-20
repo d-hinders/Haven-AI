@@ -9,7 +9,7 @@
  *    account's address are upserted into `inbound_transfers`. Two sources feed
  *    it, and both are the chain's own answer: the explorer read the dashboard
  *    already performs (`aggregate.ts`, no second explorer call) and the
- *    scheduled merchant pass's `eth_getLogs` read (`merchant-index.ts`). USDC
+ *    merchant index pass (`merchant-index.ts`, on view since #5012). USDC
  *    only: the slice's asset is the settlement token, and the ledger is a USDC
  *    receive balance, not a general token inventory. Idempotent per
  *    (chain, hash, account, log index) — and per (chain, hash, account, payer,

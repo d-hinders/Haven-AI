@@ -492,11 +492,14 @@ Isolation rules that are non-negotiable for a payments product:
   quota with prod, and Alchemy became dev's fallback. **Temporary exception:**
   the public node fails the 500-block logs line (it serves 200). Every log
   scanner learns that limit from the refusal, so a scan costs 2.5× the calls
-  it would at 500, and nothing is lost. Move the primary back to a dedicated
-  endpoint that passes every line once the merchant-index fix (this PR's
-  `MAX_UNSETTLED_REREAD_BLOCKS` and partial reads) is on dev.
+  it would at 500, and nothing is lost. Since #5012 the merchant index has no
+  scheduled pass: it refreshes a merchant account only while its owner views
+  Sales, at most once per 30 s, so it no longer drives the RPC bill. Without
+  `ALCHEMY_HISTORY_API_KEY` that refresh reads the range with `eth_getLogs` on
+  the primary. Moving the primary back to a
+  dedicated endpoint that passes every line is an ops decision.
   `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`, lower-case; any other
-  value refuses boot) stops that job outright.
+  value refuses boot) stops the refresh.
 
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over

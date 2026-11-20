@@ -18,10 +18,18 @@
  * starts it again, as a change of period does. `total` is the read's count for
  * the filter set, every page included: the list's "{shown} of {total}" and its
  * "Show N more" read it, never the loaded rows.
+ *
+ * #5012: `live` re-reads the FIRST page every 10 s while the tab is visible
+ * (`useVisiblePolling`), silently, and merges it (`mergeLivePage`): new
+ * payments appear on top, rows already shown keep their place, and pages the
+ * owner loaded with "Show more" stay loaded. A failed re-read changes nothing.
+ * Each read also asks the backend to refresh the account's index (throttled
+ * there per account).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
+import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import {
   NO_SALES_FILTERS,
   SALES_PAGE_SIZE,
@@ -57,9 +65,26 @@ function pagePath(range: SalesDayRange | null, limit: number, cursor: string | n
   return `/merchant-sales/payments?${params.toString()}`
 }
 
+/**
+ * Merge a freshly read first page into the rows on screen (#5012). When only
+ * the first page is loaded, the fresh page IS the list. When the owner loaded
+ * more, the fresh page replaces the rows it names and puts new ones on top,
+ * and every other loaded row keeps its order below: the cursor of the last
+ * loaded page stays valid because the list is keyed newest first.
+ */
+export function mergeLivePage(current: SalesPayment[], fresh: SalesPayment[], limit: number): SalesPayment[] {
+  if (current.length <= limit) return fresh
+  const freshKeys = new Set(fresh.map((payment) => payment.tx_hash))
+  return [...fresh, ...current.filter((payment) => !freshKeys.has(payment.tx_hash))]
+}
+
 export function useSalesPayments(
   range: SalesDayRange | null,
-  { limit = SALES_PAGE_SIZE, filters = NO_SALES_FILTERS }: { limit?: number; filters?: SalesFilters } = {},
+  {
+    limit = SALES_PAGE_SIZE,
+    filters = NO_SALES_FILTERS,
+    live = false,
+  }: { limit?: number; filters?: SalesFilters; live?: boolean } = {},
 ): UseSalesPaymentsResult {
   const [payments, setPayments] = useState<SalesPayment[]>([])
   const [total, setTotal] = useState<number | null>(null)
@@ -103,6 +128,34 @@ export function useSalesPayments(
       requestIdRef.current += 1
     }
   }, [first])
+
+  // Read by the silent re-read, which must not take part in React's update
+  // queue to decide whether more than the first page is on screen.
+  const shownRef = useRef({ payments, loading, loadingMore })
+  useEffect(() => {
+    shownRef.current = { payments, loading, loadingMore }
+  })
+
+  const reread = useCallback(async () => {
+    if (!live) return
+    const shown = shownRef.current
+    if (shown.loading || shown.loadingMore) return
+    const requestId = requestIdRef.current
+    try {
+      const scope = from !== null && to !== null ? { from, to } : null
+      const page = await api.get<SalesPaymentsPage>(pagePath(scope, limit, null, filterQuery))
+      if (requestIdRef.current !== requestId) return
+      const firstPageOnly = shownRef.current.payments.length <= limit
+      setPayments((current) => mergeLivePage(current, page.payments, limit))
+      if (firstPageOnly) setCursor(page.next_cursor)
+      setTotal(page.total)
+      setUsdcRates(page.usdc_rates ?? null)
+      setFailed(false)
+    } catch {
+      // Keep the rows on screen; the next tick tries again.
+    }
+  }, [live, from, to, limit, filterQuery])
+  useVisiblePolling(reread)
 
   const loadMore = useCallback(() => {
     if (cursor === null || loadingMore) return

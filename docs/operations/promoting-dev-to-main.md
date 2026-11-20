@@ -318,14 +318,15 @@ so this is a rule to point at rather than a question to ask the release runner.
       re-confirmed the acceptance with that failure mode stated on 2026-10-01.
       Revisit when a paid RPC plan is considered.
 
-      **The merchant inbound index (#4903) is the largest `eth_getLogs`
-      consumer.** It reads every merchant account every 5 minutes; at Alchemy's
-      10-block free-plan span one merchant account costs ~45 calls a tick, about
-      24–30M compute units a month, the whole shared allowance (dev, 2026-11-20,
-      PR #5004). Before a promotion carries it to prod, prod's primary must
-      serve at least 200 blocks per `eth_getLogs` call (measure it with the
-      probe's logs line), or the pass must batch accounts, or set
-      `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`) on prod's backend.
+      **The merchant inbound index (#4903) reads only while its owner views
+      Sales (#5012).** There is no scheduled pass: a refresh runs at most once
+      per 30 s per merchant account while a Sales screen is open, through
+      Alchemy's transfer index when `ALCHEMY_HISTORY_API_KEY` is set (about one
+      call a refresh, plus one receipt per new payment), else `eth_getLogs`
+      over the range. The scheduled pass it replaced cost ~24–30M compute units
+      a month per merchant account at Alchemy's 10-block span (dev, 2026-11-20,
+      PR #5004). An environment with no merchant account makes no such call.
+      `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`) stops it.
 
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
       `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run

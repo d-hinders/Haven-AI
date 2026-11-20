@@ -38,6 +38,7 @@ import {
   readPaymentsPage,
   readSalesFacets,
   readSalesSummaryForOwner,
+  refreshMerchantAccountIndex,
   resolveSalesScope,
   type SalesFilterInput,
 } from '../modules/transactions/index.js'
@@ -125,6 +126,13 @@ export default async function merchantSalesReadRoutes(app: FastifyInstance): Pro
     }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return { payments: [], next_cursor: null, total: 0, usdc_rates: null }
+    // #5012: the owner is looking at Sales, so refresh the account's index in
+    // the background. THIS read is the one trigger: every Sales screen reads
+    // it (the first-run check included), and nothing outside Sales does
+    // (/analytics reads only the summary). It is throttled per account (one
+    // refresh per 30 s however many tabs poll), never throws, and never delays
+    // or changes this answer: a transfer it finds shows on the next poll.
+    void refreshMerchantAccountIndex(scope.accountId, request.log)
     const limit = Math.min(request.query.limit ?? PAYMENTS_DEFAULT_LIMIT, PAYMENTS_MAX_LIMIT)
     return readPaymentsPage(scope, period.period, { limit, cursor }, filterInput(request.query))
   })

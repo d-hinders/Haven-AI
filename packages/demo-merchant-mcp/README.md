@@ -717,8 +717,9 @@ any of Stripe, the key or the base URL unset the joke reports nothing and
 behaves as before.
 
 **Before a demo, register the Stripe deposit address in Haven**, under the Sales
-account the Sales key belongs to, with `POST /merchant-deposit-addresses` from
-the owner's session (the screen for it is #4954).
+account the Sales key belongs to, on **Sales → Setup → Stripe deposit
+addresses** (or with `POST /merchant-deposit-addresses` from the owner's
+session; the screen is #4954).
 The full demo, step by step, is
 [`docs/operations/merchant-services-demo.md`](../../docs/operations/merchant-services-demo.md). Register it **before the first demo payment**: Haven accepts a sale only
 if the address was registered at or before the payment's block time, and the

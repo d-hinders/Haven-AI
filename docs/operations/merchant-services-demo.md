@@ -9,7 +9,7 @@ covers:
   - packages/backend/src/routes/merchant-sales.ts
   - packages/backend/src/routes/merchant-sales-reads.ts
   - packages/backend/src/routes/merchant-deposit-addresses.ts
-  - packages/frontend/src/components/settings/StripeDepositAddressesSection.tsx
+  - packages/frontend/src/components/sales/StripeDepositAddressesSection.tsx
   - packages/frontend/src/components/sales/SalesKeysSection.tsx
   - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
   - packages/frontend/src/components/sales/SalesPaymentPanel.tsx
@@ -124,7 +124,7 @@ registered under the Sales account **at or before the payment's block time**
 (#4952). The demo merchant never resends a refused report, so a joke paid
 before registration is lost for good: it never appears on the Sales page.
 
-Signed in as the merchant user, open **Settings → Business → Sales**. Under
+Signed in as the merchant user, open **Sales → Setup**. Under
 **Stripe deposit addresses**, choose **Register address**, paste
 `<STRIPE_DEPOSIT_ADDRESS>` and register it (#4954). The address is listed with
 "Not verified by Haven".
@@ -317,8 +317,8 @@ curl -s -X DELETE "<DEV_API>/merchant-sales/payments/<TX_HASH>/record" \
    the old one, then redeploy
    ([secret-rotation.md](secret-rotation.md)).
 4. Only after the last payment to the old address has settled, retire the old
-   registration: **Retire** beside it under Settings → Business → Sales →
-   Stripe deposit addresses. It stays listed as Retired. Through the API:
+   registration: **Retire** beside it under Sales → Setup → Stripe deposit
+   addresses. It stays listed as Retired. Through the API:
 
    ```bash
    curl -s "<DEV_API>/merchant-deposit-addresses" \

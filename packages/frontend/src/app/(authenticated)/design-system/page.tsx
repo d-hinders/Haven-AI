@@ -4320,7 +4320,7 @@ export default function DesignSystemPage() {
       <Section
         title="Sales patterns"
         testId="ds-sales-patterns"
-        description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. The Sales By-day chart splits by where the money was received when a period has Stripe-held sales: “In Haven” (index 0) and “In Stripe” (index 1), a zero segment dropped. Off, the Settings Sales card says “Keys not accepted while off” as a Detail list row. The show-once credential block is the copy-a-string shape, extracted in #4905 as ShowOnceCredentialBlock and used by PaymentCredentialsModal, ReplaceSigningKeyModal and the Sales key dialog."
+        description="The pieces the Sales mockup marked NEW, approved on #4894 (2026-11-16) and documented in design-system.md (#4908). Sale rows are product-first — the product is the title, the payer the subline — and a payment with no sale record titles “No product recorded” in ink-3 (mutedTitle); a sale row carries no badge, like a confirmed payment. The Sales StatusBadge family is Received (success, detail panel only), Not counted (neutral, a move from the owner's own agent or account) and No longer offered (neutral, a product the kit no longer lists). The Products card's header carries a routine freshness line in its actions slot — “Read from <host> · 4m ago” from timeAgo, then Read now — which is not BalanceFreshnessIndicator, the amber stale-read warning. Spending / Revenue on Analytics is Tabs as a page data-source switch, held in ?view= beside ?period=; Revenue hides the Agent facet. Revenue stacks products from --v2-series-* by index: five products, then one neutral “Other”, no refusal marker. The Sales By-day chart splits by where the money was received when a period has Stripe-held sales: “In Haven” (index 0) and “In Stripe” (index 1), a zero segment dropped. Off, the Settings Sales section says “Keys not accepted while off” on a `SettingsRow`, with the status row above it carrying the switch. The show-once credential block is the copy-a-string shape, extracted in #4905 as ShowOnceCredentialBlock and used by PaymentCredentialsModal, ReplaceSigningKeyModal and the Sales key dialog."
       >
         <div className="grid items-start gap-5 lg:grid-cols-2" data-testid="ds-sales-specimens">
           {/* #4981: first in the grid, so its clip test can isolate it (a multi-track
@@ -4438,17 +4438,28 @@ export default function DesignSystemPage() {
             />
           </Card>
 
-          <Card hover={false} className="p-5">
-            <DetailList
-              items={[
-                {
-                  label: 'Sales keys',
-                  value: 'Keys not accepted while off',
-                  helper: 'Sales reports from your merchant kit are refused until Sales is on again.',
-                },
-              ]}
+          {/* #4983: the Settings → Business Sales section, one `SettingsSection`
+              like Accounting — the status row carries the switch, and the
+              keys-off row states what off means. */}
+          <SettingsSection
+            title="Sales"
+            description="The status row carries the switch; the keys-off row says what off means."
+          >
+            <SettingsRow
+              label="Status"
+              value={<StatusBadge tone="neutral">Off</StatusBadge>}
+              action={
+                <Button size="sm" variant="ghost">
+                  Turn on Sales
+                </Button>
+              }
             />
-          </Card>
+            <SettingsRow
+              label="Sales keys"
+              value="Keys not accepted while off"
+              detail="Sales reports from your seller are refused until Sales is on again."
+            />
+          </SettingsSection>
 
           <Card hover={false} className="p-5">
             <h4 className="text-sm font-medium text-[var(--v2-ink)]">Sales key</h4>

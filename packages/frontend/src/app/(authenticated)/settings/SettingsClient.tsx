@@ -55,12 +55,12 @@
  *   the URL is never rewritten — `tab=business` stays, so the same link
  *   works once the data arrives.
  *
- * #4904 makes the third state unreachable in practice: the Sales card always
- * has something to show once its read settles (the switch and the purpose
- * line, the account, or a retry), and Settings → Business is the only place
- * Sales can be turned on. The rule is kept as written because it is still the
- * rule for the two cards that came first, and because a future card that can
- * genuinely be empty must not resurrect a hidden tab by accident.
+ * #4904 makes the third state unreachable in practice: the Sales section
+ * always has something to show once its read settles (the switch and the
+ * purpose line, the account, or a retry), and Settings → Business is the only
+ * place Sales can be turned on. The rule is kept as written because it is
+ * still the rule for the two cards that came first, and because a future card
+ * that can genuinely be empty must not resurrect a hidden tab by accident.
  *
  * The three reads themselves are called ONCE, in `BusinessDataProvider`
  * (see it for why), and shared with both cards through context. The Sales
@@ -145,13 +145,14 @@ function SettingsTabs() {
     providersFailed ||
     feedUnknown ||
     hasConnectOutcome(searchParams)
-  // #4904: the Sales card ALWAYS has something to show once its read settles —
-  // the switch and the purpose line when Sales was never on, the account and
-  // its network when it is on or off, a retry when the read failed. So the
-  // Business tab is no longer conditional on company details or accounting:
-  // it is the only place Sales can be turned on, and hiding it would make the
-  // feature unreachable. The tab still waits for the reads (no flash-in), and
-  // it can no longer flash OUT, because Sales content never disappears.
+  // #4904: the Sales section ALWAYS has something to show once its read
+  // settles — the switch and the purpose line when Sales was never on, the
+  // account and its network when it is on or off, a retry when the read
+  // failed. So the Business tab is no longer conditional on company details or
+  // accounting: it is the only place Sales can be turned on, and hiding it
+  // would make the feature unreachable. The tab still waits for the reads (no
+  // flash-in), and it can no longer flash OUT, because Sales content never
+  // disappears.
   const salesSettled = sales.status !== 'loading'
   const salesHasContent = salesSettled
   const businessKnown = !companyPending && !providers.loading && !feed.loading && salesSettled
@@ -372,10 +373,12 @@ function SettingsTabs() {
             */}
             <ConnectionsCard />
 
-            {/* #4904: the third card, after Company details and Accounting
-                connections (owner decision 1 on #4894). The switch, the
-                dialog with the network choice and the passkey prompt, and the
-                off state that keeps the account and refuses the keys. */}
+            {/* #4904: the third section, after Company details and Accounting
+                connections (owner decision 1 on #4894); #4983 reshaped it into
+                one `SettingsSection` like Accounting. The status row carries
+                the switch, the dialog carries the network choice and the
+                passkey prompt, and the off state keeps the account and refuses
+                the keys. Stripe deposit addresses live on Sales → Setup. */}
             <SalesCard />
           </>
         )}

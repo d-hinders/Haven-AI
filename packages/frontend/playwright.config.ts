@@ -373,6 +373,10 @@ export default defineConfig({
         '**/settings-tabs.visual.spec.ts',
         // #4904: the Settings → Business Sales card and the turn-on dialog.
         '**/settings-sales.visual.spec.ts',
+        // #4983: the Sales → Setup tab — the Sales keys (#4905) and the Stripe
+        // deposit addresses (#4954), which moved here from Settings → Business
+        // → Sales. Joined so the moved captures keep their dark baselines.
+        '**/sales-keys.visual.spec.ts',
         // #4641: the Send dialog's Details, Review and sent screens. It seeds
         // `haven.theme='dark'` itself and skips its mobile shots under this
         // project (no mobile dark baseline), like receive-dialog above.

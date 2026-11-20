@@ -1235,6 +1235,13 @@ shape everywhere.
   Tax declaration row and the agent Passport row's issued-state `dl` (#4477),
   and `ConnectionsCard.tsx`, which renders its inline feed settings through the
   slot instead of a hand-written sibling wrapper (#4478).
+- **A row that states an off feature's credentials are refused** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894); moved onto a `SettingsRow` by [#4983](https://github.com/d-hinders/Haven-AI/issues/4983)).
+  The Settings → Business Sales section (built by [#4904](https://github.com/d-hinders/Haven-AI/issues/4904))
+  carries a `SettingsRow` reading **Keys not accepted while off** when Sales is off: label "Sales keys", value "Keys not
+  accepted while off", and a detail line saying what that means for the seller ("Sales reports from your seller are refused until Sales is on again."). It is a
+  documented use of this row, not a new component — no badge, no alert, no
+  action; the section's own switch, on the status row above it, is the control. Shown on `/design-system` →
+  *Sales patterns*.
 - **The agent Settings tab is a settings page (#4477).** The agent detail
   page's Settings tab (`app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx`)
   renders its sections with `SettingsSection` and its rows with `SettingsRow`,
@@ -1292,14 +1299,6 @@ the `/design-system` specimen is unchanged).
   directly in a card elsewhere.
 
 Recorded on `/design-system` → *Detail list*.
-
-**A row that states an off feature's credentials are refused** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)).
-The Settings → Business Sales card (built by [#4904](https://github.com/d-hinders/Haven-AI/issues/4904))
-carries a Detail list row reading **Keys not accepted while off** when Sales is off: label "Sales keys", value "Keys not
-accepted while off", and a helper saying what that means for the kit ("The kit's sales reports are refused until Sales is on again."). It is a
-documented use of this list, not a new component — no badge, no alert, no
-action; the card's own switch is the control. Shown on `/design-system` →
-*Sales patterns*.
 
 ### BudgetMeter (#3692)
 

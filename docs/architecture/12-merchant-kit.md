@@ -340,7 +340,7 @@ route, or refused when it is not a product route.
 | `version` | Yes | The kit document version. `1` is the only version. |
 | `operator.name` | Yes | Who operates the endpoint. A Haven-run demo says `Haven`; a third-party merchant says its own name. The proxy refuses to start without `OPERATOR_NAME` (#4893). |
 | `operator.contact` | No | A URL or address a reader can use to reach the operator: `OPERATOR_CONTACT`. |
-| `name`, `description` | Yes | Human identification of the endpoint: `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. The proxy refuses to start without them. |
+| `name`, `description` | Yes | Human identification of the endpoint: `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION`. Both have a default (#5006): the name is `OPERATOR_NAME`, and the description is a sentence built from the products file and the network, for example "Pay-per-call API by `<OPERATOR_NAME>`: 2 products, paid in USDC on Base Sepolia testnet." A set value always wins. |
 | `network` | Yes | CAIP-2 identifier. The same value the challenge advertises. |
 | `network_name` | Yes | The chain's display name from `chains.ts`: `Base mainnet` or `Base Sepolia testnet`. For a reader that does not know CAIP-2 ids. |
 | `testnet` | Yes | Whether that chain is a test network, from `chains.ts`. |
@@ -1716,9 +1716,12 @@ What the merchant runs:
 - the proxy process (Node 24), behind HTTPS on a public host name the
   merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
   directory;
-- the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO`,
-  `OPERATOR_NAME`, `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION` (the discovery
-  document's name and description, §4), optionally `OPERATOR_CONTACT`,
+- the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO` and
+  `OPERATOR_NAME` (the proxy refuses to start without them, §3),
+  `ENDPOINT_NAME` and `ENDPOINT_DESCRIPTION` (the discovery document's name and
+  description, §4; the name defaults to `OPERATOR_NAME` and the description to a
+  sentence built from the products file and the network, #5006), optionally
+  `OPERATOR_CONTACT`,
   `UPSTREAM_BASE_URL` (where calls are forwarded),
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
@@ -1726,8 +1729,11 @@ What the merchant runs:
   credentials `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (the pilot settles
   through Coinbase's facilitator only, because the #4890 core is Coinbase's
   client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
-  used authorization), `PAYMENTS_DB`, optionally `PUBLIC_BASE_URL` (the
-  public origin the challenge's `resource.url` names; it must be `https` in
+  used authorization; it defaults to the public `https://sepolia.base.org` on
+  Base Sepolia and stays required on Base mainnet, where real money would rest
+  on a rate-limited public node, #5006), `PAYMENTS_DB`, optionally
+  `PUBLIC_BASE_URL` (the public origin the challenge's `resource.url` names; it
+  must be `https` in
   production, and without it the proxy derives `http://<Host>`; Haven's
   signer answers a retry challenge only for an `https` origin), optionally
   `CLIENT_IP_HEADER` (the header a front proxy sets to the client's address,
@@ -1736,7 +1742,8 @@ What the merchant runs:
   (at least the holder's 110 s worst case), which the proxy refuses to start
   outside those bounds, an empty `UPSTREAM_AUTH_SCHEME` sending the key bare
   (an `x-api-key` style header), optionally `VAT_RULE` with the seller settings (section 11) and `DIRECTORY_LISTING` with `ICON_URL` (section 4, off by default), and, for sales
-  reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY`;
+  reporting, `HAVEN_SALES_URL` and `HAVEN_MERCHANT_KEY` (`SALES_OUTBOX`
+  defaults to `sales-outbox.jsonl` beside `PAYMENTS_DB`, #5006);
 - persistent disk for the consumed-payment store (`PAYMENTS_DB`) and the
   sales outbox (`SALES_OUTBOX`), used by exactly one proxy process at a time
   (the proxy locks `PAYMENTS_DB` at startup, section 6), so the deployment

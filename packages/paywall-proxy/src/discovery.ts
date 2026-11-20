@@ -161,6 +161,20 @@ export function buildTerms(config: Pick<ProxyConfig, 'operatorContact'>): Discov
 }
 
 /**
+ * §4: the discovery document's `description` when `ENDPOINT_DESCRIPTION` is
+ * unset (#5006). Built from the products file and the network, because
+ * `loadConfig` never reads the products file — it holds only the path. One
+ * sentence, in the merchant's own voice, saying only what the deployment is.
+ */
+export function defaultEndpointDescription(
+  config: Pick<ProxyConfig, 'operatorName' | 'chain'>,
+  products: readonly Product[],
+): string {
+  const count = products.length
+  return `Pay-per-call API by ${config.operatorName}: ${count} ${count === 1 ? 'product' : 'products'}, paid in USDC on ${config.chain.label}.`
+}
+
+/**
  * Build the document from the products file, the deployment's settings and the
  * kit's own constants (`terms`, `payment`). `updated` is the products file's
  * last change; the caller reads it once at startup, so the document changes
@@ -179,7 +193,7 @@ export function buildDiscoveryDocument(params: {
       ...(config.operatorContact !== undefined ? { contact: config.operatorContact } : {}),
     },
     name: config.endpointName,
-    description: config.endpointDescription,
+    description: config.endpointDescription ?? defaultEndpointDescription(config, products),
     network: config.chain.network,
     network_name: config.chain.label,
     testnet: config.chain.testnet,

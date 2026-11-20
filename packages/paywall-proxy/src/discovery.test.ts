@@ -339,6 +339,28 @@ describe('the discovery document', () => {
     expect(doc.description).toBe('A test endpoint that sells calls.')
   })
 
+  it('defaults the endpoint name to the operator and the description to a sentence built from the products and the network (#5006)', async () => {
+    h = await startHarness({ env: { ENDPOINT_NAME: '', ENDPOINT_DESCRIPTION: '' } })
+    const doc = await document()
+    expect(doc.name).toBe('Test operator')
+    expect(doc.description).toBe('Pay-per-call API by Test operator: 3 products, paid in USDC on Base Sepolia testnet.')
+
+    await h.stop()
+    h = await startHarness({ products: [CHAT_PRODUCT], env: { ENDPOINT_NAME: '', ENDPOINT_DESCRIPTION: '' } })
+    expect((await document()).description).toBe(
+      'Pay-per-call API by Test operator: 1 product, paid in USDC on Base Sepolia testnet.',
+    )
+  })
+
+  it('lets a set endpoint name and description win over the defaults (#5006)', async () => {
+    h = await startHarness({
+      env: { ENDPOINT_NAME: 'Acme inference', ENDPOINT_DESCRIPTION: 'Acme inference, paid per call.' },
+    })
+    const doc = await document()
+    expect(doc.name).toBe('Acme inference')
+    expect(doc.description).toBe('Acme inference, paid per call.')
+  })
+
   it('carries the optional example fields the products file has, and no others', async () => {
     h = await startHarness({
       products: [

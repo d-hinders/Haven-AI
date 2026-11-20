@@ -155,6 +155,9 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       operator: config.operatorName,
       products: products.map((p) => p.id),
       base_path: config.basePath,
+      // §12: the public default is named; a configured URL is never printed,
+      // because a provider URL can embed a key (#5006).
+      rpc: config.rpcUrlDefault ? 'default (public Base Sepolia)' : 'configured',
       sales_reporting: config.salesStatus,
       ...(sales !== undefined ? { sales_outbox_depth: sales.outboxDepth() } : {}),
       receipt: config.receiptStatus,

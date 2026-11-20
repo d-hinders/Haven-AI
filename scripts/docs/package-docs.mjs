@@ -685,6 +685,11 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Sales account's receiving address, the key row names Sales → Setup →
     // Sales keys, Step 6 says a payment from the merchant's own agent is not a
     // sale, and .env.example carries the same corrections.
+    // Re-verified 2026-11-20 (#5006): the Step 4 tables, the discovery-field
+    // table and the demo table say which settings now have defaults
+    // (`RPC_URL` on Base Sepolia, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`,
+    // `SALES_OUTBOX`) and what they are, and the `started` line's `rpc` field
+    // is documented.
     'last-verified': '2026-11-20',
   },
   {

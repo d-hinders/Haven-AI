@@ -46,7 +46,7 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(loadConfig(base).upstream.authHeader).toBe('Authorization')
   })
 
-  it.each(['NETWORK', 'PAY_TO', 'OPERATOR_NAME', 'ENDPOINT_NAME', 'ENDPOINT_DESCRIPTION', 'PRODUCTS_FILE', 'PAYMENTS_DB', 'UPSTREAM_BASE_URL', 'UPSTREAM_API_KEY', 'CDP_API_KEY_ID', 'CDP_API_KEY_SECRET', 'RPC_URL'])(
+  it.each(['NETWORK', 'PAY_TO', 'OPERATOR_NAME', 'PRODUCTS_FILE', 'PAYMENTS_DB', 'UPSTREAM_BASE_URL', 'UPSTREAM_API_KEY', 'CDP_API_KEY_ID', 'CDP_API_KEY_SECRET'])(
     'refuses to start without %s',
     (name) => {
       const env: Record<string, string | undefined> = { ...base }
@@ -55,6 +55,46 @@ describe('configuration (refuses to start when it is incomplete)', () => {
       expect(problems({ ...env, [name]: '   ' })).toEqual([`${name} is required`])
     },
   )
+
+  it('defaults RPC_URL to the public Base Sepolia node, and keeps it required on Base mainnet (#5006)', () => {
+    const sepolia = { ...base }
+    delete (sepolia as Record<string, string | undefined>).RPC_URL
+    const config = loadConfig(sepolia)
+    expect(config.rpcUrl).toBe('https://sepolia.base.org')
+    expect(config.rpcUrlDefault).toBe(true)
+
+    // A set value always wins, and is not reported as the default.
+    expect(loadConfig(base).rpcUrl).toBe('https://rpc.example.com')
+    expect(loadConfig(base).rpcUrlDefault).toBe(false)
+
+    // Base mainnet has no default: real money would rest on a rate-limited public node.
+    const mainnet = { ...base, NETWORK: 'eip155:8453' }
+    delete (mainnet as Record<string, string | undefined>).RPC_URL
+    expect(problems(mainnet)).toEqual(['RPC_URL is required'])
+    expect(loadConfig({ ...mainnet, RPC_URL: 'https://rpc.example.com' }).rpcUrlDefault).toBe(false)
+  })
+
+  it('adds no RPC_URL problem when NETWORK is missing or invalid (#5006)', () => {
+    const missing = { ...base }
+    delete (missing as Record<string, string | undefined>).NETWORK
+    delete (missing as Record<string, string | undefined>).RPC_URL
+    expect(problems(missing)).toEqual(['NETWORK is required'])
+    expect(problems({ ...missing, NETWORK: 'eip155:1' })).toEqual([
+      'NETWORK must be one of eip155:8453, eip155:84532 (there is no default network)',
+    ])
+  })
+
+  it('defaults ENDPOINT_NAME to OPERATOR_NAME and leaves ENDPOINT_DESCRIPTION absent, and a set value always wins (#5006)', () => {
+    const unset = { ...base }
+    delete (unset as Record<string, string | undefined>).ENDPOINT_NAME
+    delete (unset as Record<string, string | undefined>).ENDPOINT_DESCRIPTION
+    const config = loadConfig(unset)
+    expect(config.endpointName).toBe('Acme')
+    expect(config.endpointDescription).toBeUndefined()
+
+    expect(loadConfig(base).endpointName).toBe('Acme inference')
+    expect(loadConfig(base).endpointDescription).toBe('Acme inference, paid per call.')
+  })
 
   it('names every problem at once and never a secret value', () => {
     let message = ''
@@ -149,6 +189,25 @@ describe('starting the proxy', () => {
     const res = await fetch(`http://127.0.0.1:${proxy.port}/healthz`)
     expect(res.status).toBe(200)
     await proxy.close()
+  })
+
+  it('starts on the public Base Sepolia RPC default and names it on the started line, never a configured URL (#5006)', async () => {
+    const e = env()
+    delete (e as Record<string, string | undefined>).RPC_URL
+    const logs: Record<string, unknown>[] = []
+    const proxy = await startProxy(e, { cdp, log: (event, fields) => logs.push({ event, ...fields }) })
+    expect(proxy.config.rpcUrl).toBe('https://sepolia.base.org')
+    expect(logs.find((line) => line.event === 'started')).toMatchObject({ rpc: 'default (public Base Sepolia)' })
+    await proxy.close()
+
+    const configured = env()
+    const configuredLogs: Record<string, unknown>[] = []
+    const second = await startProxy(configured, { cdp, log: (event, fields) => configuredLogs.push({ event, ...fields }) })
+    const started = configuredLogs.find((line) => line.event === 'started')!
+    expect(started.rpc).toBe('configured')
+    // A provider URL can embed a key, so the line never prints it.
+    expect(JSON.stringify(started)).not.toContain('rpc.example.com')
+    await second.close()
   })
 })
 
@@ -255,7 +314,7 @@ describe('sales reporting settings (#4898)', () => {
     expect(secretValues(config)).toContain(SALES_KEY)
   })
 
-  it('refuses a key that is not a Sales key, a missing or unusable Haven origin, and no outbox', () => {
+  it('refuses a key that is not a Sales key, and a missing or unusable Haven origin', () => {
     const sales = { HAVEN_MERCHANT_KEY: SALES_KEY, HAVEN_SALES_URL: 'https://api.haven.example', SALES_OUTBOX: '/tmp/o' }
     expect(problems({ ...base, ...sales, HAVEN_MERCHANT_KEY: 'not-a-sales-key' }).join(' ')).toMatch(
       /HAVEN_MERCHANT_KEY must be a Sales key/,
@@ -266,8 +325,30 @@ describe('sales reporting settings (#4898)', () => {
     expect(problems({ ...base, ...sales, HAVEN_SALES_URL: 'https://api.haven.example/v1' }).join(' ')).toMatch(
       /HAVEN_SALES_URL must be Haven's API origin/,
     )
-    expect(problems({ ...base, ...sales, SALES_OUTBOX: undefined }).join(' ')).toMatch(
-      /SALES_OUTBOX is required when HAVEN_MERCHANT_KEY is set/,
-    )
+  })
+
+  it('defaults SALES_OUTBOX to sales-outbox.jsonl beside PAYMENTS_DB, and a set value still overrides it (#5006)', () => {
+    const config = loadConfig({
+      ...base,
+      PAYMENTS_DB: '/var/lib/kit/payments.sqlite',
+      HAVEN_MERCHANT_KEY: SALES_KEY,
+      HAVEN_SALES_URL: 'https://api.haven.example',
+    })
+    expect(config.sales).toEqual({
+      havenBaseUrl: 'https://api.haven.example',
+      merchantKey: SALES_KEY,
+      outboxPath: '/var/lib/kit/sales-outbox.jsonl',
+    })
+    expect(config.salesStatus).toBe('on')
+
+    expect(
+      loadConfig({
+        ...base,
+        PAYMENTS_DB: '/var/lib/kit/payments.sqlite',
+        HAVEN_MERCHANT_KEY: SALES_KEY,
+        HAVEN_SALES_URL: 'https://api.haven.example',
+        SALES_OUTBOX: '/tmp/sales-outbox.jsonl',
+      }).sales?.outboxPath,
+    ).toBe('/tmp/sales-outbox.jsonl')
   })
 })

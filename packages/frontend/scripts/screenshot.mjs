@@ -7279,6 +7279,108 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'dashboard')
     },
   },
+  // #5001: the Sales choice on the Direction facet, and the In total's split
+  // into money from sales and money moved in. The shared fixture has no Sales
+  // account and no sale marker, so neither state is reachable from a route
+  // capture; merchant services are on, so the facet offers Sales.
+  //
+  // Two scenarios, because `scenario.api()` sees the PATHNAME only — the
+  // direction rides the query string, so each capture serves the one set its
+  // URL asks for. `total` is the whole feed's size in both, so the count line
+  // reads "{shown} of {total}" honestly.
+  'sales-direction-filter': {
+    description:
+      '#5001: with merchant services on, /transactions?direction=sales narrows the list to the two sale rows and the summary line reads one figure, "Sales <amount>" — no In, no Out. Desktop and phone.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions') {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(31, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600, accountName: 'Sales',
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(32, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200, accountName: 'Sales',
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        return {
+          transactions: [recorded, unrecorded],
+          total: FIXTURE_TXS.length + 2,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions?direction=sales`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const ledger = page.getByTestId('transactions-ledger')
+      await ledger.getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await ledger.getByText('Sale', { exact: true }).first().waitFor({ timeout: 10_000 })
+      const totals = page.getByTestId('transactions-totals')
+      await totals.getByText('Sales', { exact: true }).waitFor({ timeout: 20_000 })
+      await totals.getByText('Money from sales').waitFor({ timeout: 10_000 })
+      // The other half is not shown under a Direction choice.
+      if ((await totals.getByText('Out', { exact: true }).count()) !== 0) {
+        throw new Error('sales-direction-filter: Direction: Sales must not show an Out figure')
+      }
+      await shoot(page.locator('main').first(), 'sales-direction')
+    },
+  },
+  'sales-incoming-split': {
+    description:
+      '#5001: with merchant services on, /transactions?direction=in reads "In <amount> · of which sales <amount>" — the sales part of In, beside the whole. Desktop and phone.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions') {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(31, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600, accountName: 'Sales',
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(32, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200, accountName: 'Sales',
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        const inbound = [recorded, unrecorded, ...FIXTURE_TXS.filter((row) => row.direction === 'in')]
+        return {
+          transactions: inbound,
+          total: FIXTURE_TXS.length + 2,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions?direction=in`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByTestId('transactions-ledger').getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      const totals = page.getByTestId('transactions-totals')
+      await totals.getByText('In', { exact: true }).waitFor({ timeout: 20_000 })
+      await totals.getByText(/of which sales/).waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'incoming-split')
+    },
+  },
   'dashboard-sub-cent': {
     description:
       '#4264: a week of sub-cent agent payments — the count-form summary and the 4-decimal sub-cent figures in the spending half and the activity row, "<0,0001 kr" only below 0.00005 (owner decision 2026-10-22, superseding #3897\'s "<$0.01"; the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',

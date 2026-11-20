@@ -21,6 +21,13 @@
  *   the caller says so in words instead of hanging a "≈" on the figure. A
  *   direction whose rows ALL lack a price totals `null`, which `<Amount>`
  *   renders as "—": an unknown total is never "$0.00".
+ *
+ * #5001 adds a **sales part** of In: the inbound rows carrying #5000's sale
+ * marker, with its own `moneySales` / `pricedSales` / `unpricedSales` /
+ * `approxSales` fields so its "≈" and its "—" are decided by its own rows. It
+ * is a SUBSET of In, never a third direction — a sale row counts in both. The
+ * Transactions page renders it alone under Direction: Sales and beside In
+ * under Direction: Incoming; the account page's two figures are unchanged.
  */
 import { shouldMarkApprox } from '@haven_ai/core'
 import type { AmountCurrency } from '@/components/haven/Amount'

@@ -35,10 +35,34 @@ export interface FlowTally {
   unpricedOut: number
   approxIn: boolean
   approxOut: boolean
+  /**
+   * #5001: the sales part of In — the inbound rows carrying #5000's sale
+   * marker. It is a SUBSET of `moneyIn`, not a third direction: the
+   * Transactions page renders it alone under Direction: Sales, and beside In
+   * under Direction: Incoming. Its own fields, so its "≈" and its "—" are
+   * decided by its own rows.
+   */
+  moneySales: number
+  pricedSales: number
+  unpricedSales: number
+  approxSales: boolean
 }
 
 export function emptyFlowTally(): FlowTally {
-  return { moneyIn: 0, moneyOut: 0, pricedIn: 0, pricedOut: 0, unpricedIn: 0, unpricedOut: 0, approxIn: false, approxOut: false }
+  return {
+    moneyIn: 0,
+    moneyOut: 0,
+    pricedIn: 0,
+    pricedOut: 0,
+    unpricedIn: 0,
+    unpricedOut: 0,
+    approxIn: false,
+    approxOut: false,
+    moneySales: 0,
+    pricedSales: 0,
+    unpricedSales: 0,
+    approxSales: false,
+  }
 }
 
 /** One row's figure in the display currency, or null when it has none. */
@@ -69,10 +93,14 @@ export function tallyRow(tx: AggregatedTransaction, currency: AmountCurrency, ta
   if (tx.isError) return
   if (tx.ownTransfer) return
   const inbound = tx.direction === 'in'
+  // #5001: a sale is inbound money carrying #5000's marker. It counts in In
+  // AND in the sales part — the part is a subset, never a third direction.
+  const sale = tx.sale !== undefined
   const fiat = rowFiat(tx, currency)
   if (!fiat) {
     if (inbound) tally.unpricedIn += 1
     else tally.unpricedOut += 1
+    if (sale) tally.unpricedSales += 1
     return
   }
   if (inbound) {
@@ -81,6 +109,10 @@ export function tallyRow(tx: AggregatedTransaction, currency: AmountCurrency, ta
   } else {
     tally.moneyOut += fiat.amount
     tally.pricedOut += 1
+  }
+  if (sale) {
+    tally.moneySales += fiat.amount
+    tally.pricedSales += 1
   }
   if (
     shouldMarkApprox({
@@ -95,6 +127,8 @@ export function tallyRow(tx: AggregatedTransaction, currency: AmountCurrency, ta
     // beside re-priced outflows) must not read "≈ 0,00 kr".
     if (inbound) tally.approxIn = true
     else tally.approxOut = true
+    // The sales part follows the same rule through its own flag.
+    if (sale) tally.approxSales = true
   }
 }
 
@@ -102,20 +136,32 @@ export interface FlowFigures {
   /** null when the direction had rows and none of them could be valued. */
   moneyIn: number | null
   moneyOut: number | null
+  /** #5001: the sales part of In; null when it had sale rows and none could be valued. */
+  moneySales: number | null
   /** The "≈" decision per total — set only when THAT direction summed a converted row. */
   approxIn: boolean
   approxOut: boolean
+  /** #5001: the sales part's own "≈" decision. */
+  approxSales: boolean
   /** True when at least one row could not be valued and is not in a sum. */
   unpriced: boolean
+  /**
+   * #5001: at least one sale row is in the set — unpriced ones included. It
+   * is a count of rows, never a test for a non-zero sum.
+   */
+  salesPresent: boolean
 }
 
 export function flowFigures(tally: FlowTally): FlowFigures {
   return {
     moneyIn: tally.unpricedIn > 0 && tally.pricedIn === 0 ? null : tally.moneyIn,
     moneyOut: tally.unpricedOut > 0 && tally.pricedOut === 0 ? null : tally.moneyOut,
+    moneySales: tally.unpricedSales > 0 && tally.pricedSales === 0 ? null : tally.moneySales,
     approxIn: tally.approxIn,
     approxOut: tally.approxOut,
+    approxSales: tally.approxSales,
     unpriced: tally.unpricedIn + tally.unpricedOut > 0,
+    salesPresent: tally.pricedSales + tally.unpricedSales > 0,
   }
 }
 

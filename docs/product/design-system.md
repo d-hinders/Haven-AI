@@ -3564,7 +3564,11 @@ above the list; the card is never repeated inside a parent card.
    account Activity tab's "In · Out" (short visible labels, so the line fits a
    phone beside the count; sr-only "Money in" / "Money out" before each
    figure), and Transactions' "In · Out" too (#4266; a Direction filter shows
-   only its half). The totals are right-aligned at the line's right edge,
+   only its half). Transactions' Direction facet also offers **Sales** (#5001)
+   to a user with a Sales account: choosing it shows one figure, "Sales
+   <amount>" (sr-only "Money from sales"), and choosing Incoming splits the
+   line into "In <amount> · of which sales <amount>" when the filtered set
+   holds a sale. The totals are right-aligned at the line's right edge,
    which is where the rows' amounts end — no padding-matching to the amount
    column. The page passes
    its figures in the toolbar's `summary` slot and never builds the line, so

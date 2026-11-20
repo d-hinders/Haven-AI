@@ -256,7 +256,7 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
   const list = async (query = '') => {
     const res = await get(`/transactions?fresh=1&limit=100${query}`)
     expect(res.statusCode).toBe(200)
-    return res.json() as { transactions: Array<Record<string, unknown>> }
+    return res.json() as { transactions: Array<Record<string, unknown>>; total: number; hasMore: boolean }
   }
   const row = (body: { transactions: Array<Record<string, unknown>> }, tx: string, direction = 'in') =>
     body.transactions.find((t) => String(t.hash).toLowerCase() === tx && t.direction === direction)
@@ -490,6 +490,115 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
       const hashIdx = TRANSACTION_CSV_COLUMNS.indexOf('tx_hash')
       const saleLine = lines.find((line) => line.split(',')[hashIdx]?.replace(/"/g, '').toLowerCase() === hash(18))
       expect(saleLine?.split(',')[typeIdx]?.replace(/"/g, '')).toBe('receive')
+    })
+  })
+
+  /**
+   * #5001: `direction=sales` narrows Incoming to the rows #5000 marks as
+   * sales. One of each row the filter must separate is seeded, so the test
+   * fails if the filter keeps a non-sale or drops a sale.
+   */
+  describe('GET /transactions?direction=sales (#5001)', () => {
+    interface Seeded {
+      withProduct: string
+      withoutProduct: string
+      ownMove: string
+      ownAgent: string
+      stripeHeld: string
+      outbound: string
+    }
+
+    /** Two sales (with and without a product) and four rows that are not sales. */
+    async function seedOneOfEach(): Promise<Seeded> {
+      // A recorded sale, with a product.
+      const withProduct = await sale(30, 'field-notes', 'Haven Field Notes', '2500')
+      // A sale without a product: a non-own payment into Sales, no record.
+      const withoutProduct = hash(31)
+      rows.push({ hash: withoutProduct, from: wallet(31), to: f.sales.address, value: '1999', ts: now() })
+      await indexLeg(withoutProduct, wallet(31), '1999', now())
+      // An own-account move (#4268): Main → Sales.
+      const ownMove = hash(32)
+      rows.push({ hash: ownMove, from: f.main.address, to: f.sales.address, value: '9000', ts: now() })
+      await indexLeg(ownMove, f.main.address, '9000', now())
+      // An own-agent payment (the index recorded the payer as the owner's own).
+      const ownAgent = hash(33)
+      rows.push({ hash: ownAgent, from: f.delegate, to: f.sales.address, value: '5000', ts: now() })
+      await indexLeg(ownAgent, f.delegate, '5000', now(), true)
+      // A Stripe-held sale: a record with no indexed transfer, so no feed row.
+      const stripeHeld = hash(34)
+      await recordSale(stripeHeld, {
+        productId: 'stripe-only',
+        productName: 'Stripe product',
+        amount: '4000',
+        payer: wallet(34),
+        ts: now(),
+        heldBy: 'stripe',
+      })
+      // An outbound row from the Sales account.
+      const outbound = hash(35)
+      rows.push({ hash: outbound, from: f.sales.address, to: wallet(35), value: '1200', ts: now() })
+      return { withProduct, withoutProduct, ownMove, ownAgent, stripeHeld, outbound }
+    }
+
+    const hashesOf = (body: { transactions: Array<Record<string, unknown>> }) =>
+      body.transactions.map((t) => String(t.hash).toLowerCase()).sort()
+
+    it('returns exactly the sale rows — with and without a product — and nothing else', async () => {
+      const h = await seedOneOfEach()
+
+      const body = await list('&direction=sales')
+      expectMatchesSpec('GET', '/transactions', body)
+      expect(hashesOf(body)).toEqual([h.withProduct, h.withoutProduct].sort())
+      expect(body.total).toBe(2)
+      expect(body.hasMore).toBe(false)
+      // Every returned row is inbound and carries the marker.
+      for (const t of body.transactions) {
+        expect(t.direction).toBe('in')
+        expect(t.sale).toBeDefined()
+      }
+
+      // The excluded rows ARE in the unfiltered feed, so the filter is what
+      // removed them — not a fixture that never produced them.
+      const all = await list()
+      const allHashes = hashesOf(all)
+      for (const excluded of [h.ownMove, h.ownAgent, h.outbound]) expect(allHashes).toContain(excluded)
+      // A Stripe-held sale is never a feed row at all (the non-goal).
+      expect(allHashes).not.toContain(h.stripeHeld)
+    })
+
+    it('counts the same set in `total` and `hasMore`', async () => {
+      await seedOneOfEach()
+
+      const res = await get('/transactions?fresh=1&direction=sales&limit=1')
+      expect(res.statusCode).toBe(200)
+      const body = res.json() as { transactions: Array<Record<string, unknown>>; total: number; hasMore: boolean }
+      expect(body.transactions).toHaveLength(1)
+      expect(body.total).toBe(2)
+      expect(body.hasMore).toBe(true)
+    })
+
+    it('exports the same rows on /transactions/export.csv, with the column list unchanged', async () => {
+      const h = await seedOneOfEach()
+
+      const res = await get('/transactions/export.csv?fresh=1&direction=sales')
+      expect(res.statusCode).toBe(200)
+      const lines = res.body.replace(/^\uFEFF/, '').trim().split(/\r?\n/)
+      const [header, ...data] = lines
+      expect(header).toBe(TRANSACTION_CSV_COLUMNS.join(','))
+      const hashIdx = TRANSACTION_CSV_COLUMNS.indexOf('tx_hash')
+      const exported = data
+        .map((line) => line.split(',')[hashIdx]?.replace(/"/g, '').toLowerCase())
+        .sort()
+      expect(exported).toEqual([h.withProduct, h.withoutProduct].sort())
+    })
+
+    it('with merchant services off, no row carries the marker, so the filter is empty', async () => {
+      await seedOneOfEach()
+      await setSales(f.userId, false)
+
+      const body = await list('&direction=sales')
+      expect(body.transactions).toHaveLength(0)
+      expect(body.total).toBe(0)
     })
   })
 })

@@ -53,6 +53,14 @@ vi.mock('next/navigation', () => ({
 vi.mock('@/context/AuthContext', () => ({
   useAuth: () => ({ user: { accounts: authState.accounts } }),
 }))
+// #5001: the page reads the shell's merchant-services context for the Sales
+// option. This file is about the export and the URL, so the answer is "no
+// Sales account" — the facet is the two choices it always had.
+vi.mock('@/context/MerchantServicesContext', () => ({
+  useMerchantServicesContext: () => ({ status: 'ready', enabled: false, merchantAccount: null }),
+  // The detail panel's optional read (#5000); no row is opened in this file.
+  useOptionalMerchantServicesContext: () => null,
+}))
 vi.mock('@/hooks/useContacts', () => ({ useContacts: () => ({ resolveAddress: () => null }) }))
 // `useChainScope` is deliberately NOT mocked: the network default is part of
 // what this page renders (#3719 — every network, no active chain to follow).

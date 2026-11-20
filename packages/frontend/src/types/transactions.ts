@@ -92,11 +92,13 @@ export interface TransactionFilterState {
   agentId?: string
   tokenKey?: string
   /**
-   * Direction filter — incoming or outgoing only. Server-side since #4095:
-   * the browser filtered the loaded page in memory, which could disagree
-   * with the export over the whole result set.
+   * Direction filter — incoming, outgoing, or the sales part of incoming
+   * (#5001). Server-side since #4095: the browser filtered the loaded page in
+   * memory, which could disagree with the export over the whole result set.
+   * `sales` is a FILTER value, never a row direction: it keeps the inbound
+   * rows carrying #5000's sale marker.
    */
-  direction?: 'in' | 'out'
+  direction?: 'in' | 'out' | 'sales'
   /**
    * Network filter — one chain id, or every chain (absent). Server-side
    * since #4095 (`chainId` on the list request), same motivation as

@@ -50,15 +50,28 @@ export interface ActivityMoneyTotals {
   /** null when the set had inbound rows and none could be valued ("—"). */
   moneyIn: number | null
   moneyOut: number | null
+  /**
+   * #5001: the sales part of In — the inbound rows carrying #5000's sale
+   * marker. A subset of `moneyIn`, never a third direction. null when the
+   * set had sale rows and none could be valued ("—").
+   */
+  moneySales: number | null
   /** The "≈" decision per total (`shouldMarkApprox`, kind `total`), set only by that direction's rows. */
   approxIn: boolean
   approxOut: boolean
+  /** #5001: the sales part's own "≈" decision. */
+  approxSales: boolean
   /**
    * Some rows in the filtered set could not be valued in the display
    * currency (no price, or priced in another currency); the caller says so
    * in words rather than hanging a "≈" on the figure.
    */
   unpriced: boolean
+  /**
+   * #5001: at least one sale row is in the filtered set — unpriced ones
+   * included. A count of rows, never a test for a non-zero sum.
+   */
+  salesPresent: boolean
   loading: boolean
   error: string | null
   /**

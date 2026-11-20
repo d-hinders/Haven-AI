@@ -50,8 +50,9 @@ function readInt(value: number | string | undefined, fallback: number): number {
 
 /** The spec's `direction` enum, enforced before the handler (#3030); an alias
  *  because a quoted union inside a route generic hides the path literal from
- *  `generate-route-modules`. */
-type TransferDirection = 'in' | 'out'
+ *  `generate-route-modules`. `sales` (#5001) is a filter value, not a row
+ *  direction: it keeps the inbound rows carrying #5000's sale marker. */
+type TransferDirection = 'in' | 'out' | 'sales'
 
 /** Shape (`integer, minimum: 1`) is the spec's since #3030; support is not. */
 function parseChainId(value: unknown): number | null {

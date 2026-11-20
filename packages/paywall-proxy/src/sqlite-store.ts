@@ -18,7 +18,9 @@
  *   record type omits; neither `reserve`'s known-key answer nor `get` returns it.
  */
 import { createHash, randomBytes } from 'node:crypto'
+import { accessSync, constants, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
 import type { StatementSync } from 'node:sqlite'
 import {
   MAX_FORWARDS_PER_PAYMENT,
@@ -38,6 +40,31 @@ export class StoreLockedError extends Error {
         'stop the running proxy, then start this one.',
     )
     this.name = 'StoreLockedError'
+  }
+}
+
+/**
+ * The store's directory cannot be written by this process (#5007). The proxy
+ * runs as a non-root user in the container image, so a host directory bind
+ * mounted at `/data` must be writable by that user; a named volume is created
+ * with the image directory's ownership and needs nothing. Without this class the
+ * CLI printed only "The proxy cannot start (Error)." — the driver's message,
+ * which names neither the directory nor the reason.
+ */
+export class StorePermissionError extends Error {
+  constructor(
+    readonly directory: string,
+    readonly reason: 'not-writable' | 'missing',
+  ) {
+    super(
+      reason === 'missing'
+        ? `PAYMENTS_DB cannot be opened: the directory "${directory}" does not exist. ` +
+            'Create it, or mount a volume there.'
+        : `PAYMENTS_DB cannot be opened: the directory "${directory}" is not writable by this process. ` +
+            'The proxy runs as a non-root user, so a host directory mounted there must be writable by that user; ' +
+            'a named volume is created with the right ownership.',
+    )
+    this.name = 'StorePermissionError'
   }
 }
 
@@ -152,8 +179,45 @@ function isBusy(err: unknown): boolean {
   return code === 5 || code === 6 || /database is locked|SQLITE_BUSY/i.test(err.message)
 }
 
+/** SQLite's `SQLITE_CANTOPEN`: the file could not be created or opened. */
+const SQLITE_CANTOPEN = 14
+
+/**
+ * The filesystem refused the open, as a `StorePermissionError` (#5007), or
+ * `null` when the failure is something else and the caller should rethrow it.
+ *
+ * `SQLITE_CANTOPEN` alone is not enough to say "not writable": it also covers a
+ * path that is a directory, or a file the process may read but not write. So the
+ * directory is probed — a missing one is named as missing, an unwritable one as
+ * not writable, and anything else falls through to the original error rather
+ * than being described wrongly.
+ */
+function storePermissionFailure(path: string, err: unknown): StorePermissionError | null {
+  if (!(err instanceof Error)) return null
+  const code = (err as { code?: string }).code
+  const explicit = code === 'EACCES' || code === 'EPERM' || code === 'EROFS'
+  if (!explicit && (err as { errcode?: number }).errcode !== SQLITE_CANTOPEN) return null
+
+  const directory = dirname(path)
+  if (!existsSync(directory)) return new StorePermissionError(directory, 'missing')
+  if (explicit) return new StorePermissionError(directory, 'not-writable')
+  try {
+    accessSync(directory, constants.W_OK)
+  } catch {
+    return new StorePermissionError(directory, 'not-writable')
+  }
+  return null
+}
+
 export function openSqliteConsumedPaymentStore(path: string, options: SqliteStoreOptions): SqliteConsumedPaymentStore {
-  const db = new DatabaseSync(path)
+  let db: InstanceType<typeof DatabaseSync>
+  try {
+    db = new DatabaseSync(path)
+  } catch (err) {
+    // The constructor is the one call outside the try below: a directory the
+    // process cannot write fails here, before any statement runs.
+    throw storePermissionFailure(path, err) ?? err
+  }
   try {
     db.exec('PRAGMA locking_mode=EXCLUSIVE')
     // The startup write: takes the exclusive lock now, or fails with SQLITE_BUSY.

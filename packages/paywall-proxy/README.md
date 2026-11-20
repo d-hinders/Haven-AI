@@ -319,6 +319,61 @@ What you should see: `status: ok` on `/healthz`, your products in the discovery
 document, and a 402 whose challenge carries the product's `price` as `amount`
 and your `PAY_TO` as `payTo`. Nothing is forwarded upstream for an unpaid call.
 
+## Run it as a container
+
+The kit is published as a container image, so you do not need Node, a clone or a
+build:
+
+```
+ghcr.io/d-hinders/haven-paywall-proxy
+```
+
+The image sets two paths for you, and you do not put them in the env file:
+
+| Path | What it is |
+|---|---|
+| `PRODUCTS_FILE=/config/products.json` | Your products file from Step 3, mounted read-only. |
+| `PAYMENTS_DB=/data/payments.sqlite` | The consumed-payment store, on the `/data` volume. `SALES_OUTBOX` defaults to `sales-outbox.jsonl` beside it, so the outbox lands at `/data/sales-outbox.jsonl`. |
+
+```bash
+docker run -d --name haven-paywall-proxy \
+  --env-file .env \
+  -v "$PWD/products.json:/config/products.json:ro" \
+  -v haven-kit-data:/data \
+  -p 8080:8080 \
+  ghcr.io/d-hinders/haven-paywall-proxy:pilot-<short-sha>
+```
+
+**Pin a `pilot-<short-sha>` tag, not `pilot`.** A moving tag pulls
+config-breaking changes into your container on restart. `pilot` moves only on a
+release; `dev-<short-sha>` and `dev` are the unpromoted builds and are not for a
+merchant.
+
+**Use a named volume for `/data` (recommended).** Docker creates it with the
+image directory's ownership, so the container's non-root user can write it. A
+host-directory bind mount is the second choice, and it has two caveats: the
+directory must be writable by uid 1000, and SQLite file locking across Docker
+Desktop bind mounts on macOS is not dependable. A store the process cannot open
+for a permission reason says so in words — it names the directory and says it is
+not writable — rather than printing a bare error class.
+
+**One container per `/data` volume.** The proxy locks `PAYMENTS_DB` and refuses
+to start while another process holds it. So: stop the old container before
+starting the new one, never scale above one replica on a volume, and run
+`report-sale` and `check` with the proxy container stopped. A second container
+started on the same volume exits non-zero with the store's locked message.
+
+**Back `/data` up like a ledger** — a disk snapshot, or the in-process
+`backup()`. An external `sqlite3 .backup` cannot run while the proxy holds the
+lock.
+
+The image's entrypoint is the CLI, so the subcommands run through it:
+
+```bash
+docker run --rm --env-file .env -v haven-kit-data:/data \
+  ghcr.io/d-hinders/haven-paywall-proxy:pilot-<short-sha> report-sale 0x<transaction-hash>
+```
+
 ## Step 6: pay once with a Haven agent
 
 Give a Haven agent the URL of one of your product routes and let it pay. For now

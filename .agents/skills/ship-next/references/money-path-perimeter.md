@@ -357,6 +357,27 @@ same footing as the script that applies it.
 - `scripts/release-version-order.mjs`
 - `.github/workflows/publish.yml`
 
+### The merchant kit's image publishing
+
+#5007. The workflow that builds and pushes the merchant kit's container image to
+`ghcr.io/d-hinders/haven-paywall-proxy`. It decides **which image a merchant
+runs**: a push to `dev` publishes `dev-<short-sha>` and moves `dev`, a push to
+`main` publishes `pilot-<short-sha>` and moves `pilot`, and nothing publishes
+`latest`. That is the same class as `publish.yml` above — a change to it decides
+what reaches the channel users install from — and the money-flow harness cannot
+exercise a CI config change, so a runtime entry would hold promotion on a QA run
+that proves nothing about it. The tag rule itself lives in
+`scripts/ci/paywall-proxy-image-tags.mjs`, with its test beside it, so the
+refusal is pinned rather than described.
+
+The Dockerfile does not join either list, following the mcp-server precedent
+recorded in the JSON: it is build plumbing the harness cannot distinguish a
+change to, and `packages/paywall-proxy/src/**` (already control) is what the
+image runs. It is pinned to the README's run step through
+`scripts/docs/package-docs.mjs`'s `covers:` instead.
+
+- `.github/workflows/publish-paywall-proxy-image.yml`
+
 ### The money-path gate itself
 
 - `scripts/ci/qa-freshness.mjs`

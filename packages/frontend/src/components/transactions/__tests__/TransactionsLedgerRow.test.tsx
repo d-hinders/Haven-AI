@@ -104,7 +104,7 @@ describe('TransactionsLedgerRow — titles and sublines', () => {
     expect(row.textContent).not.toMatch(/You|Unknown/)
   })
 
-  it('a sale (#5000): "Sale · <product>" when recorded, "Sale" when not, and the own-account rule first', () => {
+  it('a sale (#5000): "Sale · <product>" when recorded', () => {
     const recorded = renderRow({
       ...deposit,
       sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1', merchantReference: null },

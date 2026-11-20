@@ -69,6 +69,9 @@ import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helper
 const CHAIN = 84532 // Base Sepolia — the registry names USDC there
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const TZ = 'UTC'
+/** #5000: the folded export's header as it stands today, literally. */
+const FOLDED_HEADER =
+  'settled_at,type,status,direction,counterparty_name,counterparty_address,token_symbol,token_address,amount,amount_sek,fx_rate,fx_source,fee_sek,chain_id,tx_hash,payment_id,agent_name,initiator,account_address,reporting_currency,converted_currency,settlement_tx_hash,to_account_name'
 
 let seq = 0
 const hash = (n: number) => `0x${n.toString(16).padStart(64, '0')}`
@@ -199,13 +202,13 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
   }
 
   /** One indexed USDC leg into the Sales account, with its RECORDED own flag. */
-  async function indexLeg(tx: string, payer: string, amount: string, ts: number, own = false): Promise<void> {
+  async function indexLeg(tx: string, payer: string, amount: string, ts: number, own = false, logIndex = 0): Promise<void> {
     await db.query(
       `INSERT INTO inbound_transfers
          (account_id, user_id, chain_id, tx_hash, log_index, payer_address, token_address,
           amount_raw, block_number, block_time, sender_is_own_address)
-       VALUES ($1, $2, $3, $4, 0, $5, $6, $7, 100, to_timestamp($8), $9)`,
-      [f.sales.id, f.userId, CHAIN, tx, payer, USDC, amount, ts, own],
+       VALUES ($1, $2, $3, $4, $10, $5, $6, $7, 100, to_timestamp($8), $9)`,
+      [f.sales.id, f.userId, CHAIN, tx, payer, USDC, amount, ts, own, logIndex],
     )
   }
 
@@ -301,6 +304,10 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
       const body = await list()
       expect(row(body, tx)).toBeDefined()
       expect(row(body, tx)).not.toHaveProperty('sale')
+      // …on the account page's read (`?accountId=`) …
+      const scoped = await list(`&accountId=${f.sales.id}`)
+      expect(row(scoped, tx)).toBeDefined()
+      expect(row(scoped, tx)).not.toHaveProperty('sale')
       // …on the dashboard too: a plain deposit, not a sale group.
       const groups = await activity()
       expect(groups).toHaveLength(1)
@@ -338,6 +345,30 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
       expect(groups).toHaveLength(1)
       expect(groups[0]).toMatchObject({ ownTransfer: { toAccountName: 'Sales' } })
       expect(groups[0]).not.toHaveProperty('sale')
+    })
+
+    it('a transaction mixing an own agent\'s leg with a customer\'s: only the customer\'s leg is a sale', async () => {
+      // The Sales page reads it as one `no_product` payment (the customer's leg
+      // is revenue); on the feed each leg is a row, and own money is never a sale.
+      const tx = hash(23)
+      rows.push({ hash: tx, from: f.delegate, to: f.sales.address, value: '3000', ts: now() })
+      rows.push({ hash: tx, from: wallet(23), to: f.sales.address, value: '7000', ts: now() })
+      await indexLeg(tx, f.delegate, '3000', now(), true, 0)
+      await indexLeg(tx, wallet(23), '7000', now(), false, 1)
+
+      const body = await list()
+      const legs = body.transactions.filter((t) => String(t.hash).toLowerCase() === tx)
+      expect(legs).toHaveLength(2)
+      const agentLeg = legs.find((t) => String(t.from).toLowerCase() === f.delegate)
+      const customerLeg = legs.find((t) => String(t.from).toLowerCase() === wallet(23))
+      expect(agentLeg).not.toHaveProperty('sale')
+      expect(customerLeg?.sale).toEqual({ productName: null, receiptNumber: null, merchantReference: null })
+
+      // The dashboard: one sale (the customer's) and one deposit (the agent's).
+      const groups = await activity()
+      expect(groups).toHaveLength(2)
+      expect(groups.find((g) => g.sale !== undefined)).toMatchObject({ count: 1, sumAtomic: '7000' })
+      expect(groups.find((g) => g.sale === undefined)).toMatchObject({ count: 1, sumAtomic: '3000' })
     })
 
     it('a Stripe-held sale sharing a hash with a feed row never lends that row its record', async () => {
@@ -447,7 +478,13 @@ describeDb('#5000 — a sale reads as a sale on the transaction reads', () => {
       // The file is CRLF-delimited with a BOM (`domain/csv.ts`).
       const lines_ = (body: string) => body.replace(/^\uFEFF/, '').trim().split(/\r?\n/)
       const [header, ...lines] = lines_(on.body)
+      // Pinned as literals: comparing to the constants could not fail if a
+      // column were added to them.
+      expect(header).toBe(
+        'settled_at,type,status,direction,counterparty_name,counterparty_address,token_symbol,token_address,amount,amount_sek,fx_rate,fx_source,fee_sek,chain_id,tx_hash,payment_id,agent_name,initiator,account_address,reporting_currency,converted_currency,settlement_tx_hash',
+      )
       expect(header).toBe(TRANSACTION_CSV_COLUMNS.join(','))
+      expect(lines_(onFolded.body)[0]).toBe(FOLDED_HEADER)
       expect(lines_(onFolded.body)[0]).toBe(FOLDED_TRANSACTION_CSV_COLUMNS.join(','))
       const typeIdx = TRANSACTION_CSV_COLUMNS.indexOf('type')
       const hashIdx = TRANSACTION_CSV_COLUMNS.indexOf('tx_hash')

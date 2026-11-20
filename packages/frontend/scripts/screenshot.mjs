@@ -7216,12 +7216,12 @@ export const SCENARIOS = {
         const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
         const recorded = tx(21, {
           direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
-          timestamp: T0 - 600,
+          timestamp: T0 - 600, accountName: 'Sales',
           sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
         })
         const unrecorded = tx(22, {
           direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
-          timestamp: T0 - 1200,
+          timestamp: T0 - 1200, accountName: 'Sales',
           sale: { productName: null, receiptNumber: null, merchantReference: null },
         })
         const transactions = [recorded, unrecorded, ...FIXTURE_TXS]

@@ -25,10 +25,14 @@
  *
  * An inbound row into the Sales account on its chain, in the chain's USDC (the
  * token `inbound_transfers` indexes): another token's leg in the same
- * transaction is never marked. Own money stays own money even where the
- * recorded flag says otherwise (owner decision 1 on #5000): a folded move
- * (#4268, `ownTransfer`) and an inbound row whose sender is another of the
- * user's own accounts (#4099's "From <account>") never carry the marker.
+ * transaction is never marked. Own money is never a sale (owner decision 1 on
+ * #5000), per ROW, not only per transaction: a leg whose payer the index
+ * recorded as the owner's own (an account, or an agent's delegate) never
+ * carries the marker, even inside a `no_product` transaction that also has a
+ * customer's leg. And own money stays own even where the recorded flag says
+ * otherwise: a folded move (#4268, `ownTransfer`) and an inbound row whose
+ * sender is another of the user's own accounts (#4099's "From <account>")
+ * never carry it.
  *
  * ## What it does not do
  *
@@ -95,7 +99,9 @@ export async function attachSaleMarkers(
           )
 
     const markers = new Map<string, TransactionSaleMarker>()
+    const ownPayers = new Map<string, Set<string>>()
     for (const row of rows) {
+      ownPayers.set(row.tx_hash, new Set(row.own_payers))
       const recorded = row.kind === 'sale'
       markers.set(row.tx_hash, {
         productId: recorded ? row.product_id : null,
@@ -107,7 +113,9 @@ export async function attachSaleMarkers(
 
     return transactions.map((tx) => {
       if (!isCandidate(tx)) return tx
-      const sale = markers.get(tx.hash.toLowerCase())
+      const hash = tx.hash.toLowerCase()
+      if (ownPayers.get(hash)?.has(tx.from.toLowerCase())) return tx
+      const sale = markers.get(hash)
       return sale ? { ...tx, sale } : tx
     })
   } catch (err) {

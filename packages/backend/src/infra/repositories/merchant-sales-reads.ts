@@ -551,6 +551,13 @@ export interface FeedSaleMarkerRow {
   product_name: string | null
   receipt_number: string | null
   merchant_reference: string | null
+  /**
+   * The payers of the transaction's legs RECORDED as the owner's own
+   * (`sender_is_own_address`), lower-case. A `no_product` transaction can mix
+   * an own leg (an agent's delegate) with a customer's: only the customer's
+   * leg is a sale on the feed.
+   */
+  own_payers: string[]
 }
 
 /**
@@ -569,9 +576,14 @@ export async function listFeedSaleMarkers(
   if (txHashes.length === 0) return []
   const result = await db.query<FeedSaleMarkerRow>(
     `WITH ${PAYMENTS_CTE}
-     SELECT tx_hash, kind, product_id, product_name, receipt_number, merchant_reference
-       FROM pay
-      WHERE held_by = 'account' AND kind IN ('sale', 'no_product')`,
+     SELECT p.tx_hash, p.kind, p.product_id, p.product_name, p.receipt_number, p.merchant_reference,
+            ARRAY(SELECT DISTINCT LOWER(t.payer_address)
+                    FROM inbound_transfers t
+                   WHERE t.account_id = $1 AND t.user_id = $2 AND t.chain_id = $3
+                     AND LOWER(t.tx_hash) = p.tx_hash
+                     AND t.sender_is_own_address) AS own_payers
+       FROM pay p
+      WHERE p.held_by = 'account' AND p.kind IN ('sale', 'no_product')`,
     relationParams(
       scope,
       { from: null, to: null },

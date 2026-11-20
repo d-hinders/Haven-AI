@@ -670,6 +670,9 @@ describeDb('analytics-overview repository (#2946)', () => {
       // the frontend's templated fallbacks
       ['f8', 'From Main account'],
       ['f9', 'returned from Research assistant'],
+      // #5000: "Sale" and its template, the first non-ASCII prefix (U+00B7)
+      ['e8', 'SALE'],
+      ['e9', 'Sale · Haven Field Notes'],
     ]
 
     for (const [seed, name] of cases) {
@@ -728,6 +731,9 @@ describeDb('analytics-overview repository (#2946)', () => {
       ['ff', 'Fromage AB'],
       ['f0', 'Deposits AB'],
       ['e7', 'Returned fromage AB'],
+      // #5000: real names beside the sale words
+      ['ea', 'Sales AB'],
+      ['eb', 'Sale·x'],
     ]
 
     for (const [seed, name] of cases) {

@@ -525,10 +525,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # 12, not 8: on 2026-10-07 passing runs took 7-7.7 min (unit tests ~5.5,
-    # build ~0.5) and the 8-minute ceiling cancelled a dev push (run
-    # 37628537263) and PR runs that had already passed every test. The same
-    # move #2556 made for Frontend checks; a hang still fails fast.
+    # 12 (raised from 8 on 2026-10-07, when passing runs took 7-7.7 min and
+    # the 8-minute ceiling cancelled runs that had passed every test; the
+    # same move #2556 made for Frontend checks). By 2026-11-18 the ceiling sat
+    # inside the normal spread again: SLOW-runner jobs (`npm ci` ~35 s; fast
+    # runners take ~20 s) spent 411-587 s in the unit tests and were
+    # cancelled at 733-738 s with every test green. The cause was ~230 full
+    # migration runs per job, one per real-DB test FILE, serialised on one
+    # advisory lock (#4971). With the schema keyed on the pool slot, the PR's
+    # own run (job 136259105368, a slow runner: `npm ci` 40 s) applied the
+    # migration set 4 times in the test step (the reference plus one per pool
+    # slot, 3 slots), and took 393 s for the unit tests and 582 s (9.7 min)
+    # for the whole job. That leaves ~2.3 min of slow-class headroom, so the
+    # ceiling stays 12; a hang still fails fast.
     timeout-minutes: 12
 
     services:

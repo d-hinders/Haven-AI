@@ -3,11 +3,14 @@
 //
 // ## Why this exists
 //
-// Worker schemas are created `IF NOT EXISTS` and never dropped, and they are
-// allocated per test FILE rather than per core — `VITEST_WORKER_ID` is the
-// file's ordinal in the run's spec list. So the set grows with the largest run
-// the machine has ever done and never shrinks: 336 measured on one developer
-// machine in #2622, 170 on another.
+// Worker schemas are created `IF NOT EXISTS` and never dropped. Until #4971 they
+// were allocated per test FILE rather than per core — keyed on
+// `VITEST_WORKER_ID`, the file's ordinal in the run's spec list — so the set grew
+// with the largest run the machine had ever done and never shrank: 336 measured
+// on one developer machine in #2622, 170 on another. Since #4971 a run uses one
+// schema per pool slot (`VITEST_POOL_ID`), so a fresh database stays at
+// `test_w1..N`, but the schemas earlier runs stranded are still there until
+// this script drops them.
 //
 // That is a standing cost independent of drift. `readSchemaShape()` scans
 // `pg_class`, and `db-harness.ts`'s own docstring names orphaned schemas as the

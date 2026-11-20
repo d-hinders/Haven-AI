@@ -641,6 +641,32 @@ describeDb('POST /merchant/sales on the real database (#4897)', () => {
       expect((await salesFor(off.accountId)).rows).toHaveLength(0)
     })
 
+    it('answers 401 before 400: an invalid key with an empty body is refused as unauthenticated (#5008)', async () => {
+      // The pre-flight `check` (#5008) probes a Sales key with `POST /merchant/sales`
+      // and the body `{}`, and reads a 401 as "the key is refused" and a 400 with
+      // Haven's `error_code` as "the key was accepted". That reading holds only
+      // while auth runs BEFORE request validation. Reordering them turns this red.
+      const missing = await app.inject({ method: 'POST', url: '/merchant/sales', payload: {} })
+      expect(missing.statusCode, missing.body).toBe(401)
+
+      const unknown = await app.inject({
+        method: 'POST',
+        url: '/merchant/sales',
+        payload: {},
+        headers: { authorization: `Bearer sk_merchant_${'0'.repeat(48)}` },
+      })
+      expect(unknown.statusCode, unknown.body).toBe(401)
+
+      // CONTROL: the same empty body with a VALID key reaches validation, so the
+      // 401s above are auth's answer and not a route that refuses everything.
+      const m = await seedMerchant()
+      const accepted = await post(m.secret, {})
+      expect(accepted.statusCode, accepted.body).toBe(400)
+      expect(accepted.json().error_code).toBe('invalid_request')
+      expect(mocks.read).not.toHaveBeenCalled()
+      expect((await salesFor(m.accountId)).rows).toHaveLength(0)
+    })
+
     it('rate limits per key: 120 a minute, then 429 for that key only', async () => {
       const m = await seedMerchant()
       const other = await seedMerchant()

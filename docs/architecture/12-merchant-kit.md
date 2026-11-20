@@ -1760,6 +1760,19 @@ What the merchant runs:
   a proof-backed call;
 - a health route, `GET /healthz`, which needs no payment and reports
   readiness (the upstream key present, the store and outbox writable);
+- a pre-flight check, `haven-paywall-proxy check` (#5008), which the merchant
+  runs with the proxy stopped before real traffic. It prints one line per check
+  (`ok`, `fail`, `skipped` or `not verified`, and a reason in words) for the
+  settings (the same `loadConfig` refusal startup makes), the products file (the
+  same `loadProductsFile`), the RPC's `eth_chainId` against `NETWORK`, the
+  Coinbase key (one authenticated `GET …/supported`, and `exact` on the
+  configured network), the Sales key (`POST /merchant/sales` with the body `{}`:
+  `401` is a refused key, `403` is Sales off for the account, `400` with Haven's
+  `error_code` is an accepted key, and nothing is written), and the store and
+  outbox (the directory, and the store's exclusive lock when the file exists).
+  It exits non-zero when any check fails, makes no call that can move money or
+  settle, and never prints a secret or an error's message. It does not replace
+  `/healthz`, which stays the running proxy's readiness probe;
 - a Haven account that receives the money, with Sales turned on (#4885) when
   the sales should appear on Haven's Sales page.
 

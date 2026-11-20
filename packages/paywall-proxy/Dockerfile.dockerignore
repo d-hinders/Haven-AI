@@ -30,7 +30,8 @@ packages/*
 **/dist
 
 # Haven's own demo configuration is not part of the published kit. The image
-# carries the kit and `products.example.json`; a merchant supplies its own
-# products file at `/config/products.json`. This is also why the #4892 demo
-# service keeps building from source (docs/operations/railway-services.md).
+# carries the kit's compiled output; a merchant supplies its own products file
+# at `/config/products.json`, and `products.example.json` stays in the
+# repository, where the README's Step 3 links to it. This is also why the #4892
+# demo service keeps building from source (docs/operations/railway-services.md).
 packages/paywall-proxy/demo

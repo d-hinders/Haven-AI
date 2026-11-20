@@ -34,8 +34,9 @@
 # `.dockerignore`: a root one would change the mcp-server image's build context
 # (`.github/workflows/ci.yml`, the MCP-server job). It also keeps Haven's own
 # demo configuration (`demo/`) out of the published image: the image carries the
-# kit and `products.example.json`, and a merchant supplies its own products file
-# at `/config/products.json`.
+# kit's compiled output, and a merchant supplies its own products file at
+# `/config/products.json`. `products.example.json` stays in the repository,
+# where the README's Step 3 links to it.
 
 # ── Builder ────────────────────────────────────────────────────────
 FROM node:24-alpine AS builder

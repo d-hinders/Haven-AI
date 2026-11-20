@@ -159,6 +159,9 @@ servers, connector, and selected dashboard setup flows:
   (#3271) and `GET /x402/{id}/sign-context`
 - `GET /x402/by-idempotency-key/{key}`, the read-only intent lookup the hosted
   pay tool's request mode checks before re-probing a merchant (#3739)
+- `GET /x402/{id}/payment-required`, the read-only stored challenge the hosted
+  `haven_submit` reads the merchant's checkout-details request from before it
+  relays a plain-HTTP payment (#4872)
 - `GET /payments/{id}/resume_state` for x402 and MPP resume context
 - x402 funding authorization at `POST /x402/authorize`
 - the deprecated `POST /x402` alias still used by the current SDK

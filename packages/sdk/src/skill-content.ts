@@ -400,8 +400,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   method, body and \`Content-Type\` to \`retry_url\`, plus the
   \`payment_header\` under exactly the headers the signer's \`retry_headers\`
   names (\`PAYMENT-SIGNATURE\`; \`X-PAYMENT\` too only for an x402 v1
-  challenge). A retry without the body fails after the funding leg has already
-  moved money.
+  challenge), plus every header in \`haven_submit\`'s
+  \`additional_retry_headers\` when it returns one: the checkout details the
+  merchant asked for, to send unchanged and never log. A retry without the body
+  fails after the funding leg has already moved money.
 - **If you pass \`payment_required\` instead, copy it verbatim.** Hand the
   merchant's \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\`
   exactly as returned — never retyped, trimmed or "corrected". Haven echoes its

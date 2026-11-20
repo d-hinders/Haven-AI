@@ -109,6 +109,7 @@ import {
   taskBudgetNextStep,
 } from './support/guidance.js'
 import { buildX402SigningContext, coerceJsonField } from './support/mcp-context.js'
+import { refuseUnshareableCheckoutDetails } from './support/checkout-details.js'
 import {
   isPendingApproval,
   compareExpectedAmount,
@@ -1363,6 +1364,13 @@ export function createPlainHttpX402Handlers(
           // #2051 extracted the body of this check into `priceSelectedOption`
           if (selection) {
             priceSelectedOption(cap, selection.option)
+            // #4872 part 2b: a required checkout detail this agent cannot
+            // share refuses HERE — after the cap and the scheme, before any
+            // funding intent or settlement child exists — sized for the option
+            // actually paid. The pay tools on the MCP-merchant flow do the same.
+            await refuseUnshareableCheckoutDetails(haven, payReq, selection.option, {
+              idempotencyKey: args.idempotency_key ?? derivedKey,
+            })
           }
 
           if (selection?.scheme === 'erc7710') {

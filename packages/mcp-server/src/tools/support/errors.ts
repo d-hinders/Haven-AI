@@ -558,9 +558,9 @@ const CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string>
   funded:
     'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_complete_mcp_tool with this payment_id and payment_header; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
   unsent:
-    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase (haven_pay_mcp_tool or haven_prepare_catalog_purchase); do not call settle again for this payment',
+    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase with the pay tool you used (haven_pay_mcp_tool, haven_prepare_catalog_purchase or haven_pay_x402_quote); do not settle or submit this payment again',
   state_unknown:
-    "Haven could not read this payment's state, so an earlier settle may already have funded or settled it: call haven_get_payment_status with this payment_id first: if it is still awaiting a signature, call haven_settle_mcp_tool again once the owner has fixed sharing; if it shows funded or settled, do not pay again",
+    "Haven could not read this payment's state, so an earlier settle or submit may already have funded or settled it: call haven_get_payment_status with this payment_id first: if it is still awaiting a signature, call the same tool again (haven_settle_mcp_tool or haven_submit) once the owner has fixed sharing; if it shows funded or settled, do not pay again",
 }
 const CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> = {
   before_payment: 'not_started',
@@ -572,7 +572,8 @@ const CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> 
 export function normalizeError(err: unknown): ToolFailure {
   // #4872: a merchant requires a checkout detail this agent cannot share.
   // The hosted pay tools throw it BEFORE any intent is created, and the
-  // settle leg before the paid request is sent. Field names, never values.
+  // settle leg and the plain-HTTP haven_submit before anything is spent or
+  // sent. Field names, never values.
   if (err instanceof CheckoutDetailsUnavailableError) {
     return {
       success: false,

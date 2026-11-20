@@ -3119,6 +3119,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/x402/{id}/payment-required": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the merchant x402 challenge stored for an x402 intent.
+         * @description Read-only (#4872): re-serves the merchant's x402 PaymentRequired exactly as Haven stored it at authorize (#1355), for any x402 intent of the calling agent. The hosted haven_submit reads the merchant's checkout-details request from it before it relays a plain-HTTP payment, which stores no merchant call context. Merchant content, untrusted, never payment authority, and never the owner's details. payment_required is null on a row stored before #1355 and on a challenge too large to store. Writes nothing. Not-found and not-yours are the same 404; a non-x402 intent is a 409.
+         */
+        get: operations["getX402StoredPaymentRequired"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/x402": {
         parameters: {
             query?: never;
@@ -22135,6 +22155,95 @@ export interface operations {
             };
             /** @description Error response */
             410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getX402StoredPaymentRequired: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Payment intent id from the quote/authorize response. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored challenge, or null when none was stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payment_id: string;
+                        /** @description The merchant's x402 PaymentRequired, verbatim. Untrusted merchant content. */
+                        payment_required: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

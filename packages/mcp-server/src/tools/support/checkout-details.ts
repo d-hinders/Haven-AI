@@ -17,24 +17,37 @@
  *   can be redeemed (`unsent`).
  * - **Complete** (`haven_complete_mcp_tool`): the payment is already funded;
  *   decided after the funding wait (`funded`).
+ * - **Plain HTTP, state-direct** (`haven_pay_x402_quote`, then `haven_submit`,
+ *   part 2b): the pay tool refuses before any intent, as above. `haven_submit`
+ *   reads the merchant's request back from the stored challenge and decides
+ *   BEFORE it relays: on EIP-3009 availability and the estimated block before
+ *   the funding relay (`checkoutDetailsBeforeSubmit`), on erc7710 availability
+ *   before the settlement child is submitted and the real block right after
+ *   it (`checkoutDetailsAfterSubmit`). The agent sends this paid request
+ *   itself, so the answer rides the tool result's retry headers.
  *
  * The values pass through this server only in memory. They are never stored,
- * logged, put in a tool result or merged into the echoed `extensions`, and
+ * logged or merged into the echoed `extensions`. On the MCP-merchant paths
  * they ride ONLY the paid request (`completeX402MerchantCall`'s
- * `paidRequestHeaders`), never the MCP handshake. Every decision is built from
+ * `paidRequestHeaders`), never the MCP handshake, and never a tool result. On
+ * the plain-HTTP state-direct path the agent sends the paid request, so the
+ * answer is in `haven_submit`'s retry headers and nowhere else in the result. Every decision is built from
  * the SDK's own functions, so local and hosted answer the same request alike.
  */
 import {
   actualPaidHeaderBlockBytes,
   checkoutDetailsRefusalError,
+  CheckoutDetailsUnavailableError,
   checkoutDetailsRequestOf,
   decideCheckoutDetails,
   estimatePaidHeaderBlockBytes,
   isErc7710Option,
   parseCheckoutDetailsRequest,
+  selectStandardPaymentOption,
   withinHeaderBlock,
   x402PaymentHeaderNamesFor,
   CHECKOUT_DETAILS_EXTENSION,
+  type CheckoutDetailField,
   type CheckoutDetailsAvailability,
   type CheckoutDetailsRequest,
   type HavenClient,
@@ -164,4 +177,80 @@ export async function checkoutDetailsForFundedDelivery(
     )
   }
   return decided.kind === 'answer' ? decided.header : undefined
+}
+
+/**
+ * A settle or submit leg's before-spend refusal stands only while the intent
+ * is still `pending_signature`. A REPEATED call (the #3423 crash recovery)
+ * reaches a payment that already moved: there the submit or relay must give
+ * its own answer (the settled replay on erc7710, the state error or the
+ * relay's 409 on EIP-3009), and delivery, if any, decides checkout details
+ * itself. Telling that agent "nothing moved" could make it pay twice.
+ *
+ * Returns `undefined` when the check is skipped. An unreadable state still
+ * refuses (fail closed: skipping would burn the erc7710 child or fund
+ * EIP-3009 first), as `state_unknown`, which never claims nothing moved.
+ */
+export async function checkoutDetailsWhilePending(
+  haven: Pick<HavenClient, 'getPaymentStatus'>,
+  paymentId: string,
+  decide: () => Promise<SettleCheckoutDetails>,
+): Promise<SettleCheckoutDetails | undefined> {
+  try {
+    return await decide()
+  } catch (err) {
+    if (!(err instanceof CheckoutDetailsUnavailableError)) throw err
+    const status = await haven.getPaymentStatus(paymentId).catch(() => null)
+    if (status?.status === 'pending_signature') throw err
+    if (status === null) {
+      throw checkoutDetailsRefusalError(err.missingFields as CheckoutDetailField[], err.reason, { stateUnknown: true, paymentId })
+    }
+    return undefined
+  }
+}
+
+/**
+ * #4872 part 2b: the merchant's challenge as stored at authorize, read for
+ * `haven_submit`. `null` when the payment is not x402 (a direct payment's
+ * 409), stored no challenge, or the read failed: the submit then proceeds as
+ * it does today and sends no answer. That degrades to the unsupported-path
+ * rule (the merchant serves the paid request without the field, §5); the pay
+ * tool already refused before any intent if a required field could not be
+ * shared.
+ */
+export async function storedChallengeForSubmit(
+  haven: Pick<HavenClient, 'getX402StoredPaymentRequired'>,
+  paymentId: string,
+): Promise<X402PaymentRequired | null> {
+  return haven.getX402StoredPaymentRequired(paymentId).catch(() => null)
+}
+
+/**
+ * `haven_submit`, BEFORE anything is spent, from the stored challenge. Reads
+ * the details once. On EIP-3009 the agent's payment header never reaches this
+ * tool, so the block is ESTIMATED from the challenge and the option it pays
+ * (the pay tool's estimate also counted the caller's own request headers); on
+ * erc7710 only availability is decided here, and the real block right after
+ * the submit (`checkoutDetailsAfterSubmit`). Refuses as `before_payment` —
+ * nothing was funded, submitted or sent.
+ */
+export async function checkoutDetailsBeforeSubmit(
+  haven: CheckoutReader,
+  input: { paymentRequired: X402PaymentRequired | null; scheme: 'erc7710' | 'eip3009'; paymentId: string },
+): Promise<SettleCheckoutDetails> {
+  const paymentRequired = input.paymentRequired
+  const request = paymentRequired ? checkoutDetailsRequestOf(paymentRequired) : null
+  if (paymentRequired === null || request === null) return { request: null, availability: null, header: undefined }
+  const availability = await haven.readCheckoutDetails()
+  const base = decideCheckoutDetails(request, availability)
+  const option = input.scheme === 'eip3009' ? selectStandardPaymentOption(paymentRequired.accepts) : null
+  const decided = option
+    ? withinHeaderBlock(base, request, (answerHeader) =>
+        estimatePaidHeaderBlockBytes({ paymentRequired, accepted: option, isErc7710: false, answerHeader }),
+      )
+    : base
+  if (decided.kind === 'refuse') {
+    throw checkoutDetailsRefusalError(decided.missingFields, decided.reason, { intentExists: true, paymentId: input.paymentId })
+  }
+  return { request, availability, header: option && decided.kind === 'answer' ? decided.header : undefined }
 }

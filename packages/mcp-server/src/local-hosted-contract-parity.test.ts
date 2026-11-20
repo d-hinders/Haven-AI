@@ -145,9 +145,9 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     description: {
       local: 'ec647b165fab',
-      hosted: 'e86bdff11c81',
+      hosted: '521874ac2601',
       reason:
-        'The local text opens with the three ids a signature can belong to and says this runtime has no signer tool, so it cannot produce one (#4825); the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up.',
+        'The local text opens with the three ids a signature can belong to and says this runtime has no signer tool, so it cannot produce one (#4825); the hosted text leads with the payment signature and adds settlement_scheme and the decomposed-x402 follow-up. #4872 part 2b: the hosted text adds the checkout-details refusal before the relay and the retry-header answer of the plain-HTTP path, where the agent sends the paid request itself.',
     },
   },
   'haven_pay_mcp_tool↔haven_pay_mcp_tool': {
@@ -198,18 +198,18 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     legacyRefused: { idempotencyKey: LEGACY_IDEMPOTENCY_KEY },
     description: {
       local: '4ee5539c5e93',
-      hosted: '86bacb9685b5',
+      hosted: 'dc75a1a31598',
       reason:
-        'Two different input contracts under one name (a quote object versus a restated request), each described as such. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
+        'Two different input contracts under one name (a quote object versus a restated request), each described as such. #4872: each text states the checkout-details behaviour of its own surface — the local one sends the requested fields on the paid request it makes and refuses before paying; the hosted one refuses before any intent (the answer comes back from haven_submit for the agent\'s own retry).',
     },
   },
   'haven_resume_x402_payment↔haven_resume_x402_payment': {
     hostedOnly: { url: '#3097: the hosted tool takes the https URL originally quoted, as haven_pay_x402_quote does.' },
     description: {
       local: '0896acd83083',
-      hosted: '671adfb0a4d0',
+      hosted: '3efe4135be96',
       reason:
-        'The local text retries the merchant itself with the signed header; the hosted text returns the signing context for the signer to rebuild it. #4872 part 1: the local text adds checkout details on the paid request (and its typed refusal), which the hosted paths carry only in part 2.',
+        'The local text retries the merchant itself with the signed header; the hosted text returns the signing context for the signer to rebuild it. #4872: the local text adds checkout details on the paid request (and its typed refusal); the hosted text says a resume sends no answer, as the stored resume state carries no merchant extensions.',
     },
   },
   'haven_discover_tools↔haven_discover_tools': {

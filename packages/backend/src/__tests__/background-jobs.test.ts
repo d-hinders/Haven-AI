@@ -23,6 +23,11 @@ const mocks = vi.hoisted(() => ({
   refreshAllMerchantCatalogues: vi.fn(),
   startJobs: vi.fn(),
   startRetrySweep: vi.fn(),
+  runMerchantInboundIndexTick: vi.fn(),
+}))
+
+vi.mock('../modules/transactions/index.js', () => ({
+  runMerchantInboundIndexTick: mocks.runMerchantInboundIndexTick,
 }))
 
 vi.mock('../modules/catalog/index.js', () => ({
@@ -46,6 +51,7 @@ vi.mock('../platform/job-scheduler.js', () => ({
 }))
 
 import { createBackgroundJobs, startBackgroundJobs } from '../background-jobs.js'
+import { config } from '../config.js'
 import { LEADER_LOCK_KEYS } from '../platform/leader-lock.js'
 
 const log = {
@@ -160,6 +166,29 @@ describe('the background-job table', () => {
     // probed on every tick — the #4407 defect.
     expect(mocks.createCatalogIngestMonitor).toHaveBeenCalledTimes(1)
     expect(mocks.monitorTick).toHaveBeenCalledTimes(2)
+  })
+
+  /**
+   * The kill switch (dev Alchemy incident, 2026-11-20): the merchant inbound
+   * index is the largest eth_getLogs consumer, so ops can stop it with
+   * MERCHANT_INBOUND_INDEX_DISABLED=true. Unset, it runs.
+   */
+  it('runs the merchant inbound index unless MERCHANT_INBOUND_INDEX_DISABLED is set', async () => {
+    mocks.runMerchantInboundIndexTick.mockResolvedValue({ accounts: 0, indexed: 0, failed: 0, skipped: 0 })
+    const row = createBackgroundJobs({ log, pool }).find((r) => r.name === 'merchant inbound index')
+    expect(row).toBeDefined()
+    const before = config.merchantInboundIndexDisabled
+    try {
+      config.merchantInboundIndexDisabled = false
+      await row!.run()
+      expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
+
+      config.merchantInboundIndexDisabled = true
+      await row!.run()
+      expect(mocks.runMerchantInboundIndexTick).toHaveBeenCalledTimes(1)
+    } finally {
+      config.merchantInboundIndexDisabled = before
+    }
   })
 })
 

@@ -5,7 +5,7 @@ covers:
   - packages/core/src/approx-mark.ts
   - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
   - packages/frontend/src/components/sales/SalesFirstRun.tsx
-  - packages/frontend/src/components/sales/MerchantKitSetupPrompt.tsx
+  - packages/frontend/src/components/sales/SellerSetupPrompt.tsx
   - packages/frontend/src/components/connect-agent/CloseGuardPanel.tsx
   - packages/frontend/src/context/MerchantServicesContext.tsx
   - packages/frontend/src/components/sales/SalesOverviewTab.tsx
@@ -1981,8 +1981,9 @@ ghost `Button` reading "Copy prompt" → "Copied" (#4003), the visible words kep
 accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
 pass to reveal the value when the clipboard refuses it. Two callers use that shape: the
 marketplace's offer instruction (#3998) and, since #4985, the Sales page's "Copy setup prompt"
-(`MerchantKitSetupPrompt`, shared by the first-run helper and the Setup tab — the prompt is never
-printed, and `onCopyFailed` reveals it). `CodeBlock`'s copy button
+(`SellerSetupPrompt`, shared by the first-run helper and the Setup tab — the prompt is never
+printed, and `onCopyFailed` reveals it; #5010 adds the second prompt, "Copy own-server prompt",
+through the same component). `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind
 spot of the *check*, which it remains, but it is no longer a shape with nowhere to go.
 

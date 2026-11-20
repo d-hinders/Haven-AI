@@ -10,7 +10,7 @@ import NetworkPill from '@/components/NetworkPill'
 import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
 import { timeAgo } from '@/lib/format'
 import { catalogueView, type SalesCatalogue } from '@/lib/sales'
-import { MerchantKitSetupPrompt } from './MerchantKitSetupPrompt'
+import { SellerSetupPrompt } from './SellerSetupPrompt'
 import { SalesKeysSection } from './SalesKeysSection'
 import { SellerDefinition } from './SellerDefinition'
 import StripeDepositAddressesSection from './StripeDepositAddressesSection'
@@ -54,8 +54,9 @@ function productListHelper(catalogue: SalesCatalogue | null): React.ReactNode {
  *   The `#kit-address` anchor id and the `sales-kit-address*` ids stay: the
  *   first-run step links to the anchor. "Optional" means it may be left empty;
  *   removing an address once saved is out of scope (the route has no DELETE).
- * - **Set up with your coding agent**: `MerchantKitSetupPrompt`, the same
- *   function the first-run helper uses. Base Sepolia only.
+ * - **Set up with your coding agent**: `SellerSetupPrompt`, the same function
+ *   the first-run helper uses — the merchant kit's prompt and, since #5010, the
+ *   prompt for the merchant's own server. Base Sepolia only.
  * - **Stripe deposit addresses**: `StripeDepositAddressesSection`, moved here
  *   from Settings → Business → Sales by #4983 (owner decision 2026-11-19:
  *   "Yes move Stripe deposit address"). It is one more part of this card, so
@@ -166,7 +167,7 @@ export function SalesSetupTab({
         </Card.Section>
 
         <Card.Section className="mt-5 pt-5">
-          <MerchantKitSetupPrompt accountAddress={account.account_address} chainId={account.chain_id} />
+          <SellerSetupPrompt accountAddress={account.account_address} chainId={account.chain_id} />
         </Card.Section>
 
         <StripeDepositAddressesSection chainId={account.chain_id} />

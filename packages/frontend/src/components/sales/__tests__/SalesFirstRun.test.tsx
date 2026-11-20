@@ -268,19 +268,26 @@ describe('the observed steps (#4985)', () => {
   })
 })
 
-describe('the coding-agent prompt (#4985)', () => {
-  it('offers the prompt on Base Sepolia and never prints it until the clipboard refuses', async () => {
+describe('the coding-agent prompts (#4985, #5010)', () => {
+  it('offers both prompts on Base Sepolia, each with its own copy action, and prints neither', async () => {
     await renderHelper(catalogue())
-    expect(screen.getByTestId('merchant-kit-setup-prompt')).toBeTruthy()
+    expect(screen.getByTestId('seller-setup-prompts')).toBeTruthy()
+    expect(screen.getByTestId('seller-setup-kit-prompt')).toBeTruthy()
+    expect(screen.getByTestId('seller-setup-own-server-prompt')).toBeTruthy()
     expect(screen.getByRole('button', { name: 'Copy setup prompt' })).toBeTruthy()
-    expect(screen.queryByTestId('merchant-kit-setup-prompt-text')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Copy own-server prompt' })).toBeTruthy()
+    expect(screen.queryByTestId('seller-setup-kit-prompt-text')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-own-server-prompt-text')).toBeNull()
   })
 
-  it('on a Base Sales account offers no prompt, and shows the Base Sepolia pilot line', async () => {
+  it('on a Base Sales account offers neither prompt, and shows the Base Sepolia pilot line', async () => {
     await renderHelper(catalogue(), { ...ACCOUNT, chain_id: 8453 })
-    expect(screen.queryByTestId('merchant-kit-setup-prompt')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-prompts')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-kit-prompt')).toBeNull()
+    expect(screen.queryByTestId('seller-setup-own-server-prompt')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Copy setup prompt' })).toBeNull()
-    expect(screen.getByTestId('merchant-kit-setup-pilot-only').textContent).toContain(
+    expect(screen.queryByRole('button', { name: 'Copy own-server prompt' })).toBeNull()
+    expect(screen.getByTestId('seller-setup-pilot-only').textContent).toContain(
       'During the pilot the merchant kit runs on Base Sepolia only',
     )
   })

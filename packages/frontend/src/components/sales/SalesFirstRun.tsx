@@ -9,7 +9,7 @@ import { StepChecklist, type StepChecklistRow, type StepChecklistState } from '@
 import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
 import { useMerchantKeys } from '@/hooks/useMerchantKeys'
 import { catalogueView } from '@/lib/sales'
-import { MerchantKitSetupPrompt } from './MerchantKitSetupPrompt'
+import { SellerSetupPrompt } from './SellerSetupPrompt'
 import { SellerDefinition } from './SellerDefinition'
 
 /** The count stays over three even though step 3 is optional (#4985). */
@@ -167,7 +167,7 @@ export function SalesFirstRun({
         />
         <div className="p-5">
           <StepChecklist aria-labelledby="sales-first-run-steps" headingAs="p" numbered rows={rows} />
-          <MerchantKitSetupPrompt
+          <SellerSetupPrompt
             accountAddress={account.account_address}
             chainId={account.chain_id}
             className="mt-5 border-t border-[var(--v2-border)] pt-5"

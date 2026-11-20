@@ -1115,7 +1115,11 @@ function ExportCsvDrawing() {
  * shaped: Export CSV in the actions slot, a Period with a custom range.
  */
 function ServerListControlsExample() {
-  const [state, setState] = useState<ListState>({ q: '', facets: { chainId: [], direction: [] }, period: { preset: '30d' } })
+  // #5001: the demo opens on Direction: Incoming, because that is the state
+  // where the summary line splits In into its sales part. The facet offers
+  // Sales between Incoming and Outgoing, as the Transactions page does for a
+  // user with a Sales account.
+  const [state, setState] = useState<ListState>({ q: '', facets: { chainId: [], direction: ['in'] }, period: { preset: '30d' } })
   const [requests, setRequests] = useState(1)
   const { toast } = useToast()
   return (
@@ -1142,6 +1146,7 @@ function ServerListControlsExample() {
             label: 'Direction',
             options: [
               { value: 'in', label: 'Incoming' },
+              { value: 'sales', label: 'Sales' },
               { value: 'out', label: 'Outgoing' },
             ],
           },
@@ -1155,14 +1160,15 @@ function ServerListControlsExample() {
         count={{ shown: 12, total: 60 }}
         // The page's totals join the list summary line, right of the count
         // (#4196, sides swapped #4473) — the account Activity tab's shape.
+        // #5001: under Direction: Incoming the line splits In into its sales
+        // part; under Direction: Sales it is one "Sales <amount>" figure.
         summary={
           <>
             {/* The account Activity tab's markup (`TotalFigure`): short visible
                 label, full name for screen readers before the figure. */}
             <span aria-hidden="true">In</span>
             <span className="sr-only">Money in</span> <Amount amount={1240} currency="USD" /> ·{' '}
-            <span aria-hidden="true">Out</span>
-            <span className="sr-only">Money out</span> <Amount amount={312.5} currency="USD" />
+            of which sales <Amount amount={860} currency="USD" />
           </>
         }
       />

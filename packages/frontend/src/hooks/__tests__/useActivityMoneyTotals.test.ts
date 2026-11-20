@@ -256,4 +256,34 @@ describe('useActivityMoneyTotals (#4098)', () => {
     expect(result.current.error).toBe('network down')
     expect(result.current.loading).toBe(false)
   })
+
+  /**
+   * #5001: the sales part of In rides the same walk. The Activity tab's own
+   * line is unchanged — it reads `moneyIn` / `moneyOut`, which the part does
+   * not alter.
+   */
+  it('exposes the sales part of In without changing the In/Out figures (#5001)', async () => {
+    mockApiGet.mockResolvedValue(
+      page([
+        tx({ direction: 'in', convertedAmount: '10.00', sale: { productName: 'Field Notes', receiptNumber: 'R-1', merchantReference: 'ref-1' } }),
+        tx({ direction: 'in', convertedAmount: '5.00', hash: '0xdef' }),
+      ]),
+    )
+    const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+
+    // In still sums both inbound rows; the part is the sale's share of it.
+    expect(result.current.moneyIn).toBe(15)
+    expect(result.current.moneySales).toBe(10)
+    expect(result.current.salesPresent).toBe(true)
+    expect(result.current.approxSales).toBe(false)
+  })
+
+  it('reports no sales part when the set holds no sale row (#5001)', async () => {
+    mockApiGet.mockResolvedValue(page([tx({ direction: 'in', convertedAmount: '10.00' })]))
+    const { result } = renderHook(() => useActivityMoneyTotals(FILTERS, 'USD'))
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.salesPresent).toBe(false)
+    expect(result.current.moneySales).toBe(0)
+  })
 })

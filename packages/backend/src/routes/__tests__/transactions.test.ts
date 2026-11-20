@@ -353,6 +353,9 @@ describe('transaction routes', () => {
       ['/transactions?agentId=nope', 'querystring/agentId'],
       ['/transactions?tokenKey=garbage', 'querystring/tokenKey'],
       ['/transactions?tokenKey=0:native', 'querystring/tokenKey'],
+      // #5001: the list route refuses an off-enum direction too — before it,
+      // only the export had a refusal case.
+      ['/transactions?direction=sideways', 'querystring/direction'],
       ['/transactions/export.csv?direction=sideways', 'querystring/direction'],
       ['/transactions/export.csv?chainId=0', 'querystring/chainId'],
       ['/transactions/payment-intents/not-a-uuid/evidence', 'params/paymentId'],

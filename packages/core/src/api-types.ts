@@ -23791,8 +23791,8 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
-                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). */
-                direction?: "in" | "out";
+                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). #5001: `sales` narrows Incoming to the rows carrying the sale marker — money from sales, including sales without a product; a row’s own direction stays `in` or `out`. */
+                direction?: "in" | "out" | "sales";
                 /** @description #4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler. */
                 chainId?: number;
                 /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved names (every name source of the one naming order, #4882: another of the user's accounts, a contact, the Haven-curated catalog merchant, the receipt seller name), the agent name, and the counterparty address (partial match). */
@@ -23868,7 +23868,7 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
-                direction?: "in" | "out";
+                direction?: "in" | "out" | "sales";
                 chainId?: number;
                 /** @description #4095: the same search term `GET /transactions` applies, matched against the resolved counterparty names. */
                 search?: string;

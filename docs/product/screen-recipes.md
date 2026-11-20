@@ -1269,12 +1269,18 @@ Structure:
    Direction and Network facets (each hidden while it has a single option)
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
    Export CSV in the actions slot (content-width on phone — its own row
-   after search and Filters, #4150). While a filter is active the status row
+   after search and Filters, #4150). Direction offers Incoming, Sales and
+   Outgoing; Sales (#5001) is shown only to a user with a Sales account and
+   narrows the list to the rows carrying the sale marker, sales without a
+   product included. While a filter is active the status row
    carries a removable chip per active filter and Clear filters. The list
    summary line below the card (#4196) carries the standard count on the
    right — "{n} transactions", or "{shown} of {total} transactions" filtered,
    both server figures — and the "In <total> · Out <total>" money totals on
-   the left (per #4266; a Direction filter shows only its half). The next page is "Show N more" as the ledger card's footer row
+   the left (per #4266; a Direction filter shows only its half). Under
+   Direction: Sales the line is one figure, "Sales <total>"; under Direction:
+   Incoming it reads "In <total> · of which sales <total>" when the filtered
+   set holds a sale (#5001). The next page is "Show N more" as the ledger card's footer row
    (the pattern's paging rule); once every page is loaded the footer is gone
    and the card ends with its last row. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its API

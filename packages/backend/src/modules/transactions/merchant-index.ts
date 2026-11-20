@@ -64,8 +64,9 @@ import {
   latestBlockNumber,
   readInboundTransfersInBlockRange,
   settledBlockNumber,
-  type ChainReadResult,
+  type ChainRangeReadResult,
 } from './chain-read.js'
+import { SETTLED_CHAIN_READ_DEPTH_BLOCKS } from '../../infra/chain/settled-read-block.js'
 import {
   ingestInboundTransfers,
   type InboundIngestLogger,
@@ -80,6 +81,20 @@ import {
  * walked block, so the next tick continues where this one stopped.
  */
 export const MAX_BLOCKS_PER_PASS = 10_000
+
+/**
+ * The most blocks below the head the pass reads again on the next tick. The
+ * cursor stops at the settled block so a reorged tail is re-read (#4940 review
+ * S1), but `finalized` can lag far behind the head: on Base Sepolia it was
+ * 5,445 blocks (~3 hours) behind on 2026-11-20. Re-reading all of that every 5
+ * minutes, at 10 blocks per `eth_getLogs` call on Alchemy's free plan, is what
+ * held dev at ~1M compute units an hour. So the cursor may move up to this
+ * depth below the head even when `finalized` is further back: the same depth
+ * `settledReadBlock` already treats as settled on a chain with no finalized
+ * tag. A reorg deeper than this (~10 minutes on Base) would not be re-read by
+ * the scheduled pass.
+ */
+export const MAX_UNSETTLED_REREAD_BLOCKS = SETTLED_CHAIN_READ_DEPTH_BLOCKS
 
 export interface MerchantIndexDeps {
   listMerchantAccounts: () => Promise<MerchantAccountRow[]>
@@ -98,7 +113,7 @@ export interface MerchantIndexDeps {
     accountAddress: string,
     fromBlock: number,
     toBlock: number,
-  ) => Promise<ChainReadResult>
+  ) => Promise<ChainRangeReadResult>
   ingest: (
     account: IngestInboundTransferAccount,
     legs: InboundTransferLeg[],
@@ -126,7 +141,10 @@ export interface MerchantIndexTickResult {
   accounts: number
   /** Rows newly indexed across every account. */
   indexed: number
-  /** Accounts whose chain read failed; their cursor did not move. */
+  /**
+   * Accounts whose chain read failed. Their cursor moved only as far as the
+   * read got before the failure (not at all when no chunk was read).
+   */
   failed: number
   /** Accounts skipped because their chain is not served for writes. */
   skipped: number
@@ -134,8 +152,9 @@ export interface MerchantIndexTickResult {
 
 /**
  * One pass over every merchant account. Per-account failures are isolated: a
- * failed chain read leaves that account's cursor untouched (so the next tick
- * retries the same range) and never stops the other accounts.
+ * failed chain read keeps what it read before the failure, moves that
+ * account's cursor no further than that (so the next tick retries from the
+ * first block it could not read) and never stops the other accounts.
  */
 export async function runMerchantInboundIndexTick(
   log: InboundIngestLogger,
@@ -190,9 +209,10 @@ export async function runMerchantInboundIndexTick(
 
       const toBlock = Math.min(latest, fromBlock + MAX_BLOCKS_PER_PASS - 1)
       // Read BEFORE the range (#4940 review round 2): every block at or below
-      // the cursor saved below must already have been settled when it was
-      // read. Taken after the read, a block replaced by a reorg and finalized
-      // during this pass could be passed over with its pre-reorg contents.
+      // the cursor saved below must, when it was read, already have been
+      // either finalized or at least MAX_UNSETTLED_REREAD_BLOCKS below the
+      // head. Taken after the read, a block replaced by a reorg during this
+      // pass could be passed over with its pre-reorg contents.
       const settled = await deps.settledBlock(account.chainId)
       const read = await deps.readRange(
         account.chainId,
@@ -200,13 +220,35 @@ export async function runMerchantInboundIndexTick(
         fromBlock,
         toBlock,
       )
-      if (!read.ok) {
+      let legs: InboundTransferLeg[]
+      let readThroughBlock: number
+      if (read.ok) {
+        legs = read.legs
+        readThroughBlock = toBlock
+      } else {
         result.failed += 1
+        if (!read.partial) {
+          log.warn(
+            { accountId: account.accountId, chainId: account.chainId, fromBlock, toBlock },
+            'Merchant inbound index: chain read failed; cursor left unchanged',
+          )
+          continue
+        }
+        // Keep the chunks that were read: they are complete through
+        // `readThroughBlock`, and discarding them is how one failed chunk made
+        // every tick re-read the whole range (2026-11-20).
+        legs = read.partial.legs
+        readThroughBlock = read.partial.readThroughBlock
         log.warn(
-          { accountId: account.accountId, chainId: account.chainId, fromBlock, toBlock },
-          'Merchant inbound index: chain read failed; cursor left unchanged',
+          {
+            accountId: account.accountId,
+            chainId: account.chainId,
+            fromBlock,
+            toBlock,
+            readThroughBlock,
+          },
+          'Merchant inbound index: chain read failed part-way; kept the blocks read before it',
         )
-        continue
       }
 
       const indexed = await deps.ingest(
@@ -216,22 +258,28 @@ export async function runMerchantInboundIndexTick(
           accountAddress: account.accountAddress,
           chainId: account.chainId,
         },
-        read.legs,
+        legs,
         log,
       )
       result.indexed += indexed
 
       // The cursor moves only after the range was read AND written: a failed
-      // write leaves it where it was, so the next tick re-reads the range.
+      // write leaves it where it was, so the next tick re-reads the range. A
+      // read that failed part-way moves it no further than the last block read.
       //
-      // And never past the settled block (#4940 review S1): the pass reads up
-      // to `latest` so a payment is indexed within a tick, but a block above
-      // the settled one can still be replaced by a reorg. Keeping the cursor
-      // at or below it means the unsettled tail is read again on every pass,
-      // so a payment that lands in a replacement block at a height already
-      // walked is still found. Re-reading is cheap: the row identity dedupes.
-      // With no settled block known, the cursor does not move at all.
-      const lastIndexedBlock = Math.min(toBlock, settled ?? fromBlock - 1)
+      // And never past the cursor ceiling (#4940 review S1, bounded on
+      // 2026-11-20): the higher of the settled block and
+      // `MAX_UNSETTLED_REREAD_BLOCKS` under the head. The pass reads up to
+      // `latest` so a payment is indexed within a tick, but a recent block can
+      // still be replaced by a reorg, so the tail above the ceiling is read
+      // again on every pass and a payment that lands in a replacement block at
+      // a height already walked is still found. When `finalized` lags more than
+      // MAX_UNSETTLED_REREAD_BLOCKS behind the head, the ceiling sits ABOVE the
+      // settled block: a reorg deeper than that is not re-read here (stated on
+      // the constant). With no settled block known, the cursor does not move.
+      const cursorCeiling =
+        settled === null ? fromBlock - 1 : Math.max(settled, latest - MAX_UNSETTLED_REREAD_BLOCKS)
+      const lastIndexedBlock = Math.min(readThroughBlock, cursorCeiling)
       await deps.saveCursor({
         accountId: account.accountId,
         chainId: account.chainId,

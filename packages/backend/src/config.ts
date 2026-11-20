@@ -471,6 +471,16 @@ export const config = {
   igdrasilClientSecret: process.env.IGDRASIL_CLIENT_SECRET ?? '',
   igdrasilRedirectUri: process.env.IGDRASIL_REDIRECT_URI ?? '',
 
+  // The scheduled merchant inbound index (#4903) is ON unless this is "true".
+  // A kill switch, not a feature flag: the pass reads the chain every 5 minutes
+  // for every merchant account, and on a provider that serves 10 blocks per
+  // eth_getLogs call that can use up a shared compute-unit quota (dev,
+  // 2026-11-20). Turning it off stops indexing; nothing else reads it.
+  merchantInboundIndexDisabled: parseBooleanFlag(
+    'MERCHANT_INBOUND_INDEX_DISABLED',
+    process.env.MERCHANT_INBOUND_INDEX_DISABLED,
+  ),
+
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.

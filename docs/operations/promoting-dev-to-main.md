@@ -11,7 +11,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-10-29"
+last-verified: "2026-11-20"
 ---
 
 # Promoting `dev → main` (production release)
@@ -307,16 +307,25 @@ so this is a rule to point at rather than a question to ask the release runner.
       either can be rotated alone.
 
       **One accepted exception (owner, 2026-09-29, #3456):** prod's
-      `RPC_URL_BASE_FALLBACK` and dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` share
-      one Infura free Core key, because the free plan allows one key, and
-      that key fails the #3336 burst of 20. Both are fallbacks, but the two
-      **primaries** are apps on one Alchemy account with one account-wide
-      monthly compute-unit allowance. If that allowance runs out, both
-      primaries fail together and both environments land on the one Infura
-      key at once, where the shared budget will throttle. Alchemy's usage
-      alerts are the early warning. The owner re-confirmed the acceptance with
-      that failure mode stated on 2026-10-01. Revisit when a paid RPC plan is
-      considered.
+      `RPC_URL_BASE_FALLBACK` is an Infura free Core key, which fails the
+      #3336 burst of 20; dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` shared it until
+      2026-11-20. Prod's **primary** is an app on the one Alchemy account whose
+      account-wide monthly compute-unit allowance dev's Alchemy app (now dev's
+      fallback) also draws on. If that allowance runs out, prod's primary fails
+      and prod lands on the Infura key, which throttles: on 2026-11-20 it
+      answered every request with 429 within minutes of carrying dev's
+      traffic. Alchemy's usage alerts are the early warning. The owner
+      re-confirmed the acceptance with that failure mode stated on 2026-10-01.
+      Revisit when a paid RPC plan is considered.
+
+      **The merchant inbound index (#4903) is the largest `eth_getLogs`
+      consumer.** It reads every merchant account every 5 minutes; at Alchemy's
+      10-block free-plan span one merchant account costs ~45 calls a tick, about
+      24–30M compute units a month, the whole shared allowance (dev, 2026-11-20,
+      PR #5004). Before a promotion carries it to prod, prod's primary must
+      serve at least 200 blocks per `eth_getLogs` call (measure it with the
+      probe's logs line), or the pass must batch accounts, or set
+      `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`) on prod's backend.
 
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
       `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run

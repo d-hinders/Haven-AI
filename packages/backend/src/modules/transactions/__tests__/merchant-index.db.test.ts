@@ -41,10 +41,11 @@ import {
 } from '../../../infra/repositories/inbound-transfers.js'
 import { ingestInboundTransfers } from '../receive.js'
 import {
+  MAX_UNSETTLED_REREAD_BLOCKS,
   runMerchantInboundIndexTick,
   type MerchantIndexDeps,
 } from '../merchant-index.js'
-import type { ChainInboundLeg, ChainReadResult } from '../chain-read.js'
+import type { ChainInboundLeg, ChainRangeReadResult } from '../chain-read.js'
 
 const CHAIN = 84532
 const USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e'
@@ -113,6 +114,8 @@ function deps(opts: {
   settled?: number | null
   seedBlock?: number
   readOk?: boolean
+  /** A read that failed part-way: complete through this block, with `legs`. */
+  readThroughBlock?: number
   ranges?: Array<[number, number]>
 }): MerchantIndexDeps {
   return {
@@ -122,9 +125,16 @@ function deps(opts: {
     latestBlock: async () => opts.latest ?? 5_000_000,
     settledBlock: async () => (opts.settled !== undefined ? opts.settled : (opts.latest ?? 5_000_000)),
     blockAtOrBefore: async () => opts.seedBlock ?? 4_000_000,
-    readRange: async (_chainId, _address, fromBlock, toBlock): Promise<ChainReadResult> => {
+    readRange: async (_chainId, _address, fromBlock, toBlock): Promise<ChainRangeReadResult> => {
       opts.ranges?.push([fromBlock, toBlock])
-      if (opts.readOk === false) return { ok: false, reason: 'rpc_unavailable' }
+      if (opts.readThroughBlock !== undefined) {
+        return {
+          ok: false,
+          reason: 'rpc_unavailable',
+          partial: { legs: opts.legs ?? [], readThroughBlock: opts.readThroughBlock },
+        }
+      }
+      if (opts.readOk === false) return { ok: false, reason: 'rpc_unavailable', partial: null }
       return { ok: true, legs: opts.legs ?? [] }
     },
     ingest: (account, legs, logger) => ingestInboundTransfers(account, legs, logger),
@@ -222,6 +232,73 @@ describeDb('merchant inbound index (#4903)', () => {
     expect(ranges[1]).toEqual([4_000_201, 4_000_600])
     expect(await countRows(seeded.accountId)).toBe(1)
     expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_000_450)
+  })
+
+  /**
+   * The dev Alchemy incident (2026-11-20): Base Sepolia's `finalized` block
+   * lagged the head by 5,445 blocks, so a cursor held at `finalized` made every
+   * tick re-read ~5,000 blocks. The re-read tail is now bounded to
+   * MAX_UNSETTLED_REREAD_BLOCKS under the head.
+   */
+  it('bounds the re-read tail when the finalized block lags far behind the head', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+    const ranges: Array<[number, number]> = []
+
+    await runMerchantInboundIndexTick(
+      log,
+      deps({ legs: [], latest: 4_006_000, settled: 4_000_500, ranges }),
+    )
+    expect(ranges).toEqual([[4_000_001, 4_006_000]])
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(
+      4_006_000 - MAX_UNSETTLED_REREAD_BLOCKS,
+    )
+
+    // The next tick re-reads only the bounded tail plus the new blocks.
+    await runMerchantInboundIndexTick(
+      log,
+      deps({ legs: [], latest: 4_006_150, settled: 4_000_600, ranges }),
+    )
+    expect(ranges[1]).toEqual([4_006_000 - MAX_UNSETTLED_REREAD_BLOCKS + 1, 4_006_150])
+  })
+
+  /**
+   * The dev Alchemy incident (2026-11-20): a read that failed part-way was
+   * thrown away whole, so the cursor never moved and every tick re-read the
+   * same ~9,500 blocks. The blocks read before the failure are now kept.
+   */
+  it('keeps the legs of a read that failed part-way and moves the cursor to the last block read', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+    const early = leg({ blockNumber: 4_001_000 })
+    const ranges: Array<[number, number]> = []
+
+    const tick = await runMerchantInboundIndexTick(
+      log,
+      deps({ legs: [early], latest: 4_009_000, readThroughBlock: 4_003_000, ranges }),
+    )
+
+    expect(tick.failed).toBe(1)
+    expect(tick.indexed).toBe(1)
+    expect(await countRows(seeded.accountId)).toBe(1)
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_003_000)
+
+    // The next tick starts at the first block that was not read.
+    await runMerchantInboundIndexTick(log, deps({ legs: [], latest: 4_009_000, ranges }))
+    expect(ranges[1]![0]).toBe(4_003_001)
+  })
+
+  it('never moves the cursor past the settled block on a read that failed part-way', async () => {
+    const seeded = await seedAccount()
+    await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
+
+    await runMerchantInboundIndexTick(
+      log,
+      deps({ legs: [], latest: 4_000_400, settled: 4_000_100, readThroughBlock: 4_000_350 }),
+    )
+
+    // Ceiling = max(settled 4_000_100, latest - 300 = 4_000_100).
+    expect((await findInboundIndexCursor(seeded.accountId))?.lastIndexedBlock).toBe(4_000_100)
   })
 
   it('does not move the cursor when no settled block is known', async () => {

@@ -39,7 +39,14 @@
  * served span, learned from its refusals — #4012), so a pass costs one
  * `eth_getLogs` per chunk of elapsed blocks and one `eth_getBlockByNumber` per
  * DISTINCT block that carried a payment (cached per chain+block). A quiet pass
- * is one `getLogs` call.
+ * over at most 500 blocks is one `getLogs` call.
+ *
+ * On a provider that serves only 10 blocks per call (Alchemy's free plan) a
+ * chunk is 10 blocks, so a range costs one call per 10 blocks. That is why a
+ * failed range read keeps the chunks it did read (`ChainRangeReadResult.partial`):
+ * before it did, one failed chunk discarded the whole range, the next tick asked
+ * for all of it again, and dev spent ~1M compute units an hour re-reading the
+ * same ~9,500 blocks (2026-11-20).
  */
 import { ethers } from 'ethers'
 import { settlementTokenForChain } from '../../domain/chains.js'
@@ -293,16 +300,36 @@ export async function readInboundTransfersByTxHash(
 }
 
 /**
+ * The range read's answer. A failure is never "none", but it may carry the
+ * progress made before it: `partial` is every leg in
+ * `[fromBlock, partial.readThroughBlock]`, complete for that sub-range, so the
+ * scheduled pass can keep it and move its cursor that far instead of throwing
+ * the whole range away and asking for all of it again next tick (the dev
+ * Alchemy incident, 2026-11-20). `partial` is null when no chunk was read.
+ */
+export type ChainRangeReadResult =
+  | { ok: true; legs: ChainInboundLeg[] }
+  | {
+      ok: false
+      reason: 'rpc_unavailable'
+      partial: { legs: ChainInboundLeg[]; readThroughBlock: number } | null
+    }
+
+/**
  * Every USDC transfer INTO `accountAddress` in `[fromBlock, toBlock]`, read
  * with `eth_getLogs` in provider-sized chunks. Complete for the range: there is
  * no page cap, so a burst of payments between two passes is not truncated.
+ *
+ * Chunks are read in block order. When one fails, the read stops there and
+ * reports what the chunks before it returned as `partial` — complete through
+ * the last block read, and nothing claimed past it.
  */
 export async function readInboundTransfersInBlockRange(
   chainId: number,
   accountAddress: string,
   fromBlock: number,
   toBlock: number,
-): Promise<ChainReadResult> {
+): Promise<ChainRangeReadResult> {
   const tokenAddress = settlementTokenAddress(chainId)
   if (!tokenAddress) return { ok: true, legs: [] }
   if (fromBlock > toBlock) return { ok: true, legs: [] }
@@ -312,6 +339,9 @@ export async function readInboundTransfersInBlockRange(
   const provider = getProvider(chainId)
   const rawLogs: ethers.Log[] = []
 
+  // The last block every chunk up to which was read; `fromBlock - 1` = none yet.
+  let readThrough = fromBlock - 1
+  let failed = false
   let start = fromBlock
   while (start <= toBlock) {
     const span = effectiveLogBatchBlocks(chainId, DEFAULT_LOG_BATCH_BLOCKS)
@@ -328,29 +358,46 @@ export async function readInboundTransfersInBlockRange(
       // Teaches the next request a narrower span when the provider named one;
       // this read still reports "could not ask" rather than an empty answer.
       noteLogScanFailure(chainId, err)
-      return { ok: false, reason: 'rpc_unavailable' }
+      failed = true
+      break
     }
+    readThrough = end
     start = end + 1
   }
 
   const legs: ChainInboundLeg[] = []
   const times = new Map<number, Date>()
+  // Walk in block order (sorted, not trusted from the provider): a block time
+  // that cannot be read stops the walk there, and every leg in an earlier
+  // block must already have been taken for the partial result to be complete.
+  rawLogs.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index)
   for (const log of rawLogs) {
     let blockTime = times.get(log.blockNumber)
     if (!blockTime) {
+      let seconds: number | null = null
       try {
-        const seconds = await blockTimeSec(chainId, log.blockNumber)
-        if (seconds === null) return { ok: false, reason: 'rpc_unavailable' }
-        blockTime = new Date(seconds * 1000)
+        seconds = await blockTimeSec(chainId, log.blockNumber)
       } catch {
-        return { ok: false, reason: 'rpc_unavailable' }
+        seconds = null
       }
+      if (seconds === null) {
+        failed = true
+        readThrough = Math.min(readThrough, log.blockNumber - 1)
+        break
+      }
+      blockTime = new Date(seconds * 1000)
       times.set(log.blockNumber, blockTime)
     }
     const leg = legFromLog(log, tokenAddress, account, blockTime)
     if (leg) legs.push(leg)
   }
-  return { ok: true, legs }
+
+  if (!failed) return { ok: true, legs }
+  return {
+    ok: false,
+    reason: 'rpc_unavailable',
+    partial: readThrough >= fromBlock ? { legs, readThroughBlock: readThrough } : null,
+  }
 }
 
 /** The chain's current block number. */
@@ -361,8 +408,9 @@ export async function latestBlockNumber(chainId: number): Promise<number> {
 /**
  * A block whose contents will not be reorganised away (`finalized`, else
  * `SETTLED_CHAIN_READ_DEPTH_BLOCKS` below the head), or null when the chain
- * offers none. The merchant index never moves its cursor past it, so the
- * unsettled tail is read again on every pass (#4940 review S1).
+ * offers none. The merchant index keeps its cursor at or below the higher of
+ * this block and `MAX_UNSETTLED_REREAD_BLOCKS` under the head, so the recent
+ * tail is read again on every pass (#4940 review S1).
  */
 export async function settledBlockNumber(chainId: number): Promise<number | null> {
   const { settledReadBlock } = await import('../../infra/chain/settled-read-block.js')

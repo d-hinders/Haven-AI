@@ -242,7 +242,54 @@ never prints the URL itself, because a provider URL can embed a key),
 missing or invalid setting refuses startup and names every problem at once,
 never a secret's value.
 
+## Check the deployment before real traffic
+
+Before you take a real payment, run the check. It reads the same settings the
+proxy reads, and it adds the network calls startup does not make:
+
+```bash
+node packages/paywall-proxy/dist/index.js check
+```
+
+It prints one line per check (`ok`, `fail`, `skipped` or `not verified`, and a
+reason in words) and exits non-zero when any check fails:
+
+```
+settings: ok
+products: ok (2 products: lookup, chat)
+rpc: ok (eip155:84532 at sepolia.base.org)
+coinbase key: ok (exact on eip155:84532)
+sales key: ok (the key was accepted)
+store: ok (will be created at /var/lib/paywall-proxy/payments.sqlite)
+outbox: ok (will be created at /var/lib/paywall-proxy/sales-outbox.jsonl)
+```
+
+What each line means:
+
+| Line | What it checks |
+|---|---|
+| `settings` | The same validation startup runs. A missing or invalid setting prints its problem, one line each, and the checks that need it print `skipped (settings invalid)`. |
+| `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
+| `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
+| `coinbase key` | One authenticated `GET …/supported` with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`, and that the facilitator lists `exact` on your network. A malformed secret fails locally, with no network call. `not verified` means the client could not exercise the key, and says why. |
+| `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` is a key that is missing, wrong or revoked; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
+| `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
+| `outbox` | The same directory check for `SALES_OUTBOX`, and its depth when the file exists. It never replays or changes it. |
+
+Run it with the proxy stopped: the store check takes the same exclusive lock the
+proxy takes, so a running proxy makes it fail. The check makes no call that can
+move money or settle (no verify, no settle, no sale record), and it never prints
+a secret or an error's message.
+
+`GET /healthz` is a different thing: it is the running proxy's readiness probe.
+`check` is what you run before you start it.
+
 ## Step 5: run it on Base Sepolia
+
+Before you start it, run `check` with the proxy stopped (see
+[Check the deployment before real traffic](#check-the-deployment-before-real-traffic)):
+it tells you whether the settings, the products file, the RPC, the Coinbase key
+and the Sales key work, and exits non-zero when one does not.
 
 ```bash
 npm run build -w packages/paywall-proxy

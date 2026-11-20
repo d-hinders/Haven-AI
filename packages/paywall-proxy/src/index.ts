@@ -4,11 +4,18 @@
  * that names what is wrong and never prints a secret, when configuration is
  * missing or invalid.
  *
- * One subcommand, `report-sale <tx-hash>` (#4898): send a past settled call to
- * Haven again, for a sale whose record was cleared or never recorded. It is
- * named in the README, and it needs the proxy stopped because it opens
- * `PAYMENTS_DB` (§6: one process per store).
+ * Two subcommands:
+ *
+ * - `check` (#5008): before any real traffic, tell a developer whether the
+ *   deployment will work — settings, products file, RPC, Coinbase key, Sales
+ *   key, store and outbox — one line per check, non-zero when any fails. It
+ *   runs with the proxy stopped and makes no call that can move money.
+ * - `report-sale <tx-hash>` (#4898): send a past settled call to Haven again,
+ *   for a sale whose record was cleared or never recorded. It is named in the
+ *   README, and it needs the proxy stopped because it opens `PAYMENTS_DB` (§6:
+ *   one process per store).
  */
+import { runCheckCommand } from './check.js'
 import { ConfigError } from './config.js'
 import { startProxy } from './main.js'
 import { ProductsFileError } from './products.js'
@@ -16,10 +23,14 @@ import { runReportSaleCommand } from './report-sale.js'
 import { StoreLockedError } from './sqlite-store.js'
 
 const USAGE =
-  'Usage: haven-paywall-proxy [report-sale <tx-hash> [--vat-treatment SE_25|REVERSE_CHARGE] [--new-reference]]'
+  'Usage: haven-paywall-proxy [check | report-sale <tx-hash> [--vat-treatment SE_25|REVERSE_CHARGE] [--new-reference]]'
 
 async function run(): Promise<void> {
   const [command, ...args] = process.argv.slice(2)
+  if (command === 'check') {
+    process.exitCode = await runCheckCommand(args, process.env)
+    return
+  }
   if (command === 'report-sale') {
     process.exitCode = await runReportSaleCommand(args, process.env)
     return

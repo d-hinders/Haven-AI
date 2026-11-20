@@ -690,6 +690,9 @@ export const GOVERNED_PACKAGE_DOCS = [
     // (`RPC_URL` on Base Sepolia, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`,
     // `SALES_OUTBOX`) and what they are, and the `started` line's `rpc` field
     // is documented.
+    // Re-verified 2026-11-20 (#5008): the README gains the `check` section
+    // (one line per check, what each line means, and that it runs with the
+    // proxy stopped), and Step 5 points at it before the proxy starts.
     'last-verified': '2026-11-20',
   },
   {

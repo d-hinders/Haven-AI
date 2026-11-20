@@ -23,14 +23,22 @@ import {
   type PublicClient,
 } from 'viem'
 import { base, baseSepolia } from 'viem/chains'
-import type { PaymentPayload, PaymentRequirements, SettleResponse, VerifyResponse } from '@x402/core/types'
+import type { PaymentPayload, PaymentRequirements, SettleResponse, SupportedResponse, VerifyResponse } from '@x402/core/types'
 import { DEFAULT_LOG_SPAN_BLOCKS, LogWindows } from './log-range.js'
 
-/** The two facilitator calls the merchant makes. `HTTPFacilitatorClient` from
+/** The facilitator calls the merchant makes. `HTTPFacilitatorClient` from
  *  `@x402/core/server` (which `createCdpFacilitatorClient` returns) satisfies it. */
 export interface CdpFacilitator {
   verify(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse>
   settle(payload: PaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse>
+  /**
+   * The facilitator's supported kinds (#5008). `HTTPFacilitatorClient` has it,
+   * and `@coinbase/x402`'s config signs a CDP JWT for `GET …/supported`, so the
+   * call is authenticated. Optional, so a test fake need not implement it: the
+   * pre-flight `check` reports `not verified` when it is absent rather than
+   * casting.
+   */
+  getSupported?(): Promise<SupportedResponse>
 }
 
 /**
@@ -146,16 +154,27 @@ export async function withCdpTimeout<T>(
  * Loaded lazily, so a merchant without CDP credentials never imports either.
  * The credentials go to the config constructor and nowhere else; the client
  * signs a fresh JWT per request, so nothing reaches Coinbase until a payment.
+ *
+ * `options.timeoutMs` bounds each request. `getSupported`'s own default is 90 s
+ * and it retries a 429 three times; the pre-flight `check` (#5008) sets a short
+ * one, because it is a pre-flight and not a payment.
  */
-export async function createCdpFacilitator(credentials: {
-  apiKeyId: string
-  apiKeySecret: string
-}): Promise<CdpFacilitator> {
+export async function createCdpFacilitator(
+  credentials: {
+    apiKeyId: string
+    apiKeySecret: string
+  },
+  options: { timeoutMs?: number } = {},
+): Promise<CdpFacilitator> {
   const [{ createFacilitatorConfig }, { HTTPFacilitatorClient }] = await Promise.all([
     import('@coinbase/x402'),
     import('@x402/core/server'),
   ])
-  return new HTTPFacilitatorClient(createFacilitatorConfig(credentials.apiKeyId, credentials.apiKeySecret))
+  const config = createFacilitatorConfig(credentials.apiKeyId, credentials.apiKeySecret)
+  return new HTTPFacilitatorClient({
+    ...config,
+    ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+  })
 }
 
 const AUTHORIZATION_USED_EVENT = parseAbiItem(

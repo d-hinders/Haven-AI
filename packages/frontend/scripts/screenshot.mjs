@@ -7203,6 +7203,82 @@ export const SCENARIOS = {
       await shoot(page.locator('main').first(), 'page')
     },
   },
+  // #5000: a sale reads as a sale outside the Sales page. The shared fixture
+  // has no Sales account and no sale marker, so none of this is reachable from
+  // a route capture. Merchant services are on, so the drawer's "View in Sales"
+  // link renders.
+  'sales-read-as-sales': {
+    description:
+      '#5000: with merchant services on, /transactions titles a recorded sale "Sale · <product>" and an unrecorded one "Sale", beside a plain "Deposit"; the two drawers (Product, Receipt number, Merchant reference, no kind line, "View in Sales"); and the dashboard Activity card showing "Sale ×2" apart from "Deposit".',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions' || apiPath.startsWith('/transactions?')) {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(21, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600,
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(22, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200,
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        const transactions = [recorded, unrecorded, ...FIXTURE_TXS]
+        return { transactions, total: transactions.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedAccountIds: [], truncated: false }
+      }
+      if (apiPath === '/dashboard/overview') {
+        const [, deposit] = FIXTURE_OVERVIEW.activity
+        const at = (secondsBefore) => new Date(Date.parse(deposit.latestAt) + 3_600_000 - secondsBefore * 1000).toISOString()
+        return {
+          ...FIXTURE_OVERVIEW,
+          activity: [
+            // Two sales of different products the same day: one group, no product named.
+            { ...deposit, count: 2, sumAtomic: '19992500', approxAmount: '215.1192', sale: { productName: null }, latestAt: at(60) },
+            // The day's top-up into another account: still "Deposit".
+            { ...deposit, count: 1, sumAtomic: '19990000', approxAmount: '215.0924', latestAt: at(120) },
+            ...FIXTURE_OVERVIEW.activity.filter((group) => group.direction === 'out'),
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const ledger = page.getByTestId('transactions-ledger')
+      await ledger.getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await ledger.getByText('Sale', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // Negative control: a plain deposit keeps its word.
+      await ledger.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'transactions')
+
+      const rows = ledger.locator('[role="button"][aria-haspopup="dialog"]')
+      for (const [index, name, label] of [
+        [0, 'Sale · Haven Field Notes', 'drawer-recorded'],
+        [1, 'Sale', 'drawer-unrecorded'],
+      ]) {
+        await rows.nth(index).click()
+        const drawer = page.getByRole('dialog', { name })
+        await drawer.waitFor({ timeout: 20_000 })
+        await drawer.getByRole('link', { name: 'View in Sales' }).waitFor({ timeout: 10_000 })
+        await shoot(drawer, label)
+        await page.keyboard.press('Escape')
+        await drawer.waitFor({ state: 'hidden', timeout: 10_000 })
+      }
+
+      // `domcontentloaded`: the Activity card polls (#2736), so a cold
+      // dashboard never reaches `networkidle`; the text waits below gate it.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Sale', { exact: true }).first().waitFor({ timeout: 60_000 })
+      await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'dashboard')
+    },
+  },
   'dashboard-sub-cent': {
     description:
       '#4264: a week of sub-cent agent payments — the count-form summary and the 4-decimal sub-cent figures in the spending half and the activity row, "<0,0001 kr" only below 0.00005 (owner decision 2026-10-22, superseding #3897\'s "<$0.01"; the agent caption\'s sub-cent form is unit-tested, not shown here: the shared budget read is not sub-cent)',

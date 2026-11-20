@@ -364,17 +364,21 @@ first pass seeds it at the block carrying the account's creation time.
 
 **When it runs.** Only while the owner is looking: there is no scheduled pass
 since #5012 (it scanned on a clock and, on a 10-block `eth_getLogs` plan, held
-dev at ~1M Alchemy compute units an hour). The Sales summary and payments reads
-ask for a background refresh of the owner's own account
+dev at ~1M Alchemy compute units an hour). The Sales payments read, which
+every Sales screen makes and nothing outside Sales does, asks for a background refresh of the owner's own account
 (`refreshMerchantAccountIndex`), at most once per 30 s per account across
 replicas (`claimInboundIndexRefresh`, one conditional UPDATE on the cursor
 row), and the Sales page re-reads every 10 s while visible. A payment nobody
-reported therefore shows on an open Sales page within about 40 s; with nobody
-looking it is indexed the next time the owner opens Sales. A sale the merchant
-reports is recorded at once by its own by-hash read (#4897) either way. The
-writes are idempotent and converge under concurrent refreshes (the row
-identity dedupes, the cursor only moves forward). Indexing continues while
-merchant services are turned off — the account is the marker, not the setting.
+reported therefore shows on an open Sales page within about a minute when the
+transfer index is configured. On the `eth_getLogs` fallback a refresh walks at
+most 10,000 blocks (about 5.5 hours of Base), so after a longer quiet spell
+the page catches up over several refreshes. With nobody looking, a payment is
+indexed the next time the owner opens Sales. A sale the merchant reports is
+recorded at once by its own by-hash read (#4897) either way. The writes are
+idempotent and converge under concurrent refreshes (the row identity dedupes,
+the cursor only moves forward). While merchant services are off the Sales
+reads answer nothing, so no refresh runs; the next view continues from the
+cursor.
 Each row records `sender_is_own_address`, decided at index time against the
 owner's own addresses (the set #4897 defines).
 

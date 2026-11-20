@@ -320,12 +320,12 @@ so this is a rule to point at rather than a question to ask the release runner.
 
       **The merchant inbound index (#4903) reads only while its owner views
       Sales (#5012).** There is no scheduled pass: a refresh runs at most once
-      per 30 s per merchant account while the Sales page is open, through
+      per 30 s per merchant account while a Sales screen is open, through
       Alchemy's transfer index when `ALCHEMY_HISTORY_API_KEY` is set (about one
       call a refresh, plus one receipt per new payment), else `eth_getLogs`
       over the range. The scheduled pass it replaced cost ~24–30M compute units
       a month per merchant account at Alchemy's 10-block span (dev, 2026-11-20,
-      PR #5004). With no merchant accounts on prod it costs nothing.
+      PR #5004). An environment with no merchant account makes no such call.
       `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`) stops it.
 
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /

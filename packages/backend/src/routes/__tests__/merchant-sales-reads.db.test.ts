@@ -40,7 +40,7 @@ import { describeDb, initDbHarness, resetDb } from '../../infra/__tests__/helper
 
 const mocks = vi.hoisted(() => ({ read: vi.fn(), price: vi.fn(), refresh: vi.fn() }))
 
-// #5012: the summary and payments reads ask for a background index refresh.
+// #5012: the payments read asks for a background index refresh.
 // It is recorded, never run, so the suite makes no RPC or index call; the
 // refresh itself is proven in merchant-index.db.test.ts.
 vi.mock('../../modules/transactions/merchant-index.js', async (importOriginal) => {
@@ -207,13 +207,15 @@ describeDb('the owner sales reads on the real database (#4897)', () => {
 
   const PERIOD = 'from=2026-11-01&to=2026-11-30'
 
-  it("asks for a refresh of the owner's own account on the summary and payments reads, never without one (#5012)", async () => {
+  it("asks for a refresh of the owner's own account on the payments read only, never without one (#5012)", async () => {
     mocks.refresh.mockResolvedValue({ status: 'throttled' })
     const m = await seedMerchant()
 
+    // The summary is also read by /analytics, which is not the Sales screen.
     expect((await get(m.userId, `/merchant-sales/summary?${PERIOD}`)).statusCode).toBe(200)
+    expect(mocks.refresh).not.toHaveBeenCalled()
     expect((await get(m.userId, `/merchant-sales/payments?${PERIOD}`)).statusCode).toBe(200)
-    expect(mocks.refresh.mock.calls.map((call) => call[0])).toEqual([m.accountId, m.accountId])
+    expect(mocks.refresh.mock.calls.map((call) => call[0])).toEqual([m.accountId])
 
     // No Sales account in scope: nothing to refresh.
     mocks.refresh.mockClear()

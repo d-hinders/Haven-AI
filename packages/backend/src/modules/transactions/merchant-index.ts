@@ -20,13 +20,13 @@
  * ## When it runs (#5012)
  *
  * Only while someone is looking. There is no scheduled pass: the owner's Sales
- * reads ask for a refresh (`refreshMerchantAccountIndex`), at most once per
- * `MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS` per account, so a payment appears
- * on an open Sales page within about that interval plus the page's poll. A
- * sale the merchant REPORTS is recorded at once by its own by-hash read
- * (#4897) and needs none of this; the pass is what finds the transfers nobody
- * reported. `runMerchantInboundIndexTick` still walks every account in one go,
- * for tests and for an operator's one-off run.
+ * payments read asks for a refresh (`refreshMerchantAccountIndex`), at most once
+ * per `MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS` per account, so a payment
+ * appears on an open Sales page within about a minute (the interval, the pass
+ * and the page's 10 s poll). A sale the merchant REPORTS is recorded at once by
+ * its own by-hash read (#4897) and needs none of this; the pass is what finds
+ * the transfers nobody reported. `runMerchantInboundIndexTick` walks every
+ * account in one go; nothing schedules or calls it in production.
  *
  * The scheduled pass was removed because it scanned on a clock whether or not
  * anything happened: on a 10-block `eth_getLogs` plan it held dev at ~1M
@@ -42,11 +42,12 @@
  * race rare: it is about cost, not correctness. Both are proven on the
  * real-database harness.
  *
- * ## Indexing continues while merchant services are off
+ * ## While merchant services are off
  *
- * The account is chosen by `is_merchant_account = true`, NOT
- * `merchant_service_settings.enabled`. Turning merchant services off keeps the
- * account and its history (#4895).
+ * The Sales reads answer nothing while merchant services are off
+ * (`resolveSalesScope`), so no refresh is asked for and this pass does not
+ * run. The account and its index stay (#4895); the next view after services
+ * are turned back on continues from the cursor.
  *
  * ## Money path
  *
@@ -115,7 +116,11 @@ export const MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS = 30
 export interface MerchantIndexDeps {
   listMerchantAccounts: () => Promise<MerchantAccountRow[]>
   findAccount: (accountId: string) => Promise<MerchantAccountRow | null>
-  claimRefresh: (accountId: string, minIntervalSeconds: number) => Promise<InboundIndexRefreshClaim>
+  claimRefresh: (
+    accountId: string,
+    chainId: number,
+    minIntervalSeconds: number,
+  ) => Promise<InboundIndexRefreshClaim>
   findCursor: (accountId: string) => Promise<InboundIndexCursor | null>
   saveCursor: (input: {
     accountId: string
@@ -152,7 +157,8 @@ export function productionMerchantIndexDeps(): MerchantIndexDeps {
   return {
     listMerchantAccounts: () => listMerchantAccounts(),
     findAccount: (accountId) => findMerchantAccountRow(accountId),
-    claimRefresh: (accountId, minIntervalSeconds) => claimInboundIndexRefresh(accountId, minIntervalSeconds),
+    claimRefresh: (accountId, chainId, minIntervalSeconds) =>
+      claimInboundIndexRefresh(accountId, chainId, minIntervalSeconds),
     findCursor: (accountId) => findInboundIndexCursor(accountId),
     saveCursor: (input) => upsertInboundIndexCursor(input),
     latestBlock: (chainId) => latestBlockNumber(chainId),
@@ -375,10 +381,10 @@ export async function refreshMerchantAccountIndex(
 ): Promise<MerchantIndexRefreshResult> {
   if (config.merchantInboundIndexDisabled) return { status: 'disabled' }
   try {
-    const claim = await deps.claimRefresh(accountId, MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS)
-    if (claim === 'throttled') return { status: 'throttled' }
     const account = await deps.findAccount(accountId)
     if (account === null) return { status: 'not_merchant_account' }
+    const claim = await deps.claimRefresh(account.accountId, account.chainId, MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS)
+    if (claim === 'throttled') return { status: 'throttled' }
     const outcome = await indexMerchantAccount(account, log, deps)
     if (outcome.kind === 'skipped') return { status: 'skipped' }
     return { status: outcome.kind, indexed: outcome.indexed }

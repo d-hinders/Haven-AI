@@ -311,27 +311,44 @@ export async function findMerchantAccountRow(
   }
 }
 
-export type InboundIndexRefreshClaim = 'claimed' | 'throttled' | 'no_cursor'
+/**
+ * The `last_indexed_block` of a cursor row that a refresh claim created before
+ * the account's first pass resolved its starting block (#5012). Read as "no
+ * cursor" (`findInboundIndexCursor`), and `GREATEST` replaces it with the
+ * first real block, so it never moves a pass backwards.
+ */
+export const UNSEEDED_CURSOR_BLOCK = -1
+
+export type InboundIndexRefreshClaim = 'claimed' | 'throttled'
 
 /**
  * Claim the right to run one on-view index refresh for the account (#5012):
  * at most one per `minIntervalSeconds`, however many tabs, viewers or
- * replicas ask. It is ONE conditional UPDATE on the cursor row, so it holds
- * across replicas: a concurrent second UPDATE waits on the row lock, then
- * re-checks `updated_at` against the first one's write and matches nothing.
+ * replicas ask, from the very first view.
  *
- * - `claimed`: the cursor was older than the interval and is now stamped.
- * - `throttled`: a refresh ran (or saved its cursor) within the interval.
- * - `no_cursor`: the account has never been indexed. The caller runs the
- *   first pass, which writes the cursor, so every later call is throttled.
- *   Two first passes racing each other are correct (the row identity dedupes
- *   and the cursor only moves forward) and can happen only once per account.
+ * - An account with no cursor row gets one, unseeded, by the INSERT: the first
+ *   caller wins it (`ON CONFLICT DO NOTHING`), every concurrent one falls to
+ *   the UPDATE and finds it fresh. So a first pass that fails before it can
+ *   write a cursor is throttled like any other, instead of re-running on
+ *   every read.
+ * - Otherwise ONE conditional UPDATE: a concurrent second UPDATE waits on the
+ *   row lock, then re-checks `updated_at` against the first one's write and
+ *   matches nothing. That holds across replicas.
  */
 export async function claimInboundIndexRefresh(
   accountId: string,
+  chainId: number,
   minIntervalSeconds: number,
   db: Executor = pool,
 ): Promise<InboundIndexRefreshClaim> {
+  const created = await db.query<{ account_id: string }>(
+    `INSERT INTO inbound_index_cursors (account_id, chain_id, last_indexed_block)
+     VALUES ($1, $2, $3)
+     ON CONFLICT (account_id) DO NOTHING
+     RETURNING account_id`,
+    [accountId, chainId, UNSEEDED_CURSOR_BLOCK],
+  )
+  if (created.rows.length > 0) return 'claimed'
   const claimed = await db.query<{ account_id: string }>(
     `UPDATE inbound_index_cursors
         SET updated_at = NOW()
@@ -340,12 +357,7 @@ export async function claimInboundIndexRefresh(
       RETURNING account_id`,
     [accountId, minIntervalSeconds],
   )
-  if (claimed.rows.length > 0) return 'claimed'
-  const exists = await db.query<{ account_id: string }>(
-    'SELECT account_id FROM inbound_index_cursors WHERE account_id = $1',
-    [accountId],
-  )
-  return exists.rows.length > 0 ? 'throttled' : 'no_cursor'
+  return claimed.rows.length > 0 ? 'claimed' : 'throttled'
 }
 
 export interface InboundIndexCursor {
@@ -367,7 +379,10 @@ export async function findInboundIndexCursor(
   )
   const row = result.rows[0]
   if (!row) return null
-  return { chainId: row.chain_id, lastIndexedBlock: Number(row.last_indexed_block) }
+  const lastIndexedBlock = Number(row.last_indexed_block)
+  // A claim's placeholder (#5012): the first pass has not resolved a block yet.
+  if (lastIndexedBlock === UNSEEDED_CURSOR_BLOCK) return null
+  return { chainId: row.chain_id, lastIndexedBlock }
 }
 
 /**

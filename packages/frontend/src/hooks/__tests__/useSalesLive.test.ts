@@ -98,6 +98,30 @@ describe('useSalesSummary live (#5012)', () => {
     expect(result.current.failed).toBe(false)
   })
 
+  it('drops a re-read that started for a period the page has left', async () => {
+    const november = { payments: 1 } as unknown as SalesSummary
+    const december = { payments: 9 } as unknown as SalesSummary
+    let resolveStale: (value: unknown) => void = () => {}
+    mockApiGet
+      .mockResolvedValueOnce(november)
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(december)
+
+    const { result, rerender } = renderHook(
+      ({ range }) => useSalesSummary(range, undefined, { live: true }),
+      { initialProps: { range: RANGE } },
+    )
+    await waitFor(() => expect(result.current.data).toBe(november))
+
+    await tick() // the November re-read starts and hangs
+    rerender({ range: { from: '2026-12-01', to: '2026-12-31' } })
+    await waitFor(() => expect(result.current.data).toBe(december))
+
+    // The November answer lands late: it must not overwrite December.
+    await act(async () => resolveStale({ payments: 1 }))
+    expect(result.current.data).toBe(december)
+  })
+
   it('does not poll without live', async () => {
     mockApiGet.mockResolvedValue({ payments: 1 })
     const { result } = renderHook(() => useSalesSummary(RANGE))
@@ -145,6 +169,27 @@ describe('useSalesPayments live (#5012)', () => {
     expect(result.current.total).toBe(4)
     // The loaded pages are all there, so there is nothing more to show.
     expect(result.current.hasMore).toBe(false)
+  })
+
+  it('drops a re-read that started for a period the list has left', async () => {
+    let resolveStale: (value: unknown) => void = () => {}
+    mockApiGet
+      .mockResolvedValueOnce(page([payment(1)]))
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveStale = resolve)))
+      .mockResolvedValueOnce(page([payment(7)]))
+
+    const { result, rerender } = renderHook(({ range }) => useSalesPayments(range, { live: true }), {
+      initialProps: { range: RANGE },
+    })
+    await waitFor(() => expect(result.current.payments).toEqual([payment(1)]))
+
+    await tick() // the November re-read starts and hangs
+    rerender({ range: { from: '2026-12-01', to: '2026-12-31' } })
+    await waitFor(() => expect(result.current.payments).toEqual([payment(7)]))
+
+    // The November page lands late: it must not merge into December's list.
+    await act(async () => resolveStale(page([payment(2), payment(1)])))
+    expect(result.current.payments).toEqual([payment(7)])
   })
 
   it('keeps the rows on screen when a re-read fails', async () => {

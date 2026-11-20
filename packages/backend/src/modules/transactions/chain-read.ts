@@ -53,7 +53,7 @@
 import { ethers } from 'ethers'
 import { settlementTokenForChain } from '../../domain/chains.js'
 import { getProvider } from '../../infra/chain/relayer-reads.js'
-import { discoverInboundTokenTransferHashes } from '../../infra/explorer-api.js'
+import type { discoverInboundTokenTransferHashes } from '../../infra/explorer-api.js'
 import {
   effectiveLogBatchBlocks,
   noteLogScanFailure,
@@ -406,12 +406,19 @@ export async function readInboundTransfersInBlockRange(
 /** The seams `readInboundTransfersViaIndex` reads through; injectable for tests. */
 export interface IndexReadDeps {
   discover: typeof discoverInboundTokenTransferHashes
-  readByHash: typeof readInboundTransfersByTxHash
+  readByHash: (chainId: number, accountAddress: string, txHash: string) => Promise<ChainTransactionRead>
 }
 
 const PRODUCTION_INDEX_READ_DEPS: IndexReadDeps = {
-  discover: discoverInboundTokenTransferHashes,
-  readByHash: readInboundTransfersByTxHash,
+  // Imported when first used, like `settledReadBlock` below: this module is
+  // imported by every transactions test, and several of them replace
+  // `explorer-api.js` with a mock that does not (and need not) carry this read.
+  discover: async (...args) => {
+    const { discoverInboundTokenTransferHashes } = await import('../../infra/explorer-api.js')
+    return discoverInboundTokenTransferHashes(...args)
+  },
+  readByHash: (chainId, accountAddress, txHash) =>
+    readInboundTransactionByTxHash(chainId, accountAddress, txHash),
 }
 
 /**
@@ -429,7 +436,10 @@ const PRODUCTION_INDEX_READ_DEPS: IndexReadDeps = {
  *
  * Failure keeps the same shape as the range read: never "none", and `partial`
  * holds every leg through the last block known complete. A receipt that
- * cannot be read ends the partial result before that transaction's block.
+ * cannot be read ends the partial result before that transaction's block, and
+ * so does a receipt the chain says it does not have: the index named that
+ * transaction as mined in range, so "no receipt" is the two sources
+ * disagreeing (a lagging or pruned RPC node), never "none".
  */
 export async function readInboundTransfersViaIndex(
   chainId: number,
@@ -449,18 +459,20 @@ export async function readInboundTransfersViaIndex(
   let readThrough = found.ok ? toBlock : found.readThroughBlock ?? fromBlock - 1
   let failed = !found.ok
   const legs: ChainInboundLeg[] = []
+  // The highest block of a transaction read so far (`fromBlock` before any).
+  let highest = fromBlock
   for (const txHash of found.txHashes) {
     const read = await deps.readByHash(chainId, accountAddress, txHash)
-    if (!read.ok) {
+    if (!read.ok || !read.receiptFound) {
       // The failed receipt's block is unknown, but hashes arrive oldest
       // first, so it is at or after the highest block read so far, and may BE
       // that block: stop just before it. The legs of that block are dropped
       // below and read again next time (the row identity dedupes).
       failed = true
-      const highest = legs.reduce((max, leg) => Math.max(max, leg.blockNumber), fromBlock)
       readThrough = Math.min(readThrough, highest - 1)
       break
     }
+    highest = Math.max(highest, read.blockNumber)
     legs.push(...read.legs)
   }
 

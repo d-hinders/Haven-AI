@@ -145,7 +145,7 @@ function deps(opts: {
   return {
     listMerchantAccounts: () => listMerchantAccounts(),
     findAccount: (accountId) => findMerchantAccountRow(accountId),
-    claimRefresh: (accountId, seconds) => claimInboundIndexRefresh(accountId, seconds),
+    claimRefresh: (accountId, chainId, seconds) => claimInboundIndexRefresh(accountId, chainId, seconds),
     readViaIndex: async (_chainId, _address, fromBlock, toBlock) => {
       if (!opts.viaIndex) return null
       opts.indexRanges?.push([fromBlock, toBlock])
@@ -736,21 +736,51 @@ describeDb('merchant inbound index (#4903)', () => {
 
   it('claims a refresh at most once per interval, across concurrent callers', async () => {
     const seeded = await seedAccount()
-    expect(await claimInboundIndexRefresh(seeded.accountId, 30)).toBe('no_cursor')
-
     await upsertInboundIndexCursor({ accountId: seeded.accountId, chainId: CHAIN, lastIndexedBlock: 4_000_000 })
     // The cursor was just written: a refresh is due only after the interval.
-    expect(await claimInboundIndexRefresh(seeded.accountId, 30)).toBe('throttled')
+    expect(await claimInboundIndexRefresh(seeded.accountId, CHAIN, 30)).toBe('throttled')
 
     await db.query(
       `UPDATE inbound_index_cursors SET updated_at = NOW() - INTERVAL '60 seconds' WHERE account_id = $1`,
       [seeded.accountId],
     )
     const claims = await Promise.all(
-      Array.from({ length: 5 }, () => claimInboundIndexRefresh(seeded.accountId, 30)),
+      Array.from({ length: 5 }, () => claimInboundIndexRefresh(seeded.accountId, CHAIN, 30)),
     )
     expect(claims.filter((c) => c === 'claimed')).toHaveLength(1)
     expect(claims.filter((c) => c === 'throttled')).toHaveLength(4)
+  })
+
+  /**
+   * Review S1: the first view of a new merchant account fires several reads
+   * at once, and a first pass can fail before it writes a cursor. Neither may
+   * escape the throttle.
+   */
+  it('throttles the very first view too: one claim wins for an account with no cursor, and a failed first pass is not re-run', async () => {
+    const seeded = await seedAccount()
+    const claims = await Promise.all(
+      Array.from({ length: 4 }, () => claimInboundIndexRefresh(seeded.accountId, CHAIN, 30)),
+    )
+    expect(claims.filter((c) => c === 'claimed')).toHaveLength(1)
+    // The claim's placeholder reads as "no cursor", so the first pass still
+    // seeds from the account's creation block.
+    expect(await findInboundIndexCursor(seeded.accountId)).toBeNull()
+
+    const indexRanges: Array<[number, number]> = []
+    const other = await seedAccount()
+    const failing = await refreshMerchantAccountIndex(
+      other.accountId,
+      log,
+      deps({ readOk: false, viaIndex: true, indexRanges }),
+    )
+    expect(failing).toEqual({ status: 'failed', indexed: 0 })
+    const again = await refreshMerchantAccountIndex(
+      other.accountId,
+      log,
+      deps({ readOk: false, viaIndex: true, indexRanges }),
+    )
+    expect(again).toEqual({ status: 'throttled' })
+    expect(indexRanges).toHaveLength(1)
   })
 
   it('refreshes the viewed account, then throttles the next view within the interval', async () => {

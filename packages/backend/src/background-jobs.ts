@@ -106,7 +106,9 @@ const RECONCILE_INTERVAL_MS = 60_000
  * The scheduled merchant inbound index (#4903, epic #4885). Five minutes is the
  * stated indexing latency: a payment into a merchant account is indexed within
  * 5 minutes of the next tick, with no dashboard open. The pass reads only the
- * blocks since its cursor, so a quiet tick is one `eth_getLogs` call.
+ * blocks since its cursor (plus a bounded re-read of the unsettled tail), so a
+ * quiet tick on a provider serving 500-block ranges is one `eth_getLogs` call.
+ * `MERCHANT_INBOUND_INDEX_DISABLED=true` turns it off.
  */
 const MERCHANT_INBOUND_INDEX_INTERVAL_MS = 5 * 60 * 1000
 
@@ -410,6 +412,10 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       // the cursor only moves forward). Indexing continues while merchant
       // services are off — the account list is the marker, not the setting.
       run: async () => {
+        // Kill switch (MERCHANT_INBOUND_INDEX_DISABLED=true): the pass is the
+        // largest eth_getLogs consumer, so ops can stop it without a deploy of
+        // new code. Indexing resumes from the cursor when it is turned back on.
+        if (config.merchantInboundIndexDisabled) return
         const { runMerchantInboundIndexTick } = await import('./modules/transactions/index.js')
         const tick = await runMerchantInboundIndexTick(log)
         if (tick.indexed || tick.failed) log.info(tick, 'Merchant inbound index tick')

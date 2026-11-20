@@ -213,7 +213,52 @@ describe('readInboundTransfersInBlockRange (#4903)', () => {
     expect(await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 10)).toEqual({
       ok: false,
       reason: 'rpc_unavailable',
+      partial: null,
     })
+  })
+
+  /**
+   * The dev Alchemy incident (2026-11-20): one failed chunk discarded every
+   * chunk before it, so each tick asked for the whole range again. A failure
+   * now keeps the chunks read before it, complete through their last block.
+   */
+  it('keeps the chunks read before a failed chunk, complete through the last block read', async () => {
+    const provider = providerWith({})
+    provider.getLogs
+      .mockResolvedValueOnce([transferLog({ index: 2, blockNumber: 120 })])
+      .mockResolvedValueOnce([transferLog({ index: 5, blockNumber: 730 })])
+      .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 1_200)
+
+    expect(read.ok).toBe(false)
+    if (read.ok) return
+    // [1..500] and [501..1000] were read; [1001..1200] was not.
+    expect(read.partial?.readThroughBlock).toBe(1_000)
+    expect(read.partial?.legs.map((leg) => leg.blockNumber)).toEqual([120, 730])
+    expect(provider.getLogs).toHaveBeenCalledTimes(3)
+  })
+
+  it('stops the partial result before a block whose time cannot be read', async () => {
+    const provider = providerWith({
+      logs: [
+        transferLog({ index: 0, blockNumber: 100 }),
+        transferLog({ index: 1, blockNumber: 140 }),
+      ],
+    })
+    provider.getBlock
+      .mockResolvedValueOnce({ timestamp: 1_790_000_000 })
+      .mockRejectedValueOnce(new Error('rpc down'))
+    mocks.getProvider.mockReturnValue(provider)
+
+    const read = await readInboundTransfersInBlockRange(CHAIN, ACCOUNT, 1, 400)
+
+    expect(read.ok).toBe(false)
+    if (read.ok) return
+    // Block 100 is complete; nothing at or after block 140 is claimed.
+    expect(read.partial?.readThroughBlock).toBe(139)
+    expect(read.partial?.legs.map((leg) => leg.blockNumber)).toEqual([100])
   })
 
   it('is empty when the range is empty', async () => {

@@ -227,6 +227,9 @@ describe('the coding-agent prompts (#4985, #5010)', () => {
     expect(copied).toContain('eip155:84532')
     expect(copied).toContain('HAVEN_SALES_URL=')
     expect(copied).not.toContain('sk_merchant_')
+    // #5009: the first step runs the container image (#5007), never a clone.
+    expect(copied).toContain('ghcr.io/d-hinders/haven-paywall-proxy')
+    expect(copied).not.toContain('git clone')
     // The prompt is not printed: only the labelled copy control is on screen.
     expect(screen.queryByTestId('seller-setup-kit-prompt-text')).toBeNull()
   })

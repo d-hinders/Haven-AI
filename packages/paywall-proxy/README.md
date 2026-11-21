@@ -129,8 +129,8 @@ The kit has no licence yet. A merchant in Haven's pilot may run and modify the
 kit to evaluate Haven. Do not redistribute it. A licence comes before general
 availability.
 
-The container image is public. The npm package `@haven_ai/paywall-proxy` is
-private and is not published; to run the kit without the image, see
+The kit is published as a container image. The npm package
+`@haven_ai/paywall-proxy` is private and is not published; to run the kit without the image, see
 [Running from source](#running-from-source).
 
 ## The parts

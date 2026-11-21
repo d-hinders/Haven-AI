@@ -113,8 +113,12 @@ request, with the answers to expect — is
 ## 2. The two new packages
 
 Both are workspace-private packages in this repository. Neither is published
-for the pilot (owner decision of 2026-11-16, recorded under *Owner decisions*
-on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and distribution are decided after the first pilot).
+to npm for the pilot (owner decision of 2026-11-16, recorded under *Owner decisions*
+on epic [#4884](https://github.com/d-hinders/Haven-AI/issues/4884): licence and distribution are decided after the first pilot). The
+paywall proxy is also published as a container image,
+`ghcr.io/d-hinders/haven-paywall-proxy` (#5007): that is how a merchant runs
+it, with no clone or build. Its README's Quickstart is the merchant's path
+(#5009).
 
 | Package | Directory | What it holds |
 |---|---|---|
@@ -1719,7 +1723,8 @@ statement that sums them is later work and is not designed here.
 
 What the merchant runs:
 
-- the proxy process (Node 24), behind HTTPS on a public host name the
+- the proxy process (the container image, or Node 24 from this repository),
+  behind HTTPS on a public host name the
   merchant controls. A shared tunnel domain works but ranks lower in Coinbase's
   directory;
 - the products file at `PRODUCTS_FILE`, and the settings: `NETWORK`, `PAY_TO` and

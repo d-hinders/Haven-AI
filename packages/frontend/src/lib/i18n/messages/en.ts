@@ -54,14 +54,18 @@ export const MERCHANT_KIT_README_URL =
 export const SELLING_WITHOUT_KIT_URL =
   'https://github.com/d-hinders/Haven-AI/blob/dev/docs/architecture/12-merchant-kit.md#selling-without-the-kit'
 
-/** The repository the merchant kit is cloned from (#4985). */
-export const MERCHANT_KIT_REPO_URL = 'https://github.com/d-hinders/Haven-AI.git'
+/**
+ * The merchant kit's container image (#5007). The setup prompt's first step
+ * runs it, so a developer never clones or builds (#5009). Pin a
+ * `pilot-<short-sha>` tag: the README's Quickstart says why.
+ */
+export const MERCHANT_KIT_IMAGE = 'ghcr.io/d-hinders/haven-paywall-proxy'
 
 /**
  * The "Set up with your coding agent" prompt (#4985), in the style of the agent
  * connect flow's prompt: one block a merchant pastes to their coding agent.
  *
- * It carries the README URL, the clone instruction, the pilot line, `PAY_TO`
+ * It carries the README URL, the container image to run, the pilot line, `PAY_TO`
  * (the Sales account's address), `NETWORK` in the CAIP-2 form the merchant kit
  * needs and `HAVEN_SALES_URL` (Haven's API origin). It NEVER carries a Sales key
  * secret or a key prefix: the agent is told to ask the merchant for a key they
@@ -76,7 +80,7 @@ export function merchantKitSetupPrompt(params: { accountAddress: string; salesUr
   return [
     'Set up Haven’s merchant kit so my Sales account can take payments.',
     '',
-    `1. Clone the repository: git clone ${MERCHANT_KIT_REPO_URL}`,
+    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to a pilot-<short-sha> tag, as the setup guide’s quickstart shows.`,
     `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
     `3. ${MERCHANT_KIT_PILOT_LINE}`,
     '4. Set these in the merchant kit’s environment:',

@@ -116,6 +116,7 @@ covers:
   - scripts/release-version-constants.mjs
   - .github/workflows/publish.yml
   - .github/workflows/publish-paywall-proxy-image.yml
+  - scripts/ci/paywall-proxy-image-tags.mjs
   - packages/backend/src/__tests__/execution-rail-live-census-pin.test.ts
   - packages/sdk/src/merchant-discovery.test.ts
 satisfied-by:

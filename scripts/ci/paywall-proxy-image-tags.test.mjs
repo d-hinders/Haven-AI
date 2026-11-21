@@ -14,10 +14,11 @@
  *      run push any tag, so the token cannot carry the rule; the structure and
  *      the refusal do.
  *
- * Plus the perimeter: the workflow joins `controlGlobs`, so a PR weakening it
- * gets the money-path label and a human read. `scripts/ci/money-path.test.mjs`
- * holds the three copies equal; this file pins that the new workflow is one of
- * them, so a later edit cannot quietly drop it from all three at once.
+ * Plus the perimeter: the workflow and this script (#5022) are `controlGlobs`,
+ * so a PR weakening either gets the money-path label and a human read.
+ * `scripts/ci/money-path.test.mjs` holds the four copies equal; this file pins
+ * that both paths are in the JSON, labeler.yml and the perimeter reference, so
+ * a later edit cannot quietly drop one from every copy at once.
  *
  * Run with: node --test scripts/ci/paywall-proxy-image-tags.test.mjs
  * (also collected by the `ci_config_checks` job's `scripts/ci/*.test.mjs`)
@@ -25,6 +26,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -35,6 +37,7 @@ import {
   assertTagAllowed,
   channelForRef,
   imageTags,
+  imageRefs,
   parseArgs,
   shortSha,
 } from './paywall-proxy-image-tags.mjs'
@@ -45,6 +48,9 @@ const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 const WORKFLOW_PATH = '.github/workflows/publish-paywall-proxy-image.yml'
 const workflow = read(WORKFLOW_PATH)
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+const CLI = path.join(ROOT, 'scripts', 'ci', 'paywall-proxy-image-tags.mjs')
+const SCRIPT_PATH = 'scripts/ci/paywall-proxy-image-tags.mjs'
+const PERIMETER = [WORKFLOW_PATH, SCRIPT_PATH]
 
 describe('the tag rule', () => {
   test('a push to dev publishes dev-<short-sha> and moves dev', () => {
@@ -109,12 +115,41 @@ describe('the tag rule', () => {
     }
   })
 
-  test('the CLI prints the tags, and refuses a bad pair with a GUARD line', () => {
+  test('parseArgs reads --ref and --sha, and refuses anything else', () => {
     assert.deepEqual(parseArgs(['--ref', 'refs/heads/dev', '--sha', SHA]), { ref: 'refs/heads/dev', sha: SHA })
     assert.throws(() => parseArgs(['--ref', 'refs/heads/dev']), TagRefusal)
     assert.throws(() => parseArgs(['--sha', SHA]), TagRefusal)
     assert.throws(() => parseArgs(['--ref']), TagRefusal)
     assert.throws(() => parseArgs(['--nope', 'x']), TagRefusal)
+  })
+
+  // #5022: the workflow hands this CLI's stdout to docker/build-push-action as
+  // `tags:`, which reads each line as an image REFERENCE. A bare `dev-<sha>`
+  // named `docker.io/library/dev-<sha>`, and every publish failed on Docker
+  // Hub auth. So the test runs the real CLI and pins every printed line.
+  test('the CLI prints full image references, one per line, for each channel (#5022)', () => {
+    const run = (ref) =>
+      spawnSync(process.execPath, [CLI, '--ref', ref, '--sha', SHA], { encoding: 'utf8' })
+    const dev = run('refs/heads/dev')
+    assert.equal(dev.status, 0, dev.stderr)
+    assert.deepEqual(dev.stdout.trim().split('\n'), [
+      'ghcr.io/d-hinders/haven-paywall-proxy:dev-a1b2c3d',
+      'ghcr.io/d-hinders/haven-paywall-proxy:dev',
+    ])
+    const main = run('refs/heads/main')
+    assert.equal(main.status, 0, main.stderr)
+    assert.deepEqual(main.stdout.trim().split('\n'), [
+      'ghcr.io/d-hinders/haven-paywall-proxy:pilot-a1b2c3d',
+      'ghcr.io/d-hinders/haven-paywall-proxy:pilot',
+    ])
+    assert.deepEqual(imageRefs('refs/heads/dev', SHA), dev.stdout.trim().split('\n'))
+  })
+
+  test('the CLI refuses a ref that publishes nothing with a GUARD line and no stdout', () => {
+    const refused = spawnSync(process.execPath, [CLI, '--ref', 'refs/heads/feature', '--sha', SHA], { encoding: 'utf8' })
+    assert.equal(refused.status, 1)
+    assert.equal(refused.stdout, '')
+    assert.match(refused.stderr, /^GUARD: refusing to publish from ref 'refs\/heads\/feature'/)
   })
 
   test('the registry path is the one the owner accepted', () => {
@@ -200,8 +235,13 @@ describe('the workflow structure', () => {
       'packages/sdk/**',
       'package-lock.json',
       '.github/workflows/publish-paywall-proxy-image.yml',
+      'scripts/ci/paywall-proxy-image-tags.mjs',
     ]) {
-      assert.ok(on.includes(`'${p}'`), `the push paths must include '${p}'`)
+      // A whole list line, so a commented-out `# '<path>'` does not count.
+      assert.ok(
+        on.split('\n').some((line) => line.trim() === `- '${p}'`),
+        `the push paths must include '${p}' as a list entry`,
+      )
     }
   })
 
@@ -214,16 +254,15 @@ describe('the workflow structure', () => {
 })
 
 describe('the money-path perimeter', () => {
-  test('the workflow is a control glob in the single source of truth', () => {
+  test('the workflow and the tag script are control globs in the single source of truth', () => {
     const json = JSON.parse(read('.github/money-path-globs.json'))
-    assert.ok(
-      json.controlGlobs.includes(WORKFLOW_PATH),
-      `${WORKFLOW_PATH} must be in controlGlobs: it decides which image a merchant runs`,
-    )
-    assert.ok(!json.globs.includes(WORKFLOW_PATH), 'the workflow is control, not runtime: no QA run exercises it')
+    for (const p of PERIMETER) {
+      assert.ok(json.controlGlobs.includes(p), `${p} must be in controlGlobs: it decides which image is pushed`)
+      assert.ok(!json.globs.includes(p), `${p} is control, not runtime: no QA run exercises it`)
+    }
   })
 
-  test('the workflow is in labeler.yml money-path list', () => {
+  test('the workflow and the tag script are in labeler.yml money-path list', () => {
     const lines = read('.github/labeler.yml').split('\n')
     const start = lines.findIndex((line) => /^["']?money-path["']?:/.test(line))
     assert.notEqual(start, -1, 'labeler.yml has no `money-path:` key')
@@ -240,17 +279,19 @@ describe('the money-path perimeter', () => {
       if (m) listed.push(m[1])
       else if (line.trim() && !line.trim().startsWith('#')) break
     }
-    assert.ok(listed.includes(WORKFLOW_PATH), `${WORKFLOW_PATH} must be in labeler.yml's money-path list`)
+    for (const p of PERIMETER) assert.ok(listed.includes(p), `${p} must be in labeler.yml's money-path list`)
   })
 
-  test('the workflow is in the annotated perimeter twin, under the control heading', () => {
+  test('the workflow and the tag script are in the annotated perimeter twin, under the control heading', () => {
     const text = read('.agents/skills/ship-next/references/money-path-perimeter.md')
     const controlAt = text.indexOf('## Control surface: `controlGlobs`')
     assert.notEqual(controlAt, -1, 'the perimeter doc has no control heading')
     const control = text.slice(controlAt)
-    assert.ok(
-      control.split('\n').includes(`- \`${WORKFLOW_PATH}\``),
-      `${WORKFLOW_PATH} must be an entry under the control heading, exactly as the JSON writes it`,
-    )
+    for (const p of PERIMETER) {
+      assert.ok(
+        control.split('\n').includes(`- \`${p}\``),
+        `${p} must be an entry under the control heading, exactly as the JSON writes it`,
+      )
+    }
   })
 })

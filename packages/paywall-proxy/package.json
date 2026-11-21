@@ -2,7 +2,7 @@
   "name": "@haven_ai/paywall-proxy",
   "version": "0.0.0",
   "private": true,
-  "description": "Haven paywall proxy — x402 in front of any HTTP API, settled through the shared merchant payment core (#4893). Not published; run from this repository.",
+  "description": "Haven paywall proxy — x402 in front of any HTTP API, settled through the shared merchant payment core (#4893). Not published to npm; run it from its container image, ghcr.io/d-hinders/haven-paywall-proxy (#5007), or from this repository.",
   "type": "module",
   "main": "./dist/index.js",
   "bin": {

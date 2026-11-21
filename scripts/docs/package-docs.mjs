@@ -708,7 +708,13 @@ export const GOVERNED_PACKAGE_DOCS = [
     // Re-verified 2026-11-20 (#5009, licence paragraph only): § Licence gives
     // a pilot merchant permission to run and modify the kit to evaluate Haven,
     // with no written step; `package.json` still says "UNLICENSED".
-    'last-verified': '2026-11-20',
+    // Re-verified 2026-11-21 (#5009): the README opens with an eight-step
+    // Quickstart that runs the #5007 container image; the old Steps 1-6 became
+    // reference sections below it ("Running from source" keeps the Node path),
+    // and the optional, receipt and sales-reporting tables moved under
+    // Reference → All settings. Every earlier sentence survives or is listed
+    // as corrected in the PR.
+    'last-verified': '2026-11-21',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

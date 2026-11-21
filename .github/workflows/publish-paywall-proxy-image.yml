@@ -52,6 +52,9 @@ on:
       - 'packages/sdk/**'
       - 'package-lock.json'
       - '.github/workflows/publish-paywall-proxy-image.yml'
+      # The tag script decides which references are pushed (#5022), so a change
+      # to it republishes, like a change to this file.
+      - 'scripts/ci/paywall-proxy-image-tags.mjs'
 
 # Per-ref, so a stream of dev builds cannot sit in front of a promotion. The
 # moving tag is the reason: two runs on one ref must not race to move it.

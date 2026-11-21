@@ -18,6 +18,8 @@ covers:
   - packages/backend/src/modules/transactions/search.ts
   - packages/mcp-server/src/tools/support/checkout-details.ts
   - packages/mcp/src/tools.ts
+  - packages/mcp-server/src/log.ts
+  - packages/sdk/src/client-checkout-details.ts
   - packages/frontend/src/hooks/useSalesPayments.ts
   - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
   - packages/frontend/src/hooks/useMerchantKeys.ts

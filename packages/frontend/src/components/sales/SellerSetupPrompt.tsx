@@ -57,11 +57,14 @@ export function SellerSetupPrompt({
       <div className={className} data-testid="seller-setup-pilot-only">
         <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
           {MERCHANT_KIT_PILOT_LINE}{' '}
+          {/* whitespace-nowrap (#5026): inline after the long pilot line, the
+              link split after "Read the kit"; it now moves to the next line
+              whole. */}
           <a
             href={MERCHANT_KIT_README_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
+            className="whitespace-nowrap font-medium text-[var(--v2-brand)] hover:text-[var(--v2-brand-strong)]"
           >
             Read the kit setup guide
           </a>
@@ -77,7 +80,7 @@ export function SellerSetupPrompt({
   return (
     <div className={className} data-testid="seller-setup-prompts">
       <div data-testid="seller-setup-kit-prompt">
-        <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+        <p className="text-pretty text-xs leading-relaxed text-[var(--v2-ink-3)]">
           Set up the merchant kit with your coding agent. {MERCHANT_KIT_PILOT_LINE}
         </p>
         <div className="mt-2">

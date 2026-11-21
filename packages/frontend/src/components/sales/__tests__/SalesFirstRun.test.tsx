@@ -297,4 +297,22 @@ describe('the coding-agent prompts (#4985, #5010)', () => {
       'During the pilot the merchant kit runs on Base Sepolia only',
     )
   })
+
+  // #5026: the pilot line is long enough that, inline after it, the guide
+  // link split after "Read the kit" on desktop; and the definition's own
+  // pilot line ended in a one-word "it." on a phone. jsdom cannot lay text
+  // out, so the pixels are proven by the Sales baselines; these pins stop
+  // the two classes being dropped silently between baseline runs.
+  // Mutations: drop `whitespace-nowrap` from the link → red; drop
+  // `text-pretty` from the definition's pilot line → red.
+  it('keeps the guide link whole and the pilot line free of a one-word last line (#5026)', async () => {
+    await renderHelper(catalogue(), { ...ACCOUNT, chain_id: 8453 })
+    const link = screen.getByTestId('seller-setup-pilot-only').querySelector('a')!
+    expect(link.textContent).toBe('Read the kit setup guide')
+    expect(link.className.split(/\s+/)).toContain('whitespace-nowrap')
+    const pilotLine = Array.from(screen.getByTestId('seller-definition').querySelectorAll('p')).find((p) =>
+      p.textContent?.startsWith('During the pilot'),
+    )!
+    expect(pilotLine.className.split(/\s+/)).toContain('text-pretty')
+  })
 })

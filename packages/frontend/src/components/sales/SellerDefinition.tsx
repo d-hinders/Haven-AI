@@ -29,7 +29,9 @@ export function SellerDefinition({ className = '' }: { className?: string }) {
       <p className="text-sm leading-relaxed text-[var(--v2-ink-2)]">
         {SELLER_DEFINITION} {MERCHANT_KIT_SENTENCE}
       </p>
-      <p className="mt-2 text-xs leading-relaxed text-[var(--v2-ink-3)]">{MERCHANT_KIT_PILOT_LINE}</p>
+      {/* text-pretty (#5026): at phone width this line ended in a one-word
+          "it."; `text-wrap: pretty` rebalances the last lines instead. */}
+      <p className="mt-2 text-pretty text-xs leading-relaxed text-[var(--v2-ink-3)]">{MERCHANT_KIT_PILOT_LINE}</p>
       <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
         <a
           href={MERCHANT_KIT_README_URL}

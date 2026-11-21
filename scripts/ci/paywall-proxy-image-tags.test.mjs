@@ -17,8 +17,8 @@
  * Plus the perimeter: the workflow and this script (#5022) are `controlGlobs`,
  * so a PR weakening either gets the money-path label and a human read.
  * `scripts/ci/money-path.test.mjs` holds the four copies equal; this file pins
- * that both paths are in them, so a later edit cannot quietly drop one from
- * every copy at once.
+ * that both paths are in the JSON, labeler.yml and the perimeter reference, so
+ * a later edit cannot quietly drop one from every copy at once.
  *
  * Run with: node --test scripts/ci/paywall-proxy-image-tags.test.mjs
  * (also collected by the `ci_config_checks` job's `scripts/ci/*.test.mjs`)
@@ -237,7 +237,11 @@ describe('the workflow structure', () => {
       '.github/workflows/publish-paywall-proxy-image.yml',
       'scripts/ci/paywall-proxy-image-tags.mjs',
     ]) {
-      assert.ok(on.includes(`'${p}'`), `the push paths must include '${p}'`)
+      // A whole list line, so a commented-out `# '<path>'` does not count.
+      assert.ok(
+        on.split('\n').some((line) => line.trim() === `- '${p}'`),
+        `the push paths must include '${p}' as a list entry`,
+      )
     }
   })
 

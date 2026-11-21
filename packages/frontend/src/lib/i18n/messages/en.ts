@@ -36,13 +36,15 @@ export const MERCHANT_KIT_SENTENCE = 'The merchant kit is a small program you ru
 
 /**
  * The pilot condition (#4985), stated wherever the merchant kit is offered so
- * the product UI never reads as a licence. The merchant kit's README says it is
- * used under written permission from Haven and that this release runs on Base
- * Sepolia only (`packages/paywall-proxy/README.md` § Licence, § Before you
- * start).
+ * the product UI never reads as a licence. The merchant kit's README says a
+ * merchant in Haven's pilot may run and modify the kit to evaluate Haven, must
+ * not redistribute it, and gets a licence before general availability; and
+ * that this release runs on Base Sepolia only (`packages/paywall-proxy/README.md`
+ * § Licence, § Before you start). The permission is the pilot merchant's, with
+ * no written step (#5009, owner decision (b) on #5005).
  */
 export const MERCHANT_KIT_PILOT_LINE =
-  'During the pilot the merchant kit runs on Base Sepolia only, under written permission from Haven.'
+  'During the pilot the merchant kit runs on Base Sepolia only. A merchant in the pilot may run and modify it to evaluate Haven, but not redistribute it.'
 
 /** The merchant kit's setup guide — the README the definition links to (#4985). */
 export const MERCHANT_KIT_README_URL =

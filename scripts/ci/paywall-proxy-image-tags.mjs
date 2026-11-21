@@ -32,7 +32,11 @@
  * Usage:
  *   node scripts/ci/paywall-proxy-image-tags.mjs --ref refs/heads/dev --sha <sha>
  *
- * Prints one tag per line, the immutable one first.
+ * Prints one full image reference per line (`ghcr.io/d-hinders/haven-paywall-proxy:<tag>`),
+ * the immutable one first. `docker/build-push-action` reads each line as an
+ * image reference, so a bare tag would name a Docker Hub image instead
+ * (`dev-<sha>` → `docker.io/library/dev-<sha>`), which is how every publish
+ * failed until #5022.
  */
 
 /** The registry path the workflow pushes to. */
@@ -116,6 +120,15 @@ export function imageTags(ref, sha) {
   return tags
 }
 
+/**
+ * The full image references a push publishes, `${IMAGE}:<tag>`, in the order of
+ * `imageTags` (#5022). The tag rule is checked on the bare tag inside
+ * `imageTags`; this only adds the registry path.
+ */
+export function imageRefs(ref, sha) {
+  return imageTags(ref, sha).map((tag) => `${IMAGE}:${tag}`)
+}
+
 /** `--ref` and `--sha` from argv, or a refusal naming what is missing. */
 export function parseArgs(argv) {
   const out = {}
@@ -154,7 +167,7 @@ function isEntryPoint() {
 if (isEntryPoint()) {
   try {
     const { ref, sha } = parseArgs(process.argv.slice(2))
-    for (const tag of imageTags(ref, sha)) console.log(tag)
+    for (const reference of imageRefs(ref, sha)) console.log(reference)
   } catch (err) {
     if (err instanceof TagRefusal) {
       console.error(`GUARD: ${err.message}`)

@@ -25,6 +25,7 @@
 import { test, describe } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { spawnSync } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -35,6 +36,7 @@ import {
   assertTagAllowed,
   channelForRef,
   imageTags,
+  imageRefs,
   parseArgs,
   shortSha,
 } from './paywall-proxy-image-tags.mjs'
@@ -45,6 +47,7 @@ const read = (p) => readFileSync(path.join(ROOT, p), 'utf8')
 const WORKFLOW_PATH = '.github/workflows/publish-paywall-proxy-image.yml'
 const workflow = read(WORKFLOW_PATH)
 const SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678'
+const CLI = path.join(ROOT, 'scripts', 'ci', 'paywall-proxy-image-tags.mjs')
 
 describe('the tag rule', () => {
   test('a push to dev publishes dev-<short-sha> and moves dev', () => {
@@ -109,12 +112,41 @@ describe('the tag rule', () => {
     }
   })
 
-  test('the CLI prints the tags, and refuses a bad pair with a GUARD line', () => {
+  test('parseArgs reads --ref and --sha, and refuses anything else', () => {
     assert.deepEqual(parseArgs(['--ref', 'refs/heads/dev', '--sha', SHA]), { ref: 'refs/heads/dev', sha: SHA })
     assert.throws(() => parseArgs(['--ref', 'refs/heads/dev']), TagRefusal)
     assert.throws(() => parseArgs(['--sha', SHA]), TagRefusal)
     assert.throws(() => parseArgs(['--ref']), TagRefusal)
     assert.throws(() => parseArgs(['--nope', 'x']), TagRefusal)
+  })
+
+  // #5022: the workflow hands this CLI's stdout to docker/build-push-action as
+  // `tags:`, which reads each line as an image REFERENCE. A bare `dev-<sha>`
+  // named `docker.io/library/dev-<sha>`, and every publish failed on Docker
+  // Hub auth. So the test runs the real CLI and pins every printed line.
+  test('the CLI prints full image references, one per line, for each channel (#5022)', () => {
+    const run = (ref) =>
+      spawnSync(process.execPath, [CLI, '--ref', ref, '--sha', SHA], { encoding: 'utf8' })
+    const dev = run('refs/heads/dev')
+    assert.equal(dev.status, 0, dev.stderr)
+    assert.deepEqual(dev.stdout.trim().split('\n'), [
+      'ghcr.io/d-hinders/haven-paywall-proxy:dev-a1b2c3d',
+      'ghcr.io/d-hinders/haven-paywall-proxy:dev',
+    ])
+    const main = run('refs/heads/main')
+    assert.equal(main.status, 0, main.stderr)
+    assert.deepEqual(main.stdout.trim().split('\n'), [
+      'ghcr.io/d-hinders/haven-paywall-proxy:pilot-a1b2c3d',
+      'ghcr.io/d-hinders/haven-paywall-proxy:pilot',
+    ])
+    assert.deepEqual(imageRefs('refs/heads/dev', SHA), dev.stdout.trim().split('\n'))
+  })
+
+  test('the CLI refuses a ref that publishes nothing with a GUARD line and no stdout', () => {
+    const refused = spawnSync(process.execPath, [CLI, '--ref', 'refs/heads/feature', '--sha', SHA], { encoding: 'utf8' })
+    assert.equal(refused.status, 1)
+    assert.equal(refused.stdout, '')
+    assert.match(refused.stderr, /^GUARD: refusing to publish from ref 'refs\/heads\/feature'/)
   })
 
   test('the registry path is the one the owner accepted', () => {

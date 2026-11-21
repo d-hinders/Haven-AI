@@ -142,6 +142,7 @@
           - "scripts/docs/validate-frontmatter.mjs"
           - "scripts/ci/money-path-restatement-scan.mjs"
           - "scripts/ci/money-path.test.mjs"
+          - "scripts/ci/paywall-proxy-image-tags.mjs"
           - "scripts/ci/qa-freshness.mjs"
           - "scripts/release-bump.mjs"
           - "scripts/release-version-order.mjs"

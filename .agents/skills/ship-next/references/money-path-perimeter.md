@@ -376,7 +376,13 @@ change to, and `packages/paywall-proxy/src/**` (already control) is what the
 image runs. It is pinned to the README's run step through
 `scripts/docs/package-docs.mjs`'s `covers:` instead.
 
+The tag script joined the list in #5022. The workflow hands its stdout to
+`docker/build-push-action` unchanged, so the script alone decides which image
+references are pushed. It printed bare tags until #5022, and no image was ever
+published.
+
 - `.github/workflows/publish-paywall-proxy-image.yml`
+- `scripts/ci/paywall-proxy-image-tags.mjs`
 
 ### The money-path gate itself
 

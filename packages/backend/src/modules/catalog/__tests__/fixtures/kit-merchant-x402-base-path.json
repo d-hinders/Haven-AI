@@ -1,0 +1,130 @@
+{
+  "version": 1,
+  "operator": {
+    "name": "Haven",
+    "contact": "https://haven.example/merchant-kit"
+  },
+  "name": "Haven inference demo",
+  "description": "Opper inference paid per call on Base Sepolia.",
+  "network": "eip155:84532",
+  "network_name": "Base Sepolia testnet",
+  "testnet": true,
+  "asset": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "asset_symbol": "USDC",
+  "asset_decimals": 6,
+  "pay_to": "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed",
+  "settlement": {
+    "scheme": "exact",
+    "facilitator": "coinbase-cdp",
+    "methods": [
+      "eip3009"
+    ]
+  },
+  "terms": {
+    "one_payment_one_call": true,
+    "replay": {
+      "code": "payment_already_delivered",
+      "statement": "The same payment header does not buy a second call: once the call is delivered, presenting it again answers payment_already_delivered."
+    },
+    "payment_response": {
+      "header": "PAYMENT-RESPONSE",
+      "statement": "Every answer after settlement carries a PAYMENT-RESPONSE header with the settlement transaction hash."
+    },
+    "upstream_answered": {
+      "code": "upstream_answered",
+      "statement": "A 3xx or 4xx from the upstream is wrapped into a 200 upstream_answered and the payment is used for that call; 401, 402, 403 and 407 are upstream_auth_refused, and 408, 429 and 5xx are failures."
+    },
+    "on_failure_after_settlement": {
+      "code": "upstream_failed_after_settlement",
+      "statement": "The payment settled and the call failed: the answer is a 200 upstream_failed_after_settlement with the transaction hash, and the merchant's contact for what happens next is https://haven.example/merchant-kit.",
+      "contact": "https://haven.example/merchant-kit"
+    }
+  },
+  "payment": {
+    "headers": [
+      "PAYMENT-SIGNATURE",
+      "X-PAYMENT"
+    ],
+    "preferred_header": "PAYMENT-SIGNATURE",
+    "x402_version": 2,
+    "spec": "https://github.com/x402-foundation/x402/blob/main/specs/x402-specification-v2.md"
+  },
+  "products": [
+    {
+      "id": "gpt-5-mini-1k",
+      "name": "GPT-5 mini, 1,000 output tokens",
+      "route": "POST /api/v3/compat/chat/completions",
+      "model": "azure/gpt-5-mini",
+      "price": "10000",
+      "price_usdc": "0.01",
+      "output_token_cap": 1000,
+      "description": "Internal technical demo run by Haven on Base Sepolia: one chat completion on azure/gpt-5-mini through Opper, up to 1,000 output tokens. Test money only.",
+      "input_example": {
+        "model": "azure/gpt-5-mini",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Say hello in one sentence."
+          }
+        ]
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    },
+    {
+      "id": "ministral-3b-2k",
+      "name": "Ministral 3B, 2,000 output tokens",
+      "route": "POST /api/v3/compat/chat/completions",
+      "model": "aws/ministral-3b",
+      "price": "5000",
+      "price_usdc": "0.005",
+      "output_token_cap": 2000,
+      "description": "Internal technical demo run by Haven on Base Sepolia: one chat completion on aws/ministral-3b through Opper, up to 2,000 output tokens. Test money only.",
+      "input_example": {
+        "model": "aws/ministral-3b",
+        "messages": [
+          {
+            "role": "user",
+            "content": "Say hello in one sentence."
+          }
+        ]
+      },
+      "input_schema": {
+        "type": "object",
+        "required": [
+          "model",
+          "messages"
+        ],
+        "properties": {
+          "model": {
+            "type": "string"
+          },
+          "messages": {
+            "type": "array"
+          },
+          "max_tokens": {
+            "type": "integer",
+            "minimum": 1
+          }
+        }
+      }
+    }
+  ]
+}

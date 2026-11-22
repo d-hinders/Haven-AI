@@ -211,7 +211,7 @@ nobody.
 | `version` | Yes | The products-file schema version. `1` is the only version. An unknown version refuses startup. |
 | `products[].id` | Yes | Stable, unique, lower-case identifier. It is the `product_id` in the sale record and the key the discovery document lists. |
 | `products[].name` | No | Human name. When present it is the sale record's `product_name`; when absent the proxy sends the `id`. Part of the receipt line (section 11), so it is under the same character rule as `description`. |
-| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after the proxy's base path. A product is selected by its route. |
+| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after the proxy's base path. A product is selected by its route. The discovery document lists it with the base path in front, so the listed route is the one a buyer calls (#5034). |
 | `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. This is how an inference product is pinned to one model. |
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. Never a float and never a dollar string: a JSON number is refused, because a float cannot represent every atomic amount exactly. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product; absent for a product that is not token-priced. |
@@ -363,7 +363,7 @@ route, or refused when it is not a product route.
 | `settlement.methods` | Yes | `["eip3009"]`. The kit advertises EIP-3009 only; ERC-7710 is later work (#4887). |
 | `terms` | Yes | The rules of the sale, stated by the kit and true for every product. See *The rules of the sale* below. |
 | `payment` | Yes | How to pay: the accepted headers, the x402 version and the specification. See *How to pay* below. |
-| `products[]` | Yes | The same product objects as the products file: `id`, `name`, `route`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
+| `products[]` | Yes | The products-file objects, with one change: `route` carries the deployment's `BASE_PATH` in front of the path, so it is the absolute path a buyer calls (#5034). The other fields are as the products file spells them: `id`, `name`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
 | `products[].price_usdc` | Yes | The same price as a decimal USDC string with no trailing zeros: `"0.01"` for `"10000"`, `"0.018"` for `"18000"`, `"0.0001"` for `"100"`. `price` stays the atomic string, unchanged. |
 | `products[].output_schema` | No | The shape of the answer, when the products file carries one beside `output_example`. Served only, never enforced. |
 | `updated` | No | RFC 3339 timestamp of the last change, for caches. |
@@ -420,7 +420,9 @@ The document is built from the products file, the deployment's settings, and the
 kit's own constants. `terms` and `payment` are constants: they describe what the
 handler does for every product and are not products-file content. Everything
 else is either a field of the products file or a setting of the deployment —
-there is no field the kit invents per product.
+there is no field the kit invents per product. The one field the deployment
+changes is `route`: it carries `BASE_PATH` in front of the products-file path,
+so the document lists the path the handler serves (#5034).
 
 The document starts from the one the demo merchant serves today
 (`packages/demo-merchant-mcp/src/http.ts`, built from

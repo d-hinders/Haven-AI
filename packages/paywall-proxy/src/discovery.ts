@@ -31,11 +31,18 @@ export const ASSET_SYMBOL = 'USDC'
 /** USDC's decimals on every chain the kit sells on. */
 export const ASSET_DECIMALS = 6
 
-/** One product, as the products file spells it (§3) and the document lists it (§4). */
+/**
+ * One product, as the document lists it (§4): the products-file fields (§3),
+ * with `route` carrying the deployment's base path so it is the path a buyer
+ * calls (#5034).
+ */
 export interface DiscoveryProduct {
   id: string
   name?: string
-  /** `METHOD /path`, the products-file spelling: how to call it. */
+  /**
+   * `METHOD /path`, the absolute path a buyer calls: the products-file path
+   * with the deployment's `BASE_PATH` in front of it (#5034).
+   */
   route: string
   model?: string
   /** Atomic USDC units, as a decimal string. */
@@ -175,6 +182,17 @@ export function defaultEndpointDescription(
 }
 
 /**
+ * The route as the document lists it (#5034): the products-file `METHOD /path`
+ * with the deployment's `BASE_PATH` in front of the path. The handler serves a
+ * product only under the base path (`handler.ts`), so listing the products-file
+ * spelling would name a route that answers 404. With no `BASE_PATH` the route
+ * is the products-file spelling, unchanged.
+ */
+export function listedRoute(product: Pick<Product, 'method' | 'path'>, basePath: string): string {
+  return `${product.method} ${basePath}${product.path}`
+}
+
+/**
  * Build the document from the products file, the deployment's settings and the
  * kit's own constants (`terms`, `payment`). `updated` is the products file's
  * last change; the caller reads it once at startup, so the document changes
@@ -212,7 +230,7 @@ export function buildDiscoveryDocument(params: {
     products: products.map((product) => ({
       id: product.id,
       ...(product.name !== undefined ? { name: product.name } : {}),
-      route: product.route,
+      route: listedRoute(product, config.basePath),
       ...(product.model !== undefined ? { model: product.model } : {}),
       price: product.price.toString(),
       price_usdc: formatUsdcPrice(product.price),

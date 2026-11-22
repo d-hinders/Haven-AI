@@ -1473,6 +1473,9 @@ const SWEEP_DELEGATE_DESCRIPTION = [
   '(1) call with no arguments — returns { status: "signature_required", authorization, expected_auth }',
   'or { status: "nothing_stranded" }; (2) sign via the signer tool haven_sign_sweep_delegate, then call',
   'again with { authorization, signature }. Returns { status: "swept", tx_hash, amount }.',
+  'If the relay was broadcast but its outcome is not confirmed yet, the answer is SWEEP_OUTCOME_UNKNOWN',
+  'with the tx_hash: do NOT prepare a new sweep — call this tool again with no arguments (or re-submit the',
+  'SAME authorization and signature) to read its current state.',
   'USDC only — stranded native ETH is not recoverable through this path.',
 ].join(' ')
 

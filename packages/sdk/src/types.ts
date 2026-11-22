@@ -2386,6 +2386,14 @@ export interface PaymentStatusResult {
    */
   settlementScheme?: 'eip3009' | 'erc7710' | null
   /**
+   * #5030: the required checkout-details field names the merchant's challenge
+   * carried, recorded at authorize. Present only when it asked for at least
+   * one; absent otherwise (a challenge that asked for nothing, or a row
+   * authorized before #5030). Field names only, never the owner's values.
+   * `haven_submit` reads it when the stored challenge itself cannot be read.
+   */
+  checkoutDetailsRequiredFields?: string[]
+  /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.
    * Absent — never `false` — when unknown or on erc7710, matching
@@ -2687,6 +2695,13 @@ export interface RawPaymentStatusResult {
    * enum.
    */
   settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #5030: the required checkout-details field names the merchant's challenge
+   * carried, recorded at authorize. Present only when it asked for at least
+   * one; absent otherwise (a challenge that asked for nothing, or a row
+   * authorized before #5030). Field names only, never the owner's values.
+   */
+  checkout_details_required_fields?: string[]
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.
@@ -3176,6 +3191,13 @@ export type CheckoutDetailsRefusalReasonName =
   | 'backend_unsupported'
   /** Hosted settle: the explicit merchant_url is not the one the payment was quoted for, so the owner's data is not sent. */
   | 'merchant_mismatch'
+  /**
+   * #5030: the stored merchant challenge could not be read, and the intent
+   * recorded that it asked for a required checkout detail. The submit cannot
+   * tell which fields the challenge named, so it fails closed before spending
+   * (owner decision 2026-11-22, option b).
+   */
+  | 'challenge_unreadable'
 
 /**
  * #4872: where in the purchase the refusal landed, which decides what the

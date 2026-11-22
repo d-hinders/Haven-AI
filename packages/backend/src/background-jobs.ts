@@ -1,7 +1,7 @@
 /**
  * The backend's background jobs, as one importable table (#4764).
  *
- * `index.ts` used to start all eleven of these inline, between its route
+ * `index.ts` used to start all of these inline, between its route
  * registrations and `startRetrySweep`. That made the wiring untestable —
  * importing `index.ts` boots the server — so two tests read the file as text
  * and regex-matched it, a technique that failed once on record (#4411).
@@ -15,7 +15,7 @@
  * Behaviour is unchanged from the inline wiring: same lock keys, intervals,
  * first-run behaviour, `.unref()`, and warn messages; per-pass and per-phase
  * catches kept with their exact messages; dynamic imports stay lazy, not
- * hoisted; no overlap guard is added to these eleven; the outbound job still
+ * hoisted; no overlap guard is added to these rows; the outbound job still
  * iterates per chain inside one tick.
  *
  * The twelfth job — the accounting retry sweep — is NOT a row. It registers
@@ -27,7 +27,8 @@
  * #4903 (the merchant inbound index) and #4899 (the merchant catalogue
  * refresh) each added a ROW; #5012 removed the merchant inbound index row again
  * (it now runs only while its owner views Sales, `refreshMerchantAccountIndex`),
- * so the table is eleven rows and the retry sweep is the twelfth job.
+ * and #5035 added the delegate-sweep confirmer, so the table is twelve rows and
+ * the retry sweep is the thirteenth job.
  */
 import { config } from './config.js'
 import { deployableChainIds } from './domain/chains.js'
@@ -102,6 +103,13 @@ const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 const OUTBOUND_BUMP_INTERVAL_MS = 60_000
 const RECONCILE_INTERVAL_MS = 60_000
+/**
+ * #5035: the delegate-sweep confirmer. A sweep booked `outcome_unknown` is
+ * resolved from the token's `authorizationState` — a cheap read — and the
+ * route's synchronous wait is 15 s, so a minute is the right cadence: the row
+ * is usually resolved on the first tick after it is booked.
+ */
+const SWEEP_CONFIRMER_INTERVAL_MS = 60_000
 
 /**
  * Ops webhook, same Slack-compatible `{ text }` shape as the
@@ -128,7 +136,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the eleven rows. A function rather than a module-level constant because
+ * Build the rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -391,6 +399,27 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       },
     },
     {
+      name: 'sweep confirmer',
+      intervalMs: SWEEP_CONFIRMER_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.sweepConfirmer,
+      failureMessage: 'Sweep confirmer tick failed',
+      // #5035: a delegate sweep whose receipt wait timed out (or whose
+      // broadcast answer was lost) is booked `outcome_unknown` with its hash,
+      // never `failed`. This tick decides the real outcome from the token's
+      // `authorizationState(from, nonce)` — independent of which hash mined —
+      // marks the row `submitted` with the mined hash (so transaction history
+      // attributes it) and resolves the stranded-funds event; an authorization
+      // that expired unused is marked `failed`. Leader-gated because the RPC
+      // reads are the expensive part; the terminal writes are CASes.
+      run: async () => {
+        const { runSweepConfirmerTick } = await import('./modules/mpp/index.js')
+        const tick = await runSweepConfirmerTick(log)
+        if (tick.submitted || tick.failedExpired) {
+          log.info(tick, 'Sweep confirmer tick acted')
+        }
+      },
+    },
+    {
       name: 'passport sweep',
       intervalMs: PASSPORT_SWEEP_INTERVAL_MS,
       lockKey: LEADER_LOCK_KEYS.passportSweep,
@@ -491,7 +520,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the eleven table rows, then the
+ * The one entry point `index.ts` calls: start the table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

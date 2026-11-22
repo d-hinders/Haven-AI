@@ -560,11 +560,20 @@ const PRE_TRIM_BASELINE_BYTES = 30_609
  * path to say so. A first draft at +471 was cut to +375. 32,827 UTF-8 bytes;
  * the cap is RAISED to the measured value, as round 35 did. No tool was added — 29 holds. Shrink-only
  * from here.
+ *
+ * **Re-derived — round 37, #5035 (2026-11-22).** A delegate sweep that was
+ * broadcast but not yet confirmed answers SWEEP_OUTCOME_UNKNOWN with the hash;
+ * `haven_sweep_delegate` gains three sentences naming that code and the one
+ * action (call it again with no arguments, or re-submit the same authorization
+ * and signature, to read the current state). +268 UTF-8 bytes; 33,095 total;
+ * the cap is RAISED to the measured value, as rounds 26–36 did for a
+ * description an issue requires. No tool was added — 29 holds. Shrink-only
+ * from here.
  */
-const MAX_TOTAL_BYTES = 32_827
-// Mean pin: round 36 (#4872 part 2b block above): 32,827 / 29 = 1131.9655…,
-// pinned at the two-decimal ceiling (1131.97). Shrink-only from here.
-const MAX_MEAN_BYTES = 1131.97
+const MAX_TOTAL_BYTES = 33_095
+// Mean pin: round 37 (#5035): 33,095 / 29 = 1141.2068…, pinned at the
+// two-decimal ceiling (1141.21). Shrink-only from here.
+const MAX_MEAN_BYTES = 1141.21
 
 describe('tool description payload (#1591)', () => {
   it(`served descriptions average ≤${MAX_MEAN_BYTES} UTF-8 bytes (pre-trim total was ${PRE_TRIM_BASELINE_BYTES})`, () => {

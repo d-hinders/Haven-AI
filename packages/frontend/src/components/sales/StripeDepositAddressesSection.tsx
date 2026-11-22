@@ -6,6 +6,14 @@
  * design is the note on #4902, approved by the owner 2026-11-18 "with
  * unverified addresses for the demo".
  *
+ * ## Only on a testnet Sales account (#5028)
+ *
+ * The registry is dev and Stripe sandbox only until a proof of address
+ * ownership exists, and the gate is per Sales account: `SalesSetupTab` renders
+ * this section only when the account's chain is a testnet, and every route
+ * answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` otherwise. The ownership-proof
+ * slice removes the gate.
+ *
  * ## What it is
  *
  * A payment processor such as Stripe can receive USDC for the merchant at an

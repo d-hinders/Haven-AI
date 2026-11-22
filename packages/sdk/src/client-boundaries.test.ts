@@ -564,6 +564,7 @@ describe('HavenClient structural boundary', () => {
       'canonicalizePassportReceipt', // #4723: the ONE canonicalizer (SDK + backend)
       'catalogFundingLegExpected', // #3839
       'checkPassport', // #4723: fetch-and-verify wrapper
+      'checkoutDetailsChallengeUnreadableError', // #5030
       'checkoutDetailsRefusalError', // #4872
       'checkoutDetailsRequestOf', // #4872
       'compareNodeVersions',

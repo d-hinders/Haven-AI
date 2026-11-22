@@ -133,9 +133,9 @@ const PARITY_MANIFEST: Record<string, PairManifest> = {
     },
     description: {
       local: 'b702163e8c18',
-      hosted: 'de1f44567c0a',
+      hosted: '0222b072ab0f',
       reason:
-        'The hosted text describes two keyless phases (the authorization out, the signature back in); the local text describes one call.',
+        'The hosted text describes two keyless phases (the authorization out, the signature back in) and the SWEEP_OUTCOME_UNKNOWN answer; the local text describes one call.',
     },
   },
   'haven_submit↔haven_submit': {

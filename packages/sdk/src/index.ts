@@ -239,6 +239,7 @@ export type {
   CheckoutDetailsValues,
 } from './checkout-details.js'
 export {
+  checkoutDetailsChallengeUnreadableError,
   checkoutDetailsRefusalError,
   readCheckoutDetailsAvailability,
   resolveCheckoutDetails,

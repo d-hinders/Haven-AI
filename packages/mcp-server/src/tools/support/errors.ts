@@ -339,6 +339,20 @@ const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
   'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
 
 /**
+ * #5035: the backend's typed `error_code` for a delegate sweep that was
+ * broadcast but whose outcome is not confirmed yet. The body carries the hash.
+ * A sweep has no `payment_id`, so `haven_get_payment_status` cannot check it —
+ * the call that reads the current state is `haven_sweep_delegate` itself:
+ * called with no arguments it answers the in-flight sweep's state, and
+ * re-submitting the SAME authorization and signature answers it too. Never a
+ * new prepare (the backend refuses to mint a second authorization while one is
+ * in flight) and never a second payment.
+ */
+const SWEEP_OUTCOME_UNKNOWN_ERROR_CODE = 'sweep_outcome_unknown'
+const SWEEP_OUTCOME_UNKNOWN_OMITTED_REASON =
+  'the sweep was broadcast but its outcome is not confirmed yet; do not prepare a new sweep — call haven_sweep_delegate again (no arguments) to read its current state, or re-submit the SAME authorization and signature; it answers swept once the authorization is used on-chain, or expired once it can no longer be used'
+
+/**
  * #4826: the backend's `error_code` for an x402 authorize replay whose
  * idempotency key already belongs to a `submitted` payment — the agent
  * settled and the outcome is not booked yet. The row is in flight, so the
@@ -873,6 +887,30 @@ export function normalizeError(err: unknown): ToolFailure {
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId ?? body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #5035: a delegate sweep that was broadcast but whose outcome is not
+  // confirmed yet. The body carries the hash. A sweep has no payment_id, so the
+  // status read is the sweep tool itself — called with no arguments it answers
+  // the in-flight sweep's state. Never a new prepare, never a second payment.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SWEEP_OUTCOME_UNKNOWN_ERROR_CODE
+  ) {
+    const body = err.body as { error_code?: string; tx_hash?: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_sweep_delegate',
+      nextArguments: {},
+    })
+    return {
+      success: false,
+      code: 'SWEEP_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      ...(typeof body.tx_hash === 'string' ? { tx_hash: body.tx_hash } : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

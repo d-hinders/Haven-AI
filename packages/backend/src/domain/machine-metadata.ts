@@ -159,3 +159,23 @@ export function settlementSchemeOfNarrowed(
   if (settlementState?.child && settlementState?.budget) return 'erc7710'
   return null
 }
+
+/**
+ * #5030: the `machine_metadata` key that records the required checkout-details
+ * field names a merchant's challenge carried at authorize. Written by
+ * `modules/x402/delegation-authorize.ts` on both delegation branches and served
+ * on the payment status read under the same name.
+ */
+export const CHECKOUT_DETAILS_REQUIRED_FIELDS_KEY = 'checkout_details_required_fields'
+
+/**
+ * #5030: the recorded required checkout-details field names, out of a
+ * `machine_metadata` value. Empty when the key is absent — a row authorized
+ * before #5030, or a challenge that asked for nothing. Field NAMES only; the
+ * owner's values are never stored.
+ */
+export function checkoutDetailsRequiredFieldsOf(machineMetadata: MachineMetadataValue): string[] {
+  const value = machineMetadataOrNull(machineMetadata)?.[CHECKOUT_DETAILS_REQUIRED_FIELDS_KEY]
+  if (!Array.isArray(value)) return []
+  return value.filter((name): name is string => typeof name === 'string')
+}

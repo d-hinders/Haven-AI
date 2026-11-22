@@ -19,6 +19,7 @@ covers:
   - packages/mcp-server/src/tools/catalog-purchase.ts
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/backend/src/modules/x402/stored-challenge.ts
+  - packages/backend/src/modules/x402/checkout-details-required.ts
   - packages/mcp-server/src/tools/support/errors.ts
   - packages/mcp-server/src/tools/support/guidance.ts
   - packages/mcp-server/src/tools/support/checkout-details.ts
@@ -28,7 +29,7 @@ covers:
   - packages/backend/src/modules/accounting/fortnox-connector.ts
   - packages/backend/src/modules/accounting/accounted-connector.ts
   - packages/backend/src/modules/accounting/igdrasil-connector.ts
-last-verified: "2026-11-17"
+last-verified: "2026-11-22"
 ---
 
 # Checkout details: how a merchant asks and how Haven answers
@@ -399,6 +400,11 @@ the SDK holds). So the block's size is known before the payment is authorised.
 - A block that would exceed 16,384 bytes is not sent. A required field is a
   refusal before payment; with no required field the answer is dropped and the
   purchase proceeds.
+- The estimate counts the caller's own request headers, which ride the paid
+  request too. The SDK paths always did; the hosted plain-HTTP pay tool now
+  passes them through (#5030), so a 14.5 KB `Cookie` plus a required answer
+  refuses before any intent instead of answering 431 at the merchant. The
+  catalog purchase tools have no caller headers to count.
 - The paid request re-checks the actual block as a safety net and never sends
   one that would answer 431.
 
@@ -431,7 +437,8 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > `tools/call` (`completeX402MerchantCall`'s `paidRequestHeaders`), never the
 > MCP handshake. The hosted plain-HTTP path is supported too (#4872 part 2b):
 > `haven_pay_x402_quote` refuses before any intent, sized for the option paid,
-> in both its payment_required and request modes. On that path the agent sends
+> in both its payment_required and request modes, and its estimate counts the
+> caller's own request headers (#5030). On that path the agent sends
 > the paid request itself, so `haven_submit` reads the merchant's request back
 > from the challenge stored at authorize (`GET /x402/:id/payment-required`),
 > reads the agent's details, and decides before it spends: on EIP-3009 before
@@ -444,9 +451,16 @@ the SDK holds). So the block's size is known before the payment is authorised.
 > known to be plain HTTP: never on the MCP-tool flow, where
 > `haven_complete_mcp_tool` sends it itself, and never when the flow cannot be
 > read. When the stored challenge cannot
-> be read, the submit proceeds as today and sends no answer (§5, "A path that
-> is not supported"); the pay tool has already refused any required field the
-> agent could not share. On EIP-3009 the answer comes back only once the relay
+> be read, the submit fails closed ONLY for a payment whose challenge asked for
+> a required detail (#5030, owner decision 2026-11-22 option b): the intent
+> records those field names at authorize
+> (`machine_metadata.checkout_details_required_fields`) and the payment status
+> read serves them, so a failed read — a 429 from the money-path rate limit is
+> realistic — refuses as `challenge_unreadable` before anything is spent. Every
+> other payment proceeds as today and sends no answer (§5, "A path that is not
+> supported"): a challenge that asked for nothing, a direct payment (a 409), a
+> 200 with no stored challenge, and a payment whose record cannot be read
+> either. On EIP-3009 the answer comes back only once the relay
 > has confirmed: a relay that is still `submitted` returns none, and a later
 > `haven_submit` gets the relay's own answer, not the header. Such a payment is
 > funded but its retry carries no answer, so a merchant that requires the
@@ -506,7 +520,7 @@ request, which is sent after funding.
 | SDK `fetch` and `payX402Quote` | Before `authorizeX402` (lines 1764 and 1479). | A required field that cannot be shared throws `CheckoutDetailsUnavailableError`. No payment is created and no funds move. |
 | SDK `resumeX402Payment` | Before the paid request, after the payment is already funded (line 1638). | The resume reports the refusal and does not send the paid request. The payment stays funded but undelivered. |
 | Hosted MCP-merchant completion | In `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` (`packages/mcp-server/src/tools/catalog-purchase.ts`), after the quote, cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_settle_mcp_tool` before the funding relay (EIP-3009, with the real header block) or before the settlement child is submitted (erc7710, availability; the block right after submit); in `haven_complete_mcp_tool` after the funding wait. | Before the intent and before the relay or submit: nothing is created or spent. After an erc7710 submit: the settlement is never sent, so nothing is redeemed (`unsent`, start a new purchase). On complete: funded but not delivered (`funded`, complete again once fixed, or verify then sweep). |
-| Hosted state-direct (plain HTTP) | In `haven_pay_x402_quote`, after the cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_submit` before the funding relay (EIP-3009, availability and the estimated block) or before the settlement child is submitted (erc7710, availability; the real block right after the submit). | Before the intent and before the relay or submit: nothing is created or spent (`before_payment`, which on `haven_submit` stands only while the intent is still `pending_signature`, as on settle). After an erc7710 submit: no `payment_header` is returned, so nothing can be redeemed (`unsent`). An EIP-3009 `haven_submit` of the decomposed MCP-tool flow refuses before the relay too, where it used to be decided only after funding by `haven_complete_mcp_tool`. |
+| Hosted state-direct (plain HTTP) | In `haven_pay_x402_quote`, after the cap and scheme and before `prepareX402Erc7710` or `createX402Intent`; again in `haven_submit` before the funding relay (EIP-3009, availability and the estimated block) or before the settlement child is submitted (erc7710, availability; the real block right after the submit). | Before the intent and before the relay or submit: nothing is created or spent (`before_payment`, which on `haven_submit` stands only while the intent is still `pending_signature`, as on settle). After an erc7710 submit: no `payment_header` is returned, so nothing can be redeemed (`unsent`). An EIP-3009 `haven_submit` of the decomposed MCP-tool flow refuses before the relay too, where it used to be decided only after funding by `haven_complete_mcp_tool`. When the stored-challenge read itself fails, the submit refuses as `challenge_unreadable` only for a payment whose challenge asked for a required detail (#5030); every other payment proceeds as today. |
 
 ### The machine-readable reason
 
@@ -516,7 +530,7 @@ value in `packages/sdk/src/types.ts` (#4872 adds it). The refusal carries:
 | Field | Meaning |
 |---|---|
 | `missing_fields` | The field names that could not be shared, in the order the merchant listed them. |
-| `reason` | `not_shared` (the owner has not turned sharing on for this agent), `feature_disabled` (the deployment has checkout details off), `not_stored` (the owner has not saved the field), `over_budget` (the answer or the block would exceed its limit), `unreadable` (Haven's read of the details failed), or `backend_unsupported` (a backend without the agent read, a 404). The last three were added by #4872, as the issue requires the read failure and the older backend to be told apart from "sharing off". |
+| `reason` | `not_shared` (the owner has not turned sharing on for this agent), `feature_disabled` (the deployment has checkout details off), `not_stored` (the owner has not saved the field), `over_budget` (the answer or the block would exceed its limit), `unreadable` (Haven's read of the details failed), `backend_unsupported` (a backend without the agent read, a 404), or `challenge_unreadable` (the stored merchant challenge itself could not be read, and the intent recorded that it asked for a required detail — #5030). The last four were added by #4872 and #5030, as the issue requires the read failure and the older backend to be told apart from "sharing off". |
 | `next_action` | `stop_and_tell_user`. The owner must turn sharing on or save the field; the agent cannot. |
 
 The message names the field and the owner setting, and says no payment was

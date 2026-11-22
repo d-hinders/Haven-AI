@@ -438,11 +438,45 @@ export function parseCandidates(text) {
 }
 
 /**
+ * The census sample's start offset, derived from the scan SHA. Pure.
+ *
+ * The census lists its candidates in last-touch order (oldest first) and the
+ * run takes CENSUS_BUDGET consecutive files from that list. Taking the first
+ * five every run samples the same five forever — mutating a file does not
+ * change its last-touch commit — so the start is rotated by the scan SHA: the
+ * SHA's leading hex digits modulo the candidate count. Consecutive scans have
+ * different SHAs, so they start at different files, and over many runs every
+ * file is reached. A value that is not a 7-40 digit hex SHA is refused.
+ */
+export function censusOffset(scanSha, count) {
+  const hex = String(scanSha ?? '').trim().toLowerCase().replace(/^0x/, '')
+  if (!/^[0-9a-f]{7,40}$/.test(hex)) throw new Error(`census offset: ${JSON.stringify(scanSha)} is not a 7-40 digit hex SHA`)
+  if (!Number.isInteger(count) || count < 0) throw new Error(`census offset: count ${count} is not a non-negative integer`)
+  if (count === 0) return 0
+  return Number(BigInt(`0x${hex.slice(0, 16)}`) % BigInt(count))
+}
+
+/**
+ * Rotate the census list so the run starts at the scan SHA's offset. Pure.
+ * The candidate list and its last-touch order are kept; only the start moves,
+ * and the list wraps, so the first CENSUS_BUDGET entries are the sample. The
+ * census command in quality-scan `dimensions.md` § 1 prints this order, so the
+ * author writes one cell per sampled file before the runner selects.
+ */
+export function rotateCensus(entries, scanSha) {
+  const list = [...entries]
+  if (list.length === 0) return list
+  const k = censusOffset(scanSha, list.length)
+  return [...list.slice(k), ...list.slice(0, k)]
+}
+
+/**
  * Pick the census sample. Pure. Candidates arrive in the order the census
  * command lists them, and the runner takes them in that order whatever it is:
  * quality-scan block 1 lists money-path guard files that carry no recorded
- * mutation, oldest first, and falls back to the newest-landing sample when none
- * is left. Files that no longer exist at HEAD are skipped, the first
+ * mutation, rotated by the scan SHA (`rotateCensus`) so consecutive runs start
+ * at different files, and falls back to the newest-landing sample when none is
+ * left. Files that no longer exist at HEAD are skipped, the first
  * CENSUS_BUDGET distinct live files get one census cell each (M1…M5), and up to
  * PROBE_BUDGET probe cells follow (M6, M7).
  */

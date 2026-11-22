@@ -19,7 +19,10 @@
  *   - a transaction that pays the account and a registered address is an
  *     account sale; one record per transaction; the own sender fold;
  *   - the reads keep Stripe-held sales apart and unchanged totals otherwise;
- *   - clearing a Stripe-held sale, and a new record afterwards.
+ *   - clearing a Stripe-held sale, and a new record afterwards;
+ *   - the testnet gate (#5028): on a Sales account whose chain is not a
+ *     testnet every route answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and
+ *     writes nothing, and the ingest treats the registry as empty.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { randomUUID } from 'node:crypto'
@@ -63,6 +66,8 @@ const { rateLimitKeyFor } = await import('../../middleware/rate-limit.js')
 const { inboundReceiveBalanceAtomic } = await import('../../infra/repositories/inbound-transfers.js')
 
 const CHAIN = 84532
+/** Base mainnet: a Sales account whose chain is not a testnet (#5028). */
+const MAINNET = 8453
 const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e'
 const TX = '0x' + '1a'.repeat(32)
 const PAYER = '0x' + 'bb'.repeat(20)
@@ -81,7 +86,8 @@ interface Merchant {
   secret: string
 }
 
-async function seedMerchant(opts: { enabled?: boolean } = {}): Promise<Merchant> {
+async function seedMerchant(opts: { enabled?: boolean; chain?: number } = {}): Promise<Merchant> {
+  const chain = opts.chain ?? CHAIN
   const user = await db.query<{ id: string }>(
     `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
     [`deposit-${randomUUID()}@test.example`],
@@ -91,7 +97,7 @@ async function seedMerchant(opts: { enabled?: boolean } = {}): Promise<Merchant>
   const account = await db.query<{ id: string }>(
     `INSERT INTO smart_accounts (user_id, account_address, chain_id, execution_rail, account_type, is_default, is_merchant_account)
      VALUES ($1, $2, $3, 'delegation', 'delegator_hybrid', false, true) RETURNING id`,
-    [userId, address, CHAIN],
+    [userId, address, chain],
   )
   await db.query(
     `INSERT INTO merchant_service_settings (user_id, enabled, enabled_at)
@@ -403,6 +409,97 @@ describeDb('the Stripe deposit-address registry and Stripe-held sales on the rea
         app.inject({ method: 'POST', url: '/merchant-deposit-addresses', headers, payload: { address: '0x12' } })
       for (let i = 0; i < 60; i += 1) expect((await call()).statusCode).toBe(400)
       expect((await call()).statusCode).toBe(429)
+    })
+  })
+
+  describe('the testnet gate (#5028): the registry is dev and Stripe sandbox only', () => {
+    const TESTNET_ONLY = 'DEPOSIT_ADDRESSES_TESTNET_ONLY'
+
+    it('every route answers one typed refusal on a Sales account whose chain is not a testnet, and writes nothing', async () => {
+      const m = await seedMerchant({ chain: MAINNET })
+      const address = addr()
+
+      const created = await register(m.userId, address)
+      expect(created.statusCode, created.body).toBe(403)
+      expect(created.json()).toEqual({
+        error: 'Stripe deposit addresses are available on a test network only.',
+        error_code: TESTNET_ONLY,
+      })
+
+      const listed = await list(m.userId)
+      expect(listed.statusCode, listed.body).toBe(403)
+      expect(listed.json().error_code).toBe(TESTNET_ONLY)
+
+      // The gate runs before any existence check: a random id is the refusal,
+      // never DEPOSIT_ADDRESS_NOT_FOUND.
+      const missing = await retire(m.userId, randomUUID())
+      expect(missing.statusCode, missing.body).toBe(403)
+      expect(missing.json().error_code).toBe(TESTNET_ONLY)
+
+      // A row seeded directly (the routes cannot create one here) is untouched.
+      const seeded = await db.query<{ id: string }>(
+        `INSERT INTO merchant_deposit_addresses (account_id, user_id, chain_id, address)
+         VALUES ($1, $2, $3, $4) RETURNING id`,
+        [m.accountId, m.userId, MAINNET, addr()],
+      )
+      const retired = await retire(m.userId, seeded.rows[0].id)
+      expect(retired.statusCode, retired.body).toBe(403)
+      expect(retired.json().error_code).toBe(TESTNET_ONLY)
+
+      const rows = await db.query(`SELECT retired_at FROM merchant_deposit_addresses WHERE account_id = $1`, [
+        m.accountId,
+      ])
+      expect(rows.rows).toHaveLength(1)
+      expect(rows.rows[0].retired_at).toBeNull()
+    })
+
+    it('the ingest treats the registry as empty: a transfer into a registered address answers exactly as a hash that paid nobody', async () => {
+      const m = await seedMerchant({ chain: MAINNET })
+      const deposit = addr()
+      await db.query(
+        `INSERT INTO merchant_deposit_addresses (account_id, user_id, chain_id, address, registered_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [m.accountId, m.userId, MAINNET, deposit, BEFORE_BLOCK],
+      )
+      // The chain read returns the leg anyway: the gate, not the read, refuses.
+      mocks.read.mockResolvedValue({
+        ok: true,
+        receiptFound: true,
+        blockNumber: 100,
+        latestBlock: 102,
+        legs: [],
+        otherLegs: [{ leg: leg(PAYER, '1000000', 4), toAddress: deposit }],
+      })
+      const res = await post(m.secret, record({ chain: `eip155:${MAINNET}` }))
+      expect(res.statusCode, res.body).toBe(422)
+      expect(res.json().error_code).toBe('no_payment_to_account')
+
+      chainShows([], [])
+      const nobody = await post(m.secret, record({ chain: `eip155:${MAINNET}`, tx_hash: '0x' + '2c'.repeat(32) }))
+      expect(res.json()).toEqual(nobody.json())
+      expect((await salesFor(m.accountId)).rows).toHaveLength(0)
+    })
+
+    it('does not name a registered address to the chain read on a non-testnet Sales account', async () => {
+      const m = await seedMerchant({ chain: MAINNET })
+      const deposit = addr()
+      await db.query(
+        `INSERT INTO merchant_deposit_addresses (account_id, user_id, chain_id, address, registered_at)
+         VALUES ($1, $2, $3, $4, $5)`,
+        [m.accountId, m.userId, MAINNET, deposit, BEFORE_BLOCK],
+      )
+      chainShows([], [])
+      await post(m.secret, record({ chain: `eip155:${MAINNET}` }))
+      expect(mocks.read.mock.calls[0][3]).toEqual([])
+    })
+
+    it('a sale into the Sales account itself is accepted as today on a non-testnet account', async () => {
+      const m = await seedMerchant({ chain: MAINNET })
+      chainShows([leg(PAYER, '1000000', 1)], [])
+      const res = await post(m.secret, record({ chain: `eip155:${MAINNET}` }))
+      expect(res.statusCode, res.body).toBe(201)
+      expect(res.json()).toMatchObject({ held_by: 'account', receiving_address: null, amount_raw: '1000000' })
+      expect((await inboundFor(m.accountId)).rowCount).toBe(1)
     })
   })
 

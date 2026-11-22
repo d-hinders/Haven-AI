@@ -36,7 +36,7 @@ const RECORD: ConsumedPaymentRecord = {
 
 const SETTINGS: SalesSettings = {
   havenBaseUrl: 'https://api.haven.example',
-  merchantKey: 'sk_merchant_test_0123456789abcdef',
+  merchantKey: '«redacted:sk_…»',
   outboxPath: '/tmp/sales-outbox.jsonl',
 }
 
@@ -45,15 +45,38 @@ function answer(status: number, body: unknown = {}): typeof fetch {
     new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 }
 
-function fakeOutbox(): SalesOutbox & { added: { key: string; record: SaleRecord; outcome: SaleReportOutcome }[] } {
-  const added: { key: string; record: SaleRecord; outcome: SaleReportOutcome }[] = []
+interface FakeOutbox extends SalesOutbox {
+  /** Every call, in order, so a test can pin that the record is durable before the first attempt. */
+  calls: string[]
+  queued: { key: string; record: SaleRecord }[]
+  released: { key: string; outcome: SaleReportOutcome }[]
+  removed: { key: string; reason: 'accepted' | 'refused' }[]
+}
+
+function fakeOutbox(): FakeOutbox {
+  const calls: string[] = []
+  const queued: { key: string; record: SaleRecord }[] = []
+  const released: { key: string; outcome: SaleReportOutcome }[] = []
+  const removed: { key: string; reason: 'accepted' | 'refused' }[] = []
   return {
-    added,
-    add: async (key, record, outcome) => {
-      added.push({ key, record, outcome })
+    calls,
+    queued,
+    released,
+    removed,
+    queue: async (key, record) => {
+      calls.push('queue')
+      queued.push({ key, record })
+    },
+    release: async (key, outcome) => {
+      calls.push('release')
+      released.push({ key, outcome })
+    },
+    remove: async (key, reason) => {
+      calls.push('remove')
+      removed.push({ key, reason })
     },
     replay: async () => undefined,
-    depth: () => added.length,
+    depth: () => released.length,
     start: () => undefined,
     stop: () => undefined,
   }
@@ -90,8 +113,8 @@ describe('the sale record (#4898)', () => {
   })
 })
 
-describe('the reporter (#4898)', () => {
-  it('marks the payment reported when Haven accepts', async () => {
+describe('the reporter (#4898, #5032)', () => {
+  it('writes the record to the outbox before the first attempt, and removes it by key when Haven accepts', async () => {
     const marked: string[] = []
     const outbox = fakeOutbox()
     const reporter = createSalesReporter({
@@ -100,17 +123,19 @@ describe('the reporter (#4898)', () => {
       store: { markSaleReported: async (key) => void marked.push(key) },
       outbox,
       log: () => undefined,
-      fetch: answer(201),
+      fetch: async () => new Response('{}', { status: 201 }),
     })
 
     reporter.report(RECORD, PRODUCT)
     await reporter.idle()
+    expect(outbox.calls).toEqual(['queue', 'remove'])
+    expect(outbox.queued).toEqual([{ key: RECORD.key, record: saleRecordFor(RECORD, PRODUCT, undefined, 84532) }])
+    expect(outbox.removed).toEqual([{ key: RECORD.key, reason: 'accepted' }])
     expect(marked).toEqual([RECORD.key])
-    expect(outbox.added).toHaveLength(0)
     expect(reporter.stats()).toMatchObject({ reported: 1, refused: 0, queued: 0 })
   })
 
-  it('queues a record the reporter gave up on, and a 429, but not a refusal', async () => {
+  it('releases a record the reporter gave up on, and a 429, but removes a refusal', async () => {
     const outbox = fakeOutbox()
     const gaveUp = createSalesReporter({
       settings: SETTINGS,
@@ -123,8 +148,8 @@ describe('the reporter (#4898)', () => {
     })
     gaveUp.report(RECORD, PRODUCT)
     await gaveUp.idle()
-    expect(outbox.added).toHaveLength(1)
-    expect(outbox.added[0]!.outcome).toMatchObject({ outcome: 'gave_up', status: 503 })
+    expect(outbox.calls).toEqual(['queue', 'release'])
+    expect(outbox.released[0]!.outcome).toMatchObject({ outcome: 'gave_up', status: 503 })
 
     const limited = createSalesReporter({
       settings: SETTINGS,
@@ -137,8 +162,8 @@ describe('the reporter (#4898)', () => {
     })
     limited.report(RECORD, PRODUCT)
     await limited.idle()
-    expect(outbox.added).toHaveLength(2)
-    expect(outbox.added[1]!.outcome).toMatchObject({ outcome: 'refused', status: 429 })
+    expect(outbox.calls).toEqual(['queue', 'release', 'queue', 'release'])
+    expect(outbox.released[1]!.outcome).toMatchObject({ outcome: 'refused', status: 429 })
 
     const refused = createSalesReporter({
       settings: SETTINGS,
@@ -151,8 +176,42 @@ describe('the reporter (#4898)', () => {
     })
     refused.report(RECORD, PRODUCT)
     await refused.idle()
-    expect(outbox.added).toHaveLength(2)
+    expect(outbox.calls).toEqual(['queue', 'release', 'queue', 'release', 'queue', 'remove'])
+    expect(outbox.removed).toEqual([{ key: RECORD.key, reason: 'refused' }])
     expect(refused.stats()).toMatchObject({ refused: 1 })
+  })
+
+  it('stops writing to the store and the outbox once the proxy is closing', async () => {
+    const marked: string[] = []
+    const outbox = fakeOutbox()
+    let release: (() => void) | undefined
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const reporter = createSalesReporter({
+      settings: SETTINGS,
+      chainId: 84532,
+      store: { markSaleReported: async (key) => void marked.push(key) },
+      outbox,
+      log: () => undefined,
+      fetch: async () => {
+        await gate
+        return new Response('{}', { status: 201 })
+      },
+    })
+
+    reporter.report(RECORD, PRODUCT)
+    // The record is durable before the first attempt; the proxy then stops.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(outbox.calls).toEqual(['queue'])
+    reporter.stop()
+    release?.()
+    await reporter.idle()
+
+    // The late answer writes nothing: the record is in the outbox, and the next
+    // proxy replays it.
+    expect(outbox.calls).toEqual(['queue'])
+    expect(marked).toEqual([])
   })
 
   it('returns at once and never throws, whatever Haven does', async () => {
@@ -178,11 +237,12 @@ describe('the reporter (#4898)', () => {
 
   it('reports a payment once: a record already marked reported is not sent again', async () => {
     let calls = 0
+    const outbox = fakeOutbox()
     const reporter = createSalesReporter({
       settings: SETTINGS,
       chainId: 84532,
       store: { markSaleReported: async () => undefined },
-      outbox: fakeOutbox(),
+      outbox,
       log: () => undefined,
       fetch: async () => {
         calls += 1
@@ -193,5 +253,6 @@ describe('the reporter (#4898)', () => {
     reporter.report({ ...RECORD, saleReported: true }, PRODUCT)
     await reporter.idle()
     expect(calls).toBe(0)
+    expect(outbox.calls).toEqual([])
   })
 })

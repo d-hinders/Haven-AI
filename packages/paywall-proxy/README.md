@@ -176,8 +176,10 @@ You monitor:
 - **Overage.** `overage` log lines, when an upstream answer runs past the
   product's output-token cap.
 - **Sales reporting.** The outbox depth (`/healthz` and the `sales_outbox_*`
-  lines) and `sales_report_refused` lines. A growing outbox means Haven is not
-  receiving the sales; a refused record means its shape or your key is wrong.
+  lines) and `sales_report_refused` lines. The depth counts the records waiting
+  for a replay — a record in its first delivery round is in the file but not
+  counted — so a growing depth means Haven is not receiving the sales; a refused
+  record means its shape or your key is wrong.
 - **Cost.** Coinbase facilitator usage against the 1,000 free transactions a
   month, and your upstream provider's spend.
 - **Money.** The receiving account's balance in Haven against the settled calls
@@ -276,7 +278,8 @@ first is `started`, with `port`, `network`, `network_label`, `pay_to`,
 when `RPC_URL` is unset on Base Sepolia, otherwise `"configured"` — the line
 never prints the URL itself, because a provider URL can embed a key),
 `sales_reporting` (`"on"` or
-`"off (no HAVEN_MERCHANT_KEY)"`), `sales_outbox_depth` when reporting is on, and
+`"off (no HAVEN_MERCHANT_KEY)"`), `sales_outbox_depth` when reporting is on (the
+records waiting for a replay), and
 `receipt` (`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A
 missing or invalid setting refuses startup and names every problem at once,
 never a secret's value.
@@ -484,7 +487,7 @@ missing or unusable Haven origin, refuses startup and names the variable.
 |---|---|
 | `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), created on **Sales → Setup → Sales keys**. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
 | `HAVEN_SALES_URL` | Haven's API origin, for example `https://api.haven.example`. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
-| `SALES_OUTBOX` | The file the proxy keeps records Haven has not accepted yet in. One proxy process per file, on persistent disk. Default `sales-outbox.jsonl` in the same directory as `PAYMENTS_DB`. |
+| `SALES_OUTBOX` | The file the proxy keeps every sale record in until Haven accepts it or refuses it for good. One proxy process per file, on persistent disk. Default `sales-outbox.jsonl` in the same directory as `PAYMENTS_DB`. |
 
 ### The discovery document
 
@@ -637,18 +640,22 @@ before the call is forwarded, and the proxy does not wait for the answer: the
 buyer's response is the same, and as fast, whether Haven accepts the record,
 refuses it, is slow, or is unreachable.
 
-**Delivery, and the resend limit.** The proxy resends a record Haven answers
+**Delivery, and the resend limit.** The record is written to the outbox
+(`SALES_OUTBOX`) *before* the first attempt, so a proxy that stops mid-delivery
+— between resends, or inside one — loses nothing: the next proxy started on the
+same store and outbox sends it. The proxy then resends a record Haven answers
 with a 5xx, a timeout, a network failure, or the route's one retry answer (425
 `transaction_not_visible`, which is normal straight after settlement: Haven
 accepts a record once the transaction has three confirmations) after 1 s, 4 s
-and 16 s. A record still undelivered after those three resends goes to the
-outbox (`SALES_OUTBOX`), which replays it every 60 s. **The outbox replays one
-record at most 5 times, then logs `sales_outbox_gave_up` and drops it** — so a
-record is attempted at most 4 + 5 times in total. Any other 4xx is a refusal:
-the record's shape or your key is wrong, resending it changes nothing, and the
-proxy logs `sales_report_refused` once with the answer's status and error code.
-A 429 (Haven's 120-a-minute limit per key) is not a refusal: the record goes to
-the outbox like a 5xx.
+and 16 s. A record still undelivered after those three resends stays in the
+outbox, which replays it every 60 s. **The outbox replays one record at most 5
+times, then logs `sales_outbox_gave_up` and drops it** — so a record is
+attempted at most 4 + 5 times in total. A record Haven accepts, or refuses for
+good, is removed from the outbox by key, so no restart sends it again. Any other
+4xx is a refusal: the record's shape or your key is wrong, resending it changes
+nothing, and the proxy logs `sales_report_refused` once with the answer's status
+and error code. A 429 (Haven's 120-a-minute limit per key) is not a refusal: the
+record stays in the outbox like a 5xx.
 
 The outbox holds at most 10,000 records. When it is full the proxy keeps what it
 has and logs `sales_outbox_full` for each record it cannot add; clear the cause
@@ -692,9 +699,11 @@ how revocation works, are in
 **What you should see.** After a paid call, one `sales_report_accepted` line
 with the transaction hash and the merchant reference, and the sale on your
 Sales account's Sales page. A refused record logs `sales_report_refused` with
-the status and error code; a record that could not be delivered logs
-`sales_outbox_queued` and then, on a later replay, `sales_outbox_accepted`. No
-line, and no response, ever carries the key.
+the status and error code; a record whose first delivery round ended without an
+answer logs `sales_outbox_queued` and then, on a later replay,
+`sales_outbox_accepted`. A record Haven accepts or refuses for good logs
+`sales_outbox_removed` with the reason. No line, and no response, ever carries
+the key.
 
 ## Haven's own demo on Base Sepolia (#4892)
 

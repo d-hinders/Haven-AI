@@ -1874,6 +1874,19 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
             nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON,
           }
     }
+    case 'sweep_outcome_unknown': {
+      // #5035: a delegate sweep broadcast but not yet confirmed. A sweep has
+      // no payment_id, so the status read is the sweep tool itself — called
+      // with no arguments it answers the in-flight sweep's state. Never a new
+      // prepare, never a second payment.
+      return {
+        code: 'SWEEP_OUTCOME_UNKNOWN',
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_sweep_delegate',
+        nextArguments: {},
+        nextToolOmittedReason: null,
+      }
+    }
     case 'account_validation_failed':
       return {
         code: 'ACCOUNT_VALIDATION_FAILED',

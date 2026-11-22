@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -30,6 +30,15 @@ afterEach(async () => {
 
 function salesDir(): string {
   return mkdtempSync(join(tmpdir(), 'paywall-sales-'))
+}
+
+/** The outbox file's lines, so a test can pin what is durable on disk. */
+function outboxLines(dir: string): unknown[] {
+  const text = readFileSync(join(dir, 'sales-outbox.jsonl'), 'utf8')
+  return text
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => JSON.parse(line) as unknown)
 }
 
 function salesEnv(mock: MockHaven | undefined, dir: string): Record<string, string> {
@@ -285,5 +294,95 @@ describe('sales reporting (#4898)', () => {
     } finally {
       await again.close()
     }
+  })
+
+  it('delivers a sale whose report is between resends when the proxy stops, from the outbox of the next proxy (#5032)', async () => {
+    // Haven answers 425 (the route's retry answer), so the reporter is in a
+    // resend wait when close() is called.
+    const first = await startHaven({ status: 425, body: { error_code: 'transaction_not_visible', retry_after_seconds: 0 } })
+    const dir = salesDir()
+    harness = await startHarness({
+      dir,
+      env: salesEnv(first, dir),
+      overrides: { ...FAST, salesRetryDelaysMs: [300, 300, 300], salesAttemptTimeoutMs: 300 },
+    })
+
+    const answer = await paidCall(harness)
+    expect(answer.status).toBe(200)
+    await until(() => harness!.logs.some((line) => line.event === 'sales_report_retry'), 4_000)
+    // The record is durable before the first attempt, and the reporter is now
+    // waiting to resend it.
+    expect(outboxLines(dir)).toHaveLength(1)
+
+    // The deploy procedure stops the old process before starting the new one.
+    const accepting = await startHaven()
+    await harness.restart({ ...FAST, salesOutboxReplayMs: 40 }, { HAVEN_SALES_URL: accepting.url })
+    await first.close()
+
+    await until(() => accepting.seen.length === 1, 4_000)
+    // The replay's accept is logged after the store's flag is set.
+    await until(() => harness!.logs.some((line) => line.event === 'sales_outbox_accepted'), 4_000)
+    expect((await harness.proxy.store.findByTxHash(TX_HASH))?.saleReported).toBe(true)
+    expect(harness.proxy.sales!.outboxDepth()).toBe(0)
+    expect(outboxLines(dir)).toHaveLength(0)
+    await accepting.close()
+  })
+
+  it('removes an accepted record from the outbox, and a restarted proxy does not send it again (#5032)', async () => {
+    haven = await startHaven()
+    const dir = salesDir()
+    harness = await startHarness({ dir, env: salesEnv(haven, dir), overrides: FAST })
+
+    const answer = await paidCall(harness)
+    expect(answer.status).toBe(200)
+    await until(() => harness!.logs.some((line) => line.event === 'sales_report_accepted'), 4_000)
+    await harness.proxy.sales!.idle()
+    expect(outboxLines(dir)).toHaveLength(0)
+
+    await harness.restart({ ...FAST, salesOutboxReplayMs: 40 })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(haven.seen).toHaveLength(1)
+    expect(harness.proxy.sales!.outboxDepth()).toBe(0)
+  })
+
+  it('removes a record Haven refuses for good, and a restarted proxy does not send it again (#5032)', async () => {
+    haven = await startHaven({ status: 422, body: { error_code: 'no_payment_to_account' } })
+    const dir = salesDir()
+    harness = await startHarness({ dir, env: salesEnv(haven, dir), overrides: FAST })
+
+    const answer = await paidCall(harness)
+    expect(answer.status).toBe(200)
+    await until(() => harness!.logs.some((line) => line.event === 'sales_report_refused'), 4_000)
+    await harness.proxy.sales!.idle()
+    expect(outboxLines(dir)).toHaveLength(0)
+
+    const second = await startHaven()
+    await harness.restart({ ...FAST, salesOutboxReplayMs: 40 }, { HAVEN_SALES_URL: second.url })
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    expect(second.seen).toHaveLength(0)
+    await second.close()
+  })
+
+  it('counts only records past their first delivery round in /healthz outbox_depth (#5032)', async () => {
+    haven = await startHaven({ status: 503, body: { error_code: 'chain_unavailable' } })
+    const dir = salesDir()
+    harness = await startHarness({
+      dir,
+      env: salesEnv(haven, dir),
+      overrides: { ...FAST, salesRetryDelaysMs: [300, 300, 300], salesOutboxReplayMs: 10_000 },
+    })
+
+    const answer = await paidCall(harness)
+    expect(answer.status).toBe(200)
+    // The record is in the file from the first moment...
+    await until(() => outboxLines(dir).length === 1, 4_000)
+    // ...but it is in its first delivery round, so it is not waiting for a replay.
+    const during = (await (await fetch(`${harness.base}/healthz`)).json()) as { sales?: { outbox_depth?: number } }
+    expect(during.sales?.outbox_depth).toBe(0)
+
+    // The first round ended without an answer: now it waits.
+    await until(() => harness!.logs.some((line) => line.event === 'sales_outbox_queued'), 4_000)
+    const after = (await (await fetch(`${harness.base}/healthz`)).json()) as { sales?: { outbox_depth?: number } }
+    expect(after.sales?.outbox_depth).toBe(1)
   })
 })

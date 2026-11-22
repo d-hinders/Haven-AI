@@ -9,6 +9,7 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import NetworkPill from '@/components/NetworkPill'
 import type { UseMerchantCatalogueResult } from '@/hooks/useMerchantCatalogue'
 import { timeAgo } from '@/lib/format'
+import { isTestnetChain } from '@/lib/marketplace'
 import { catalogueView, type SalesCatalogue } from '@/lib/sales'
 import { SellerSetupPrompt } from './SellerSetupPrompt'
 import { SalesKeysSection } from './SalesKeysSection'
@@ -61,7 +62,11 @@ function productListHelper(catalogue: SalesCatalogue | null): React.ReactNode {
  *   from Settings → Business → Sales by #4983 (owner decision 2026-11-19:
  *   "Yes move Stripe deposit address"). It is one more part of this card, so
  *   it takes the card's padding and the parts' heading scale rather than its
- *   old `Card.Section divided` wrapper.
+ *   old `Card.Section divided` wrapper. #5028: the registry is dev and Stripe
+ *   sandbox only, so the part renders only on a testnet Sales account — the
+ *   pilot line above it already says the merchant kit runs on Base Sepolia
+ *   only, so nothing is added in its place. The ownership-proof slice removes
+ *   the gate.
  */
 export function SalesSetupTab({
   account,
@@ -170,7 +175,9 @@ export function SalesSetupTab({
           <SellerSetupPrompt accountAddress={account.account_address} chainId={account.chain_id} />
         </Card.Section>
 
-        <StripeDepositAddressesSection chainId={account.chain_id} />
+        {/* #5028: the registry is dev and Stripe sandbox only, so the part is
+            absent on a Sales account whose chain is not a testnet. */}
+        {isTestnetChain(account.chain_id) ? <StripeDepositAddressesSection chainId={account.chain_id} /> : null}
       </Card>
     </div>
   )

@@ -87,6 +87,7 @@ const REASON_WORDS: Record<CheckoutDetailsRefusalReason, string> = {
   unreadable: 'Haven could not read the owner’s checkout details right now; try again',
   backend_unsupported: 'this Haven backend does not support checkout details yet',
   merchant_mismatch: 'the merchant URL given is not the one this payment was quoted for, so the owner\u2019s details are not sent to it',
+  challenge_unreadable: 'Haven could not read the merchant\u2019s stored payment challenge, so it cannot tell whether a required checkout detail was asked for',
 }
 
 /** The refusal, as the error the SDK throws. Field names only, never values. */
@@ -137,6 +138,29 @@ export function checkoutDetailsRefusalError(
     reason,
     `The merchant requires the ${names}, which this agent cannot share: ${REASON_WORDS[reason]}. ${outcome}`,
     stateUnknown ? 'state_unknown' : funded ? 'funded' : unsent ? 'unsent' : 'before_payment',
+    paymentId,
+  )
+}
+
+/**
+ * #5030: the stored merchant challenge could not be read, and the intent
+ * recorded that it asked for a required checkout detail. The submit cannot
+ * tell which fields the challenge named, so it fails closed before spending
+ * (owner decision 2026-11-22, option b). The message never names a field: the
+ * read gave none.
+ */
+export function checkoutDetailsChallengeUnreadableError(
+  requiredFields: string[],
+  { intentExists = false, paymentId }: { intentExists?: boolean; paymentId?: string } = {},
+): CheckoutDetailsUnavailableError {
+  const outcome = intentExists
+    ? 'Nothing was funded, submitted or sent for this payment.'
+    : 'No payment was created and no funds moved.'
+  return new CheckoutDetailsUnavailableError(
+    requiredFields,
+    'challenge_unreadable',
+    `Haven could not read this payment's stored merchant challenge, and the challenge asked for a required checkout detail. ${outcome} Retry haven_submit once the read succeeds.`,
+    'before_payment',
     paymentId,
   )
 }

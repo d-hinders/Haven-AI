@@ -152,7 +152,7 @@ describe('#5031 the local surface answers a checkout-details refusal per stage',
       return new Response('{}', { status: 200 })
     })
     const client = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: HAVEN })
-    const handlers = createToolHandlers(client) as Record<string, (input: unknown) => Promise<Record<string, unknown>>>
+    const handlers = createToolHandlers(client) as unknown as Record<string, (input: unknown) => Promise<Record<string, unknown>>>
     const out = await handlers.haven_resume_x402_payment({
       resume_state: {
         rail: 'x402',

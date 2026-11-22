@@ -280,6 +280,10 @@ describe('checkout details on the paid request (#4872)', () => {
       const err = await pay('resumeX402Payment', paymentRequired).catch((e: unknown) => e)
       expect(err).toBeInstanceOf(CheckoutDetailsUnavailableError)
       expect((err as Error).message).toContain('funded but was not delivered')
+      // #5031: the refusal names the payment it is about and its stage, so a
+      // surface can tell the agent to resume THIS payment, not start a new one.
+      expect((err as CheckoutDetailsUnavailableError).paymentId).toBe('pay_4872')
+      expect((err as CheckoutDetailsUnavailableError).stage).toBe('funded')
       // Refused BEFORE the re-sign: the authorization stays unused.
       expect(resign).not.toHaveBeenCalled()
       expect(merchantCallsOf(calls)).toEqual([])

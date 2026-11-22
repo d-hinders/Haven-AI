@@ -7,8 +7,8 @@
  * field NAMES, the reason, `stop_and_tell_user` and why no tool follows —
  * never the generic `API_ERROR`, and never a value.
  */
-import { describe, expect, it } from 'vitest'
-import { checkoutDetailsRefusalError } from '@haven_ai/sdk'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { CHECKOUT_DETAILS_EXTENSION, HavenClient, checkoutDetailsRefusalError } from '@haven_ai/sdk'
 import { createToolHandlers } from './tools.js'
 
 function handlersThrowing(method: 'fetch' | 'payX402Quote' | 'resumeX402Payment', thrown: unknown) {
@@ -77,5 +77,111 @@ describe('#4872 the local tools answer a checkout-details refusal as a typed ref
       next_action: 'stop_and_tell_user',
     })
     expect(String(out.message)).toContain('funded but was not delivered')
+  })
+})
+
+/**
+ * #5031: the local answer per stage, driven through the REAL SDK resume path —
+ * a `HavenClient` over a stubbed wire, never a hand-built error — so the
+ * payment id and the stage are what the SDK actually puts on the refusal.
+ */
+describe('#5031 the local surface answers a checkout-details refusal per stage', () => {
+  const HAVEN = 'https://haven.example'
+  const MERCHANT = 'https://api.merchant.example/paid'
+  const AGENT = 'agent_5031'
+  const paymentRequired = {
+    x402Version: 2,
+    error: 'Payment required',
+    resource: { url: MERCHANT, description: 'paid resource', mimeType: 'application/json' },
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'eip155:8453',
+        asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        amount: '20000',
+        payTo: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
+        maxTimeoutSeconds: 300,
+        extra: { name: 'USD Coin', version: '2' },
+      },
+    ],
+    extensions: { [CHECKOUT_DETAILS_EXTENSION]: { info: { version: 1, fields: { receipt_email: { required: true } } } } },
+  }
+  const routes: Record<string, unknown> = {
+    '/machine-payments/pay_5031/status': {
+      payment_id: 'pay_5031',
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: 'confirmed',
+      phase: 'funding_sent',
+      next_action: 'retry_original_x402_request',
+      amount: '0.02',
+      token: 'USDC',
+      resource_url: MERCHANT,
+      merchant_address: '0x15179876c595922999C2d5DC7c23Cc7711fE799a',
+      tx_hash: `0x${'ab'.repeat(32)}`,
+      expires_at: 'later',
+      chain_id: 8453,
+      message: 'ready to retry',
+    },
+    '/machine-payments/agent': {
+      id: AGENT,
+      name: 'checkout agent',
+      status: 'active',
+      account_address: '0x135a9215604711AC70d970e12Caa812c53537EF4',
+      delegate_address: '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1',
+      chain_id: 8453,
+      execution_rail: 'delegation',
+    },
+    [`/agents/${AGENT}/checkout-details`]: { available: false, reason: 'disabled' },
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('haven_resume_x402_payment on a funded payment: phase, the resume-this-payment step, and its payment_id', async () => {
+    const merchantCalls: string[] = []
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.startsWith(HAVEN)) {
+        const path = url.slice(HAVEN.length)
+        if (path in routes) return new Response(JSON.stringify(routes[path]), { status: 200 })
+        return new Response(JSON.stringify({ error: 'not found' }), { status: 404 })
+      }
+      merchantCalls.push(url)
+      return new Response('{}', { status: 200 })
+    })
+    const client = new HavenClient({ apiKey: 'sk_agent_test', delegateKey: `0x${'01'.repeat(32)}`, baseUrl: HAVEN })
+    const handlers = createToolHandlers(client) as Record<string, (input: unknown) => Promise<Record<string, unknown>>>
+    const out = await handlers.haven_resume_x402_payment({
+      resume_state: {
+        rail: 'x402',
+        paymentId: 'pay_5031',
+        paymentRequired,
+        accepted: paymentRequired.accepts[0],
+        idempotencyKey: 'q-5031',
+        request: { url: MERCHANT, method: 'GET', headers: {} },
+      },
+    })
+    expect(out).toMatchObject({
+      success: false,
+      code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+      phase: 'funded_but_unsettled',
+      paymentId: 'pay_5031',
+      next_action: 'stop_and_tell_user',
+    })
+    // Not the fixed before-payment reason: it names the resume of THIS payment.
+    expect(String(out.next_tool_omitted_reason)).toContain('haven_resume_x402_payment')
+    expect(String(out.next_tool_omitted_reason)).toContain('do not start a new purchase')
+    expect(String(out.next_tool_omitted_reason)).not.toMatch(/then retry$/)
+    expect(merchantCalls).toEqual([])
+  })
+
+  it('a pay call refused before payment: not_started and the before-payment reason', async () => {
+    const refusal = checkoutDetailsRefusalError(['receipt_email'], 'not_shared')
+    const out = (await handlersThrowing('fetch', refusal).haven_pay_x402({ url: MERCHANT, max_amount_human: '1' })) as Record<string, unknown>
+    expect(out).toMatchObject({ phase: 'not_started', code: 'CHECKOUT_DETAILS_UNAVAILABLE' })
+    expect(String(out.next_tool_omitted_reason)).toMatch(/then retry$/)
+    expect(out.paymentId).toBeUndefined()
   })
 })

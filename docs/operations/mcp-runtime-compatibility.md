@@ -214,8 +214,10 @@ last-verified: "2026-11-12"
 > funded, so that step could lead an agent to buy again. It now adds `phase`
 > (`not_started` before payment, `funded_but_unsettled` on a funded resume —
 > the hosted MCP's words for the same stages) and, on a funded refusal,
-> `paymentId` and a step naming `haven_resume_x402_payment` for that same
-> payment, else `haven_get_payment_status` then `haven_sweep_delegate`. The
+> `paymentId` and a step naming `haven_resume_x402_payment` with the same
+> `resume_state` — not `payment_id` alone, whose stored state carries no
+> checkout-details request — else `haven_get_payment_status` then
+> `haven_sweep_delegate`. The
 > before-payment step is unchanged and still equals the hosted one. The SDK's
 > `resumeX402Payment` now puts its `paymentId` on the refusal it throws.
 >

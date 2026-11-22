@@ -1938,13 +1938,15 @@ const CHECKOUT_DETAILS_OMITTED_REASON =
  * The local surface reaches two stages: `before_payment` (a pay call refused
  * before anything was spent: the fixed reason above, identical to hosted) and
  * `funded` (`haven_resume_x402_payment`, which decides after funding: the
- * payment exists, so a NEW purchase would pay twice). The other two are built
+ * payment exists, so a NEW purchase would pay twice; and only a resume_state
+ * resume carries the merchant's request — a payment_id resume would deliver
+ * without the field). The other two are built
  * only by the hosted surface; they are mapped for exhaustiveness.
  */
 const LOCAL_CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string> = {
   before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
   funded:
-    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_resume_x402_payment again for this same payment (its payment_id or resume state) — do not start a new purchase; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
+    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_resume_x402_payment again with the same resume_state — not payment_id alone, whose stored state carries no checkout-details request, so the merchant would get no answer — and do not start a new purchase; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
   unsent:
     'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase with the pay tool you used; do not resume this payment',
   state_unknown:

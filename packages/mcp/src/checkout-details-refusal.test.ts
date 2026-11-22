@@ -173,8 +173,23 @@ describe('#5031 the local surface answers a checkout-details refusal per stage',
     // Not the fixed before-payment reason: it names the resume of THIS payment.
     expect(String(out.next_tool_omitted_reason)).toContain('haven_resume_x402_payment')
     expect(String(out.next_tool_omitted_reason)).toContain('do not start a new purchase')
+    // Only a resume_state resume carries the merchant's request: a payment_id
+    // resume would deliver without the field (the tool's own description says
+    // so), so the step names the resume_state and warns off payment_id alone.
+    expect(String(out.next_tool_omitted_reason)).toContain('with the same resume_state')
+    expect(String(out.next_tool_omitted_reason)).toContain('not payment_id alone')
     expect(String(out.next_tool_omitted_reason)).not.toMatch(/then retry$/)
     expect(merchantCalls).toEqual([])
+  })
+
+  it('a funded refusal from an older SDK with no payment id still answers the funded phase and step', async () => {
+    const refusal = checkoutDetailsRefusalError(['receipt_email'], 'not_shared', { funded: true })
+    const out = (await handlersThrowing('resumeX402Payment', refusal).haven_resume_x402_payment({
+      resume_state: { rail: 'x402', paymentId: 'pay_old', paymentRequired, accepted: paymentRequired.accepts[0], idempotencyKey: 'q-old', request: { url: MERCHANT, method: 'GET', headers: {} } },
+    })) as Record<string, unknown>
+    expect(out).toMatchObject({ phase: 'funded_but_unsettled', code: 'CHECKOUT_DETAILS_UNAVAILABLE' })
+    expect(out.paymentId).toBeUndefined()
+    expect(String(out.next_tool_omitted_reason)).toContain('with the same resume_state')
   })
 
   it('a pay call refused before payment: not_started and the before-payment reason', async () => {

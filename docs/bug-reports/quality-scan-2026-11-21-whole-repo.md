@@ -15,6 +15,7 @@ covers:
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/sweep.ts
   - packages/backend/src/infra/relayer.ts
+  - packages/backend/src/infra/outbound-queue.ts
   - packages/sdk/src/haven-api-transport.ts
   - packages/backend/src/modules/accounting/fortnox-connector.ts
   - packages/backend/src/modules/transactions/search.ts
@@ -143,7 +144,7 @@ the bar's criteria 1 and 3.
   pending), and at startup queue every settled row with `sale_reported = 0`
   that is not already in the outbox.
 
-### C3 — a stranded-delegate sweep whose receipt wait times out is booked `failed`, with no hash anywhere, and cannot be replayed
+### C3 — a stranded-delegate sweep whose receipt wait times out is booked `failed`, with no hash on the sweep row or in the answer, and cannot be replayed
 
 - **Where:** `packages/backend/src/rails/sweep.ts:159` waits
   `provider.waitForTransaction(tx.hash, 1, 90_000)` after broadcast. The
@@ -159,7 +160,11 @@ the bar's criteria 1 and 3.
   calls `markSweepFailed` with no `tx_hash`, and answers 502 "Sweep relay
   failed" (`packages/backend/src/modules/mpp/sweep.ts:373-387`).
 - **What follows:** the transaction is broadcast and may land, but the sweep
-  row is `failed` with no hash, and the answer carries none either; the
+  row is `failed` with no hash, and the answer carries none either; only the
+  outbound record keeps it (the rail opens one before the broadcast,
+  `rails/sweep.ts:126`, and `submitRecorded` stamps the signed hash on it
+  before sending, `infra/outbound-queue.ts:230-249`), which is what lets the
+  bump worker replace a stuck sweep; the
   sweep-side resolver of the stranded-funds event runs only on the success path
   (`sweep.ts:392`); a retry with the same nonce answers 409 "Sweep is failed,
   expected prepared" (`sweep.ts:250-254`); and a landed sweep shows in
@@ -456,17 +461,22 @@ count. Changes requested: 0 blocking, 3 should-fix, 6 nits, all applied:
   recipe named as the worker's, not a manifest row; the `inFlight` map's
   declaration line added.
 
-After the third pass, the spec review of the issue filed from C3 (#5035) found
-C3's mechanism wrong: ethers rejects the receipt wait on timeout instead of
-returning null, so the rail's timeout branch the report described never runs,
-and the reproduction had fed in that branch's message. The defect stands, and
-is worse (no hash anywhere). The captain ran the reviewer's probe
-(`REJECTED code= TIMEOUT … hashInMsg= false`) and rewrote C3; the earlier
-"the hash reaches the agent as free text" correction is withdrawn with it.
-
 Second pass at `24f72b7ce` (the diff of the first pass's corrections only):
 0 blocking, 1 should-fix — the rewritten C1 sentence said the design document
 does not acknowledge the unreadable-challenge case; it does, by sending it to
 its § 5 unsupported-path rule — and 2 nits (the ledger's C2 line; counting the
 issue search by number, since it returns two issues twice). All applied; the C1
 sentence now quotes the document's own lines.
+
+Third pass at `6763e664e`: 0 findings, `haven-reviewer: passed`.
+
+After the third pass, the spec review of the issue filed from C3 (#5035)
+found C3's mechanism wrong: ethers rejects the receipt wait on timeout instead
+of returning null, so the rail's timeout branch the report described never
+runs, and the reproduction had fed in that branch's message. The defect
+stands. The captain re-ran the #5035 spec review's probe (`REJECTED code=
+TIMEOUT … hashInMsg= false`) and rewrote C3; the earlier "the hash reaches the
+agent as free text" correction is withdrawn with it. A fourth pass on that
+rewrite found one more wrong phrase — "no hash anywhere": the outbound record
+keeps the hash — and two nits (this paragraph's order, and whose probe it
+was); applied.

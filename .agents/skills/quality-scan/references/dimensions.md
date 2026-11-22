@@ -598,8 +598,19 @@ the signer's own refusals are **outside** this sample.
 (`POST /payments`, `POST /x402`, `POST /x402/authorize`) are a subset; the 5xx
 section adds `POST /payments/:id/sign`, which the rule already covers.
 
+**What "reaches the generic branch" means (#5040).** A typed code is counted
+when the mapper answers it with `API_ERROR` **and** one of the generic branch's
+reasons, or no reason at all. The instrument reads those reasons from the
+mapper itself (`genericReasonsOf`): it feeds `normalizeError` untyped answers —
+a 4xx, a 429, a 5xx, a non-answer to a read and to a write — which can only
+reach the generic branch. `API_ERROR` alone is not the test: a typed stop can live inside
+it with its own reason (`relayer_budget_exceeded`, #4844), and counting it
+reported three answered rows as unmarked on 2026-11-21 (204 typed rows with
+the code-only test, 201 without, on that run's recording). The seeded control
+uses the same predicate.
+
 **Clean:** no unmarked typed code on an agent payment route reaches
-`API_ERROR`; every 5xx on those routes either answers a typed non-transient
+the generic branch; every 5xx on those routes either answers a typed non-transient
 step or is marked `deliberately-transient` in
 `scripts/ci/refusal-census-allowlist.json`; no non-answer (timeout,
 unreachable, non-JSON) reads as a refusal. Report the marked and unmarked rows

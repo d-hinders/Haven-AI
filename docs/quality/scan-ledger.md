@@ -3360,8 +3360,8 @@ with four mechanisms and no recorded cost yet.
   and the local MCP drops the checkout-details stage and payment id
   (`mcp/src/tools.ts:1919-1920`, `:1992-2003`).
 - C2 — the merchant kit loses an in-flight sale report when the proxy stops
-  (`paywall-proxy/src/main.ts:172-182`; a report lives in memory only,
-  `src/sales.ts:167`).
+  (`paywall-proxy/src/main.ts:172-182`; a report lives in memory only, in the
+  `inFlight` map declared at `src/sales.ts:124` and filled at `:167-170`).
 - C3 — a stranded-delegate sweep whose 90-second receipt wait times out is
   booked `failed`, the hash only as free text in a 502 that says "failed" and
   never on the row, and cannot be replayed
@@ -3393,7 +3393,8 @@ run (mutating a file never changes its last-touch commit); block 8's
 scope that a dev-only feature's own spec requires and the code does not
 enforce), a promotion blocker on epic #4886.
 
-**Escape analysis** (104 issues created 2026-11-12 .. 2026-11-21T23:10Z: 10
+**Escape analysis** (104 distinct issues created 2026-11-12 .. 2026-11-21T23:10Z — the search
+returns two issues twice, so count by number: 10
 epics; 14 carry `Found by: quality-scan`; 2 standing reports; 1 external
 solicitation; 13 defects not found by a scan, all classified; 64 slices and
 features read by title only): CI and dev tooling 4 (workflow
@@ -3467,7 +3468,9 @@ the window, all 21 manifest rows, every cited line, four reproductions and 22
 attributions: changes requested — 0 blocking, 3 should-fix (C3's "never learns
 the hash" was wrong, the hash arrives as free text in the 502; "GitHub was
 read-only" contradicted #5028; the escape parts summed to 103), 6 nits, all
-applied. The report's § 5 lists them.
+applied. A second pass on those corrections found one sentence they had made
+wrong (what the checkout-details design document says about the case) and two
+nits; applied. The report's § 5 lists both passes.
 
 **Disposition:** the owner asked, with the scan request, for the findings to be
 filed; the filing and its issue numbers are recorded in a separate ledger pull

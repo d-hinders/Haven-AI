@@ -90,10 +90,12 @@ the bar's criteria 1 and 3.
   states the fail-open as intended ("When the stored challenge cannot be read,
   the submit proceeds as today"), justified by the pay tool's earlier check. The
   pay tool checked availability only, so the justification does not cover the
-  submit. The document already accepts one funded-but-undelivered route (a
-  relay still `submitted`, with verify-then-sweep as the recourse); the
-  unreadable-challenge case is not acknowledged there, and it is one the tool
-  could refuse before money moves.
+  submit. The document sends this case to its § 5 rule for an unsupported
+  path (lines 446-448, 560-566: paid as today, the merchant expected to serve
+  the request without the field, verify-then-sweep as the recourse). The
+  justification it gives ("the pay tool has already refused any required field
+  the agent could not share") covers only what the pay tool could see, and the
+  submit could refuse this case before money moves.
 - **Verified at scan:** `node r1-submit-failopen.mjs ok|fail|availfail` and
   `node r1b-erc7710.mjs ok|fail` against the built dist with a fake client
   (§ 4). Decisive (`fail`): calls
@@ -353,7 +355,8 @@ figures into `docs/quality/scan-baselines.json`.
   cluster on the merchant kit (#4924, #4972, #5013, #5016 — the last one
   became #5022), MCP and signer (#4844, #4837, #4842, #4834) and the Sales
   dashboard (#5002, #4999).
-- **escape analysis** → examined → 104 issues created 2026-11-12 .. counted at
+- **escape analysis** → examined → 104 distinct issues (the search returns two
+  twice, so count by number) created 2026-11-12 .. counted at
   2026-11-21T23:10Z (#5028, created at 23:32Z, is the 105th): 10
   epics, 14 carrying `Found by: quality-scan` (#4817–#4830, the previous run's
   filings), 2 standing reports, 1 external solicitation, **13 defects not
@@ -432,3 +435,10 @@ count. Changes requested: 0 blocking, 3 should-fix, 6 nits, all applied:
   line names the exit-branch reading as not done; the fat-controller
   recipe named as the worker's, not a manifest row; the `inFlight` map's
   declaration line added.
+
+Second pass at `24f72b7ce` (the diff of the first pass's corrections only):
+0 blocking, 1 should-fix — the rewritten C1 sentence said the design document
+does not acknowledge the unreadable-challenge case; it does, by sending it to
+its § 5 unsupported-path rule — and 2 nits (the ledger's C2 line; counting the
+issue search by number, since it returns two issues twice). All applied; the C1
+sentence now quotes the document's own lines.

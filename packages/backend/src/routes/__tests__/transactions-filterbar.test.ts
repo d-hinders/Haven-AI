@@ -197,7 +197,9 @@ function x402AgentPayment(now: number) {
       amount_raw: '1000000',
       amount_human: '1',
       x402_merchant_address: null,
-      // #5037: a resource host search must find (naming step 5).
+      // #5037: a resource URL, so search by its host is exercised. R5 is named
+      // by its receipt name (step 4), which wins; the host stays searchable
+      // because search matches every naming source, not only the winner.
       x402_resource_url: 'https://api.weatherly.example/v1/forecast',
       payment_proof_status: 'payment_confirmed',
       payment_reconciliation_event_type: null,

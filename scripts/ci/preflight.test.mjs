@@ -1786,26 +1786,142 @@ describe('the silence watchdog (#4276)', () => {
     }
   })
 
-  test('a gate that writes at least once per threshold is never stalled, past several thresholds', { timeout: 20_000 }, async () => {
-    // The threshold has to clear the child's START-UP latency, not only the
-    // write interval: `lastOutputAt` starts at spawn, so a gate killed before
-    // its first `tick` was read reports `output: ""` and `silentFor: 103`
-    // against a 100 ms threshold — the measured failure (#4767). Start-up
-    // measured over 300 ms under load (#4398), so 1000 ms leaves ~3x headroom,
-    // and the write interval is a 10x margin below the threshold rather than
-    // the 20 ms the old 80/100 pair left. 30 ticks at 100 ms is 3 s: three
-    // thresholds crossed, so the reset-on-output path is exercised repeatedly
-    // rather than once, and breaking it still reddens this test.
-    const TICKS = 30
-    const command = `i=0; while [ $i -lt ${TICKS} ]; do echo tick; sleep 0.1; i=$((i + 1)); done`
-    const result = await runGate({ command, jobs: ['fixture'] }, { silenceMs: 1000, graceMs: 100 })
-    assert.equal(
-      result.stalled,
-      false,
-      `stalled: ${JSON.stringify({ ...result, output: result.output.slice(0, 200) })}`,
+  /**
+   * A gate whose output, clock and watchdog polls are all driven by the test
+   * (#5055). The old version of this test ran a real `sh` loop with a forked
+   * `sleep 0.1` per tick against a real 1000 ms threshold, and went red under
+   * load: a slow fork, or a stalled harness event loop, opened a gap of more
+   * than the threshold between two reads (durations 1.1 s, 13 s and 17 s
+   * observed on 2026-11-22; #4767 had already widened the margin once). Here,
+   * nothing that decides the verdict reads the wall clock:
+   *
+   * - the gate prints tick k only once the test creates `go-<k>`, and stays
+   *   alive until `done` exists, so every poll lands on a LIVE gate (the poll
+   *   returns early once `exited` is set);
+   * - `now` is a frozen counter the test advances, and it records each read.
+   *   The poll is the only read the test triggers itself, so any other read
+   *   is the output handler's reset (the init read happens at spawn);
+   * - `schedulePoll` hands the watchdog's poll to the test, which calls it.
+   *
+   * The kill grace stays a real timer. The gate carries a self-cap (exit 9
+   * after about 200 loop turns) so a watchdog that never fires fails red
+   * instead of hanging the file.
+   */
+  const drivenGate = (dir, silenceMs) => {
+    const script = path.join(dir, 'driven.sh')
+    const d = JSON.stringify(dir)
+    writeFileSync(
+      script,
+      [
+        `k=0; n=0`,
+        `while [ ! -e ${d}/done ]; do`,
+        `  if [ -e ${d}/go-$k ]; then echo "tick $k"; k=$((k + 1)); fi`,
+        `  n=$((n + 1)); [ "$n" -gt 200 ] && exit 9 # self-cap: fails red, never hangs`,
+        `  sleep 0.05`,
+        `done`,
+        ``,
+      ].join('\n'),
     )
-    assert.equal(result.ok, true, result.output)
-    assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'all output captured')
+    let t = 0
+    let reads = 0
+    let poll = null
+    const now = () => {
+      reads += 1
+      return t
+    }
+    const schedulePoll = (fn) => {
+      poll = fn
+      return () => {
+        poll = null
+      }
+    }
+    const pending = runGate({ command: `sh ${JSON.stringify(script)}`, jobs: ['fixture'] }, { silenceMs, graceMs: 100, now, schedulePoll })
+    let settled = null
+    pending.then((result) => {
+      settled = result
+    })
+    return {
+      pending,
+      advance: (ms) => {
+        t += ms
+      },
+      /** Run one watchdog poll; true when it evaluated (read the clock) rather than returning early. */
+      pollOnce: () => {
+        assert.equal(typeof poll, 'function', 'the watchdog poll is no longer scheduled: the gate already settled')
+        const before = reads
+        poll()
+        return reads === before + 1
+      },
+      /** Release tick k, then wait until the output handler has read the clock for it. */
+      tick: async (k) => {
+        const before = reads
+        writeFileSync(path.join(dir, `go-${k}`), '')
+        const deadline = Date.now() + 15_000
+        while (reads === before) {
+          // A gate killed by the poll before this tick settles within the
+          // grace: fail on what it reported, not on the wait.
+          if (settled) {
+            assert.fail(`the gate settled before tick ${k}: ${JSON.stringify({ stalled: settled.stalled, silentFor: settled.silentFor, signal: settled.signal, output: settled.output })}`)
+          }
+          assert.ok(Date.now() < deadline, `tick ${k} was never read: the output handler did not read the clock (the reset is gone?)`)
+          await sleep(10)
+        }
+      },
+      release: () => writeFileSync(path.join(dir, 'done'), ''),
+    }
+  }
+
+  // Five gaps of EXACTLY the threshold: the watchdog's `silentFor <= silence`
+  // boundary is pinned, and five thresholds are crossed in all, so the
+  // reset-on-output path is exercised repeatedly rather than once.
+  const SILENCE = 1000
+  const TICKS = 4
+
+  test('a gate that writes at least once per threshold is never stalled, past several thresholds', { timeout: 30_000 }, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-driven-'))
+    const gate = drivenGate(dir, SILENCE)
+    try {
+      for (let k = 0; k < TICKS; k++) {
+        gate.advance(SILENCE)
+        assert.ok(gate.pollOnce(), `poll ${k} returned early: the gate was killed at a gap of exactly the threshold`)
+        await gate.tick(k)
+      }
+      gate.advance(SILENCE)
+      assert.ok(gate.pollOnce(), 'the last poll returned early: the gate was killed at a gap of exactly the threshold')
+      gate.release()
+      const result = await gate.pending
+      assert.equal(result.stalled, false, `stalled: ${JSON.stringify({ ...result, output: result.output.slice(0, 200) })}`)
+      assert.equal(result.ok, true, result.output)
+      assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'all output captured')
+    } finally {
+      gate.release()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('the same gate, gone silent past the threshold after its resets, is stalled', { timeout: 30_000 }, async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'preflight-driven-'))
+    const gate = drivenGate(dir, SILENCE)
+    try {
+      for (let k = 0; k < TICKS; k++) {
+        gate.advance(SILENCE)
+        assert.ok(gate.pollOnce(), `poll ${k} returned early`)
+        await gate.tick(k)
+      }
+      gate.advance(SILENCE + 1)
+      assert.ok(gate.pollOnce(), 'the stalling poll returned early')
+      const result = await gate.pending
+      assert.equal(result.stalled, true, JSON.stringify({ ...result, output: result.output.slice(0, 200) }))
+      assert.equal(result.silentFor, SILENCE + 1, 'silence is measured from the LAST output, not from spawn')
+      assert.equal(result.ok, false)
+      assert.equal(result.status, null, 'killed, not exited')
+      // Hard-coded by the stall settle: recorded, not a guard.
+      assert.equal(result.signal, 'SIGTERM')
+      assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'output before the stall is kept')
+    } finally {
+      gate.release()
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('SIGINT to preflight kills the running gate process group: the grandchild is dead', { timeout: 30_000 }, async () => {

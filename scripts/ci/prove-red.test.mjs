@@ -44,6 +44,7 @@ import { checkPackages } from '../check-dist-freshness.mjs'
 import {
   applyEdits,
   baselineProblem,
+  censusOffset,
   censusTable,
   classify,
   closeoutTable,
@@ -57,6 +58,7 @@ import {
   rebuildPackage,
   REVIEW_FAMILIES,
   reviewCellsProblem,
+  rotateCensus,
   selectCensus,
   validateCells,
   VITEST_ASSERTION_SHAPE,
@@ -417,6 +419,45 @@ describe('census selection', () => {
     assert.equal(parseCandidates(CANDIDATES).errors.length, 0)
     assert.match(parseCandidates('a000007 t7.test.mjs').errors.join(), /no "candidate guard files: N" line/)
     assert.match(parseCandidates('a000007 t7.test.mjs\ncandidate guard files: 2').errors.join(), /declares 2 .* lists 1/)
+  })
+  test('the sample start rotates by the scan SHA: one SHA one five, two SHAs two fives', () => {
+    const entries = Array.from({ length: 12 }, (_, i) => ({ sha: `a00000${i}`, file: `t${i}.test.mjs` }))
+    const order = entries.map((e) => e.file)
+    const five = (sha) => rotateCensus(entries, sha).slice(0, 5).map((e) => e.file)
+    // deterministic for one SHA
+    assert.deepEqual(five('8486093df'), five('8486093df'))
+    // two different scan SHAs over the same candidate list select different files
+    assert.notDeepEqual(five('8486093df'), five('9871885a9'))
+    // five consecutive files in the census order, wrapping at the end
+    for (const sha of ['8486093df', '9871885a9', '682c5fc3e', '0000000', 'fffffff']) {
+      const sel = five(sha)
+      const k = order.indexOf(sel[0])
+      assert.deepEqual(sel, Array.from({ length: 5 }, (_, i) => order[(k + i) % order.length]))
+    }
+    // over many runs every candidate is reached
+    const seen = new Set()
+    for (let i = 0; i < 200; i += 1) for (const f of five(i.toString(16).padStart(7, '0'))) seen.add(f)
+    assert.deepEqual([...seen].sort(), [...order].sort())
+  })
+  test('the offset is the SHA leading hex digits modulo the count; a non-hex SHA is refused', () => {
+    assert.equal(censusOffset('8486093df', 292), Number(BigInt('0x8486093df') % 292n))
+    assert.equal(censusOffset('0x8486093df', 292), censusOffset('8486093df', 292))
+    assert.equal(censusOffset('8486093df', 0), 0)
+    assert.throws(() => censusOffset('not-a-sha', 5), /not a 7-40 digit hex SHA/)
+    assert.throws(() => censusOffset('abc', 5), /not a 7-40 digit hex SHA/)
+    assert.throws(() => censusOffset('8486093df', -1), /not a non-negative integer/)
+  })
+  test('the rotated census output still declares its own count, so parseCandidates accepts it', () => {
+    const entries = Array.from({ length: 9 }, (_, i) => ({ sha: `a00000${i}`, file: `t${i}.test.mjs` }))
+    const rotated = rotateCensus(entries, '8486093df')
+    const text = [...rotated.map((e) => `${e.sha} ${e.file}`), `candidate guard files: ${rotated.length}`].join('\n')
+    const parsed = parseCandidates(text)
+    assert.deepEqual(parsed.errors, [])
+    assert.equal(parsed.declared, entries.length)
+    assert.deepEqual(parsed.entries.map((e) => e.file), rotated.map((e) => e.file))
+    // and the runner takes the first five of that order
+    const s = selectCensus(parsed.entries, [], () => true)
+    assert.deepEqual(s.rows.map((r) => r.file), rotated.slice(0, 5).map((e) => e.file))
   })
   test('five census files, one cell each, in the census order; then two probes; the rest out of budget', () => {
     const { entries } = parseCandidates(CANDIDATES)

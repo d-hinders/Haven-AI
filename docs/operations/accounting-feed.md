@@ -1118,7 +1118,11 @@ Fortnox does not say which; a bare 403 counts as scope, a 403 with another code
 non-ASCII in Comments/Name (middle dots, `://`, `…`) — the connector sanitises;
 a new occurrence is a new field that slipped through. Since #4532 the
 `Comments` field also carries the transaction description, whose route
-separator `/` is folded to `-` for exactly this reason. Rate limit: 25 requests /
+separator `/` is folded to `-` for exactly this reason. Since #5036 the
+`Resource` host is folded through the same sanitiser: a non-default port, an
+IPv6 literal's brackets and an underscore in a host name are outside the set,
+so `merchant.example.com:8443` reads `merchant.example.com 8443` and
+`[2001:db8::1]` reads `2001 db8 1`. Rate limit: 25 requests /
 5 s per client-id + tenant, HTTP 429 with no `Retry-After`.
 
 **What the accountant sees.** *Meny → Leverantörsfakturor*: an unbooked

@@ -14,6 +14,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { makeError } from 'ethers'
+import { readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 const TX_HASH = '0x' + 'ba'.repeat(32)
 const trace: string[] = []
@@ -211,5 +214,23 @@ describe('relaySweepAuthorization — #5035 outcome-unknown', () => {
     expect(err).toBeInstanceOf(SweepOutcomeUnknownError)
     expect((err as InstanceType<typeof SweepOutcomeUnknownError>).txHash).toBe(TX_HASH)
     expect(failedSpy).not.toHaveBeenCalled()
+  })
+
+  // #5035 acceptance criterion 5: the synchronous wait must end BEFORE the
+  // hosted client gives up, or the agent sees a transport timeout and never
+  // learns the hash. The SDK transport's default request timeout is the budget
+  // this wait has to fit inside; it is module-private, so the relationship is
+  // pinned against the source constant. Raising the wait back past the client
+  // budget (the pre-#5035 90 s) goes red here.
+  it('the synchronous wait fits inside the SDK transport default request timeout', () => {
+    const sdkSource = readFileSync(
+      join(dirname(fileURLToPath(import.meta.url)), '../../../../sdk/src/haven-api-transport.ts'),
+      'utf8',
+    )
+    const match = sdkSource.match(/const DEFAULT_REQUEST_TIMEOUT = ([\d_]+)/)
+    expect(match).not.toBeNull()
+    const clientBudgetMs = Number(match![1].replace(/_/g, ''))
+    expect(clientBudgetMs).toBeGreaterThan(0)
+    expect(SWEEP_SYNC_CONFIRMATION_TIMEOUT_MS).toBeLessThan(clientBudgetMs)
   })
 })

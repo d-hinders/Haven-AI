@@ -14,6 +14,8 @@ covers:
   - packages/paywall-proxy/src/test-harness.ts
   - packages/backend/src/rails/sweep.ts
   - packages/backend/src/modules/mpp/sweep.ts
+  - packages/backend/src/infra/relayer.ts
+  - packages/sdk/src/haven-api-transport.ts
   - packages/backend/src/modules/accounting/fortnox-connector.ts
   - packages/backend/src/modules/transactions/search.ts
   - packages/mcp-server/src/tools/support/checkout-details.ts

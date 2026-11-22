@@ -174,6 +174,27 @@ describe('the discovery document', () => {
     })
   })
 
+  it('lists every route with BASE_PATH in front of it, and every listed route answers the product’s 402 when called as listed (#5034)', async () => {
+    h = await startHarness({ env: { BASE_PATH: '/api' } })
+    const doc = await document()
+    expect(doc.products.map((product) => product.route)).toEqual([
+      'POST /api/v3/compat/chat/completions',
+      'GET /api/v1/lookup',
+      'GET /api/v1/other',
+    ])
+
+    // Called as listed: the method and the path the document names.
+    for (const product of doc.products) {
+      const [method, path] = (product.route as string).split(' ')
+      const res = await fetch(`${h.base}${path}`, method === 'POST' ? chatRequest() : { method })
+      expect(res.status, product.route as string).toBe(402)
+      expect(((await res.json()) as { error: string }).error, product.route as string).toBe('payment_required')
+    }
+
+    // The products-file spelling is not served: the document names the callable path.
+    expect((await fetch(`${h.base}/v1/lookup`)).status).toBe(404)
+  })
+
   it('carries each product’s price as a decimal USDC string with no trailing zeros (#4990)', async () => {
     h = await startHarness({
       products: [

@@ -211,7 +211,7 @@ product and the field.
 | `version` | Yes | The products-file schema version. `1` is the only version. |
 | `products[].id` | Yes | Stable, unique, lower-case identifier. It is the key the discovery document lists. |
 | `products[].name` | No | Human name. When absent the document omits it; the receipt line and the sale record use the `id`. |
-| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after `BASE_PATH`. This is how a buyer calls the product. |
+| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after `BASE_PATH`. The discovery document lists it with `BASE_PATH` in front, so the listed route is how a buyer calls the product (#5034). |
 | `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. |
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. A JSON number is refused. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product. |
@@ -450,7 +450,7 @@ Optional:
 | `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
 | `UPSTREAM_AUTH_SCHEME` | The scheme before the key. Default `Bearer`; set it empty to send the key bare, for an `x-api-key` style header. |
-| `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. |
+| `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. The discovery document lists each route with it in front. |
 | `PUBLIC_BASE_URL` | The public origin the challenge names. Must be `https` in production. |
 | `CLIENT_IP_HEADER` | The header your own front proxy sets to the client's address, for the per-IP limits. |
 | `PORT`, `HOST` | Listen address. Defaults `8080` and `0.0.0.0`. |
@@ -493,7 +493,8 @@ the deployment's settings, and the kit's own constants (`terms` and `payment`,
 which describe what the handler does for every product and are not products-file
 content). Answering it verifies nothing, settles nothing and makes no
 facilitator call. Changing the products file changes the document when the proxy
-restarts.
+restarts. Each product's `route` is the products-file path with `BASE_PATH` in
+front, so it is the path a buyer calls (#5034).
 
 | Field | Meaning |
 |---|---|
@@ -511,7 +512,7 @@ restarts.
 | `settlement` | `{"scheme":"exact","facilitator":"coinbase-cdp","methods":["eip3009"]}`. |
 | `terms` | The rules of the sale, true for every product: `one_payment_one_call`, `replay`, `payment_response`, `upstream_answered`, `on_failure_after_settlement`. Each entry is a code the handler answers with plus one sentence. |
 | `payment` | How to pay: `headers` (`PAYMENT-SIGNATURE`, preferred, and `X-PAYMENT`), `preferred_header`, `x402_version: 2`, and `spec`, the x402 v2 specification. |
-| `products[]` | Every product in the products file: `id`, `name`, `route`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
+| `products[]` | Every product in the products file, with one change: `route` carries `BASE_PATH` in front of the path, so it is the absolute path a buyer calls (#5034). The other fields are as the file spells them: `id`, `name`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
 | `products[].price_usdc` | The same price as a decimal USDC string with no trailing zeros: `"0.01"` for `"10000"`, `"0.018"` for `"18000"`, `"0.0001"` for `"100"`. `price` stays the atomic string. |
 | `products[].output_schema` | The shape of the answer, when the products file carries one beside `output_example`. Served only, never enforced. |
 | `updated` | The products file's last change, an RFC 3339 timestamp. |

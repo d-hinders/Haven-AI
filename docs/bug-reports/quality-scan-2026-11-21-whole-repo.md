@@ -45,7 +45,7 @@ reproduction with a positive control, and one measurement worker in its own
 worktree for the numbered blocks. The captain re-ran every reproduction at the
 scan SHA (§ 4). No live call moved money or used a signer; the only live call
 was one unauthenticated read of the dev catalog listing. GitHub was read-only
-during the scan.
+during the scan, except #5028, filed on the owner's instruction (§ 4).
 
 **A departure from the skill, named:** as in the 2026-11-12 run, the report
 carries a list of reproduced one-PR defects beyond the cap of five (§ 2.2).
@@ -90,8 +90,10 @@ the bar's criteria 1 and 3.
   states the fail-open as intended ("When the stored challenge cannot be read,
   the submit proceeds as today"), justified by the pay tool's earlier check. The
   pay tool checked availability only, so the justification does not cover the
-  submit. This contradicts that document's rule that a required field which
-  cannot be shared stops the purchase before money moves.
+  submit. The document already accepts one funded-but-undelivered route (a
+  relay still `submitted`, with verify-then-sweep as the recourse); the
+  unreadable-challenge case is not acknowledged there, and it is one the tool
+  could refuse before money moves.
 - **Verified at scan:** `node r1-submit-failopen.mjs ok|fail|availfail` and
   `node r1b-erc7710.mjs ok|fail` against the built dist with a fake client
   (§ 4). Decisive (`fail`): calls
@@ -120,8 +122,8 @@ the bar's criteria 1 and 3.
 - **Where:** `packages/paywall-proxy/src/main.ts:172-182` — `close()` stops the
   outbox timer and closes the store; it never awaits `sales.idle()` and never
   writes pending reports to the outbox. `src/index.ts:62` runs `close()` on
-  SIGTERM. A report lives only in the in-memory `inFlight` map
-  (`src/sales.ts:167`) until the reporter finishes its resends, and nothing at
+  SIGTERM. A report lives only in the in-memory `inFlight` map (declared at
+  `src/sales.ts:124`, filled at `:167-170`) until the reporter finishes its resends, and nothing at
   startup looks for settled rows with `sale_reported = 0`.
 - **Why it is common, not rare:** Haven answers 425 `transaction_not_visible`
   with `Retry-After: 10` until the transaction has 3 confirmations, so in
@@ -146,14 +148,16 @@ the bar's criteria 1 and 3.
   `submitSweep` catches it, calls `markSweepFailed` with no `tx_hash`, and
   answers 502 "Sweep relay failed".
 - **What follows:** the stranded-funds event is never resolved (its only
-  resolver is on the success path, `sweep.ts:392`); a retry with the same nonce
-  answers 409 "Sweep is failed, expected prepared", so the agent never learns
-  the hash; and a landed sweep shows in transaction history as an unattributed
+  sweep-side resolver is on the success path, `sweep.ts:392`); the hash reaches
+  the agent only as free text inside a 502 that says "failed" (the error's
+  `details`, which the SDK transport folds into its message), it is not written
+  to the row's `tx_hash`, and a retry with the same nonce answers 409 "Sweep is
+  failed, expected prepared" without it; and a landed sweep shows in transaction history as an unattributed
   deposit, because attribution requires `status = 'submitted' AND tx_hash IS
   NOT NULL` (`infra/repositories/transaction-history.ts:302-320`). Funds cannot
   move twice: the balance only covers one transfer.
 - **Verified at scan:** `h2-sweep-timeout-repro.test.ts` on the existing sweep
-  route harness. Decisive: `{"status":502,"body":{"error":"Sweep relay failed",…},"txHashWrittenToSweepRow":false,"strandedEventResolved":false}`,
+  route harness. Decisive: `{"status":502,"body":{"error":"Sweep relay failed","details":"Sweep tx 0xefef…ef not confirmed within 90s"},…,"txHashWrittenToSweepRow":false,"strandedEventResolved":false}`,
   then the retry `{"status":409,…}`. Positive control (relay returns the hash):
   `{"status":200,…,"strandedEventResolved":true}`.
 - **Remedy (one PR):** a typed outcome-unknown error from the rail that carries
@@ -244,8 +248,9 @@ the bar's criteria 1 and 3.
   the same first five files at `8486093df`, `9871885a9` and `682c5fc3e`
   (`auth.test.ts`, `boot.test.ts`, `log.test.ts`, `http.test.ts`,
   `node-version.test.ts`): mutating a file does not change its last-touch
-  commit, so every run takes the same five, and files 6 onward have never
-  been sampled.
+  commit, so every run takes the same five, and files 6 onward have not been
+  sampled by either run of the SHA-pinned census (#4806: the 2026-11-12 entry
+  and this one; earlier runs used another sample).
 - **Block 8's "answered" predicate misses a typed stop inside `API_ERROR`.**
   Three of this run's six unmarked agent-payment-route rows are
   `relayer_budget_exceeded` 429s that the hosted mapper answers with a typed
@@ -293,8 +298,10 @@ figures into `docs/quality/scan-baselines.json`.
   27,870; signer 5,641 / 9,872; connect 12,440 / 15,676; cli 3,199 / 3,611; ops
   3,199 / 2,266; ui 2,849 / 2,402; mcp 3,206 / 6,130; demo-merchant-mcp 6,587
   / 10,041 (4,105 / 4,591). Outside the row: merchant-payments 3,517 / 1,751;
-  paywall-proxy 5,689 / 5,056. Fat controllers → 57 route files, 4 at or above
-  1,000 lines, 237 registrations, largest 1,556 (50 / 4 / 216 / 1,556).
+  paywall-proxy 5,689 / 5,056. Fat controllers (not a manifest row; the
+  measurement worker's recipe, whose control re-derives the previous entry's
+  216 at `9871885a9`) → 57 route files, 4 at or above 1,000 lines, 237
+  registrations, largest 1,556 (50 / 4 / 216 / 1,556).
 - **block 1** (guard falsifiability) → examined → the census command →
   **292** candidate files (253); 5 census mutations → 4 caught, 1 survived
   (M3, `packages/mcp-server/src/log.ts:40` params guard deleted, 6 of 6 green:
@@ -346,10 +353,11 @@ figures into `docs/quality/scan-baselines.json`.
   cluster on the merchant kit (#4924, #4972, #5013, #5016 — the last one
   became #5022), MCP and signer (#4844, #4837, #4842, #4834) and the Sales
   dashboard (#5002, #4999).
-- **escape analysis** → examined → 104 issues created since 2026-11-12: 10
+- **escape analysis** → examined → 104 issues created 2026-11-12 .. counted at
+  2026-11-21T23:10Z (#5028, created at 23:32Z, is the 105th): 10
   epics, 14 carrying `Found by: quality-scan` (#4817–#4830, the previous run's
   filings), 2 standing reports, 1 external solicitation, **13 defects not
-  found by a scan**, 63 epic slices and features read by title only. By class:
+  found by a scan**, 64 epic slices and features read by title only. By class:
   CI and dev tooling 4 (#4947, #4971, #4976, #5022 — workflow archaeology, and
   block 6 for #4976); found in code review 4 (#4955, #4931, #4946, #4932 — no
   block); a sandbox run 1 (#4866 — block 8's class, outside its sample); copy
@@ -408,4 +416,19 @@ production scope of a dev-only feature, and it was filed, worded neutrally, as
 
 ## 5. Independent review
 
-To be completed by the `haven-reviewer` pass on this pull request.
+First pass: `haven-reviewer` at head `2d34221be`, in its own worktree. It re-ran
+the window and manifest figures (all 21 rows, every `sha` at `682c5fc3e`), every
+cited `file:line`, the C1, C2, C3 and C5 reproductions in its own build (each
+matching the quoted output), 22 issue and PR attributions and the residual
+count. Changes requested: 0 blocking, 3 should-fix, 6 nits, all applied:
+- C3 had said the agent never learns the sweep hash; it does, as free text in
+  the 502's `details`, so the text now says how it arrives and what is missing;
+- "GitHub was read-only" contradicted the filing of #5028 during the scan;
+- the escape-analysis parts summed to 103, not 104: the slices and features
+  are 64, not 63, and the count's instant is now stated;
+- nits: C1's wording about the design text narrowed; "the only resolver"
+  made "the only sweep-side resolver" (a settle proof also resolves); the
+  census sentence bounded to the two SHA-pinned runs; the ledger's block 6
+  line names the exit-branch reading as not done; the fat-controller
+  recipe named as the worker's, not a manifest row; the `inFlight` map's
+  declaration line added.

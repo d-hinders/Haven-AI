@@ -3335,7 +3335,8 @@ outside it; the agent surface; the owner dashboard), each required to run a
 reproduction with a positive control, and one measurement worker in its own
 worktree for the numbered blocks. The captain re-ran every reproduction at the
 SHA. No payment, no signer, no production call; one unauthenticated read of the
-dev listing. GitHub was read-only during the scan.
+dev listing. GitHub was read-only during the scan, except #5028, filed on the
+owner's instruction.
 
 **A departure from the skill, named:** as on 2026-11-12, a list of reproduced
 one-PR defects beyond the cap of five. They are prior art for the next run's
@@ -3362,7 +3363,8 @@ with four mechanisms and no recorded cost yet.
   (`paywall-proxy/src/main.ts:172-182`; a report lives in memory only,
   `src/sales.ts:167`).
 - C3 — a stranded-delegate sweep whose 90-second receipt wait times out is
-  booked `failed` with no hash and cannot be replayed
+  booked `failed`, the hash only as free text in a 502 that says "failed" and
+  never on the row, and cannot be replayed
   (`backend/src/rails/sweep.ts:159-171`, `modules/mpp/sweep.ts:373-387`).
 - C4 — the kit's `FakeFacilitator` ignores its arguments
   (`paywall-proxy/src/test-harness.ts:190`, `:197`): settling with a different
@@ -3391,9 +3393,10 @@ run (mutating a file never changes its last-touch commit); block 8's
 scope that a dev-only feature's own spec requires and the code does not
 enforce), a promotion blocker on epic #4886.
 
-**Escape analysis** (104 issues created since 2026-11-12; 14 carry
-`Found by: quality-scan`; 13 defects not found by a scan, all classified; 63
-slices and features read by title only): CI and dev tooling 4 (workflow
+**Escape analysis** (104 issues created 2026-11-12 .. 2026-11-21T23:10Z: 10
+epics; 14 carry `Found by: quality-scan`; 2 standing reports; 1 external
+solicitation; 13 defects not found by a scan, all classified; 64 slices and
+features read by title only): CI and dev tooling 4 (workflow
 archaeology; block 6 for #4976); code review 4 (no block); a sandbox run 1
 (block 8's class, outside its sample); copy and UX from review 4 (no block).
 This run's 12 defects by class: a lost answer read as a known outcome 2, and
@@ -3408,7 +3411,8 @@ dropped by one surface, and an estimate missing one input.
   167,714); frontend 92,170 / 101,799 (83,583 / 93,776); demo-merchant-mcp
   6,587 / 10,041 (4,105 / 4,591); the other ten in the manifest; outside the
   row merchant-payments 3,517 / 1,751, paywall-proxy 5,689 / 5,056. Fat
-  controllers → 57 / 4 / 237 / 1,556 (50 / 4 / 216 / 1,556).
+  controllers (not a manifest row; the worker's recipe, control 216 at
+  `9871885a9`) → 57 / 4 / 237 / 1,556 (50 / 4 / 216 / 1,556).
 - block 1 (guard falsifiability) → examined → the census command → **292**
   candidate files (253); 5 census mutations + 2 probes → **5 caught, 2
   survived** (M3 `mcp-server/src/log.ts:40`, weak test; P2, C4), 0 shadowed, 0
@@ -3425,7 +3429,7 @@ dropped by one surface, and an estimate missing one input.
 - block 6 (nets with holes) → partial → the manifest rows → copy lint 130 / 15
   (121 / 15); money perimeter 34 / 21 (32 / 20; flagged, both new hits
   comments); visual gate 16 / 28 (15 / 27; flagged, `/sales` is shot); docs
-  boundary 45 (45).
+  boundary 45 (45). Exit-branch reading not done (time).
 - block 8 (refusal census) → examined → 623 files, 619 passed, 2 timed out
   under load, 2 skipped, 7,970 tests, 493.6 s; **3,439 rows; 2,802 error rows;
   698 keys; 204 typed rows reach the generic branch** (2,232 / 1,626 / 578 /
@@ -3458,7 +3462,12 @@ zeros, and its controls caught it — the re-run used a wrapper passed through
 `$RG`. The root `npm run build` does not build `merchant-payments`,
 `paywall-proxy` or `demo-merchant-mcp`, so a probe there needs its own build.
 
-**Review:** to be recorded from the `haven-reviewer` pass on this pull request.
+**Review:** `haven-reviewer` at head `2d34221be`, in its own worktree, re-ran
+the window, all 21 manifest rows, every cited line, four reproductions and 22
+attributions: changes requested — 0 blocking, 3 should-fix (C3's "never learns
+the hash" was wrong, the hash arrives as free text in the 502; "GitHub was
+read-only" contradicted #5028; the escape parts summed to 103), 6 nits, all
+applied. The report's § 5 lists them.
 
 **Disposition:** the owner asked, with the scan request, for the findings to be
 filed; the filing and its issue numbers are recorded in a separate ledger pull

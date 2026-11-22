@@ -3479,3 +3479,37 @@ one phrase of the rewrite (the outbound record does keep the hash). The report's
 **Disposition:** the owner asked, with the scan request, for the findings to be
 filed; the filing and its issue numbers are recorded in a separate ledger pull
 request.
+
+**Disposition (owner, 2026-11-21 and 2026-11-22): filed.** The owner asked
+with the scan request for its findings to be filed ("run a quality-scan and
+file what you find"). Every issue went through new-task with an independent
+spec review and a posted verdict; the reviews made 66 body corrections in all (the sum of the verdicts' `Corrections:` lines),
+and one of them (#5035) found C3's mechanism wrong, which was corrected in the
+record before it merged.
+
+- C1 → [#5030](https://github.com/d-hinders/Haven-AI/issues/5030) (the hosted
+  submit and the pay tools' header estimate) and
+  [#5031](https://github.com/d-hinders/Haven-AI/issues/5031) (the local MCP's
+  answer), sub-issues of epic #4868. #5030's owner question was answered
+  2026-11-22: only a payment whose stored challenge carried a required field
+  stops when the challenge cannot be read.
+- C2 → [#5032](https://github.com/d-hinders/Haven-AI/issues/5032); C4 and the
+  receipt price → [#5033](https://github.com/d-hinders/Haven-AI/issues/5033);
+  the discovery base path → [#5034](https://github.com/d-hinders/Haven-AI/issues/5034);
+  sub-issues of epic #4884.
+- C3 → [#5035](https://github.com/d-hinders/Haven-AI/issues/5035), sub-issue of
+  epic #4816.
+- C5 and the Sales key → [#5038](https://github.com/d-hinders/Haven-AI/issues/5038),
+  sub-issue of epic #4885.
+- The Fortnox comment → [#5036](https://github.com/d-hinders/Haven-AI/issues/5036)
+  (epic #4874); search by host → [#5037](https://github.com/d-hinders/Haven-AI/issues/5037)
+  (epic #4879).
+- Scan instruments → [#5039](https://github.com/d-hinders/Haven-AI/issues/5039)
+  (block 1 census), [#5040](https://github.com/d-hinders/Haven-AI/issues/5040)
+  (block 8 predicate), [#5041](https://github.com/d-hinders/Haven-AI/issues/5041)
+  (sizing row), split by the spec review.
+- Filed during the scan on the owner's instruction:
+  [#5028](https://github.com/d-hinders/Haven-AI/issues/5028), a promotion
+  blocker on epic #4886; owner decision 2026-11-22, the testnet gate alone.
+
+`pending-review` is lifted on all thirteen.

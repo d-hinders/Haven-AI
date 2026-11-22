@@ -3363,8 +3363,9 @@ with four mechanisms and no recorded cost yet.
   (`paywall-proxy/src/main.ts:172-182`; a report lives in memory only, in the
   `inFlight` map declared at `src/sales.ts:124` and filled at `:167-170`).
 - C3 — a stranded-delegate sweep whose 90-second receipt wait times out is
-  booked `failed`, the hash only as free text in a 502 that says "failed" and
-  never on the row, and cannot be replayed
+  booked `failed` with no hash anywhere (ethers rejects the wait with a
+  hashless `TIMEOUT`, so the rail's own timeout branch never runs), and cannot
+  be replayed
   (`backend/src/rails/sweep.ts:159-171`, `modules/mpp/sweep.ts:373-387`).
 - C4 — the kit's `FakeFacilitator` ignores its arguments
   (`paywall-proxy/src/test-harness.ts:190`, `:197`): settling with a different
@@ -3470,7 +3471,9 @@ the hash" was wrong, the hash arrives as free text in the 502; "GitHub was
 read-only" contradicted #5028; the escape parts summed to 103), 6 nits, all
 applied. A second pass on those corrections found one sentence they had made
 wrong (what the checkout-details design document says about the case) and two
-nits; applied. The report's § 5 lists both passes.
+nits; applied. After those passes, the spec review of #5035 found C3's mechanism
+wrong (ethers rejects the wait; the rail's timeout branch never runs); the
+captain re-ran its probe and rewrote C3. The report's § 5 lists all of it.
 
 **Disposition:** the owner asked, with the scan request, for the findings to be
 filed; the filing and its issue numbers are recorded in a separate ledger pull

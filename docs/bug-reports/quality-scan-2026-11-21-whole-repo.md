@@ -141,31 +141,49 @@ the bar's criteria 1 and 3.
   pending), and at startup queue every settled row with `sale_reported = 0`
   that is not already in the outbox.
 
-### C3 — a stranded-delegate sweep whose receipt wait times out is booked `failed`, and cannot be replayed
+### C3 — a stranded-delegate sweep whose receipt wait times out is booked `failed`, with no hash anywhere, and cannot be replayed
 
-- **Where:** `packages/backend/src/rails/sweep.ts:159-171` — after broadcast,
-  the 90-second receipt wait returns null and the rail throws
-  `Sweep tx <hash> not confirmed within 90s` (its own comment says "Timeout is
-  NOT failure"). `packages/backend/src/modules/mpp/sweep.ts:373-387` —
-  `submitSweep` catches it, calls `markSweepFailed` with no `tx_hash`, and
-  answers 502 "Sweep relay failed".
-- **What follows:** the stranded-funds event is never resolved (its only
-  sweep-side resolver is on the success path, `sweep.ts:392`); the hash reaches
-  the agent only as free text inside a 502 that says "failed" (the error's
-  `details`, which the SDK transport folds into its message), it is not written
-  to the row's `tx_hash`, and a retry with the same nonce answers 409 "Sweep is
-  failed, expected prepared" without it; and a landed sweep shows in transaction history as an unattributed
-  deposit, because attribution requires `status = 'submitted' AND tx_hash IS
-  NOT NULL` (`infra/repositories/transaction-history.ts:302-320`). Funds cannot
-  move twice: the balance only covers one transfer.
+- **Where:** `packages/backend/src/rails/sweep.ts:159` waits
+  `provider.waitForTransaction(tx.hash, 1, 90_000)` after broadcast. The
+  relayer's provider is an ethers `JsonRpcProvider`
+  (the wallet is built on `getProvider`, `packages/backend/src/infra/relayer.ts:126`, `:290`), and ethers 6.16.0 (the locked
+  version) **rejects** that wait on timeout with a `TIMEOUT` error that carries
+  no hash (`node_modules/ethers/lib.esm/providers/abstract-provider.js`, the
+  `reject(makeError("timeout", "TIMEOUT", …))` in `waitForTransaction`). So the
+  rail's `if (!receipt)` branch (`:165-171`, "Timeout is NOT failure", throwing
+  `Sweep tx <hash> not confirmed within 90s`) never runs, and
+  `finishRelayerSpend` (`:160`) is skipped too. The TIMEOUT error reaches
+  `submitSweep`, which catches every error that is not a relayer-budget refusal,
+  calls `markSweepFailed` with no `tx_hash`, and answers 502 "Sweep relay
+  failed" (`packages/backend/src/modules/mpp/sweep.ts:373-387`).
+- **What follows:** the transaction is broadcast and may land, but the sweep
+  row is `failed` with no hash, and the answer carries none either; the
+  sweep-side resolver of the stranded-funds event runs only on the success path
+  (`sweep.ts:392`); a retry with the same nonce answers 409 "Sweep is failed,
+  expected prepared" (`sweep.ts:250-254`); and a landed sweep shows in
+  transaction history as an unattributed deposit, because attribution requires
+  `status = 'submitted' AND tx_hash IS NOT NULL`
+  (`infra/repositories/transaction-history.ts:319-320`). Through the hosted
+  MCP, the agent's request times out at the SDK's default 30 seconds
+  (`packages/sdk/src/haven-api-transport.ts:12`), before the 90-second wait
+  ends. Funds cannot move twice: the balance covers one transfer.
 - **Verified at scan:** `h2-sweep-timeout-repro.test.ts` on the existing sweep
-  route harness. Decisive: `{"status":502,"body":{"error":"Sweep relay failed","details":"Sweep tx 0xefef…ef not confirmed within 90s"},…,"txHashWrittenToSweepRow":false,"strandedEventResolved":false}`,
-  then the retry `{"status":409,…}`. Positive control (relay returns the hash):
-  `{"status":200,…,"strandedEventResolved":true}`.
-- **Remedy (one PR):** a typed outcome-unknown error from the rail that carries
-  the hash (#4817's typed error is the precedent); `submitSweep` records the
-  hash and answers "check later", not "failed". The S1 class at a site #4816
-  did not list, so it is filed as that epic's follow-up.
+  route harness, with the rail mocked to reject:
+  `{"status":502,"body":{"error":"Sweep relay failed",…},"txHashWrittenToSweepRow":false,"strandedEventResolved":false}`,
+  then the retry `{"status":409,…}`; positive control (relay returns the hash)
+  `{"status":200,…,"strandedEventResolved":true}`. The reproduction's mock
+  rejects with the dead branch's message; `submitSweep` treats every
+  non-budget error alike, so the route half holds for the real error. The rail
+  half was established at review by a probe: a `JsonRpcProvider` whose receipt
+  lookup returns null, `waitForTransaction(hash, 1, 200)` →
+  `REJECTED code= TIMEOUT … hashInMsg= false`.
+- **Remedy (one PR, larger than first scoped):** catch the wait's rejection in
+  the rail and raise a typed outcome-unknown error carrying the hash (the SDK
+  did the same for #4470); keep the relayer-spend hash; give the sweep row an
+  outcome-unknown status; and add something that later confirms the sweep
+  (the bump worker can replace a stuck sweep under a new hash). The S1 class
+  at a site #4816 did not list, so it is filed as that epic's follow-up
+  (#5035).
 
 ### C4 — the merchant kit's facilitator fake ignores its arguments, so no test sees what the kit asks the facilitator to settle
 
@@ -435,6 +453,14 @@ count. Changes requested: 0 blocking, 3 should-fix, 6 nits, all applied:
   line names the exit-branch reading as not done; the fat-controller
   recipe named as the worker's, not a manifest row; the `inFlight` map's
   declaration line added.
+
+After the third pass, the spec review of the issue filed from C3 (#5035) found
+C3's mechanism wrong: ethers rejects the receipt wait on timeout instead of
+returning null, so the rail's timeout branch the report described never runs,
+and the reproduction had fed in that branch's message. The defect stands, and
+is worse (no hash anywhere). The captain ran the reviewer's probe
+(`REJECTED code= TIMEOUT … hashInMsg= false`) and rewrote C3; the earlier
+"the hash reaches the agent as free text" correction is withdrawn with it.
 
 Second pass at `24f72b7ce` (the diff of the first pass's corrections only):
 0 blocking, 1 should-fix — the rewritten C1 sentence said the design document

@@ -245,6 +245,22 @@ last-verified: "2026-11-12"
 > `submission_outcome_unknown` rows already carry), and no hosted runtime file
 > changes. `last-verified` is not re-stamped: this block is the scope.
 
+> **Contract change (#5035, 2026-11-22): one more typed refusal on the local
+> MCP.** `packages/mcp/src/tools.ts` is on this contract's cover list. A
+> delegate sweep that was broadcast but whose outcome is not confirmed yet now
+> answers `409` with `error_code: "sweep_outcome_unknown"` and the `tx_hash`.
+> Both mappers answer it with `check_status_later` and
+> `haven_sweep_delegate {}` — a sweep has no `payment_id`, so the status read
+> is the sweep tool itself (called with no arguments it answers the in-flight
+> sweep's state; re-submitting the same authorization answers it too). That is
+> the 22nd typed code the local mapper answers. The hosted
+> `haven_sweep_delegate` description gains three sentences naming the code and
+> that one action, so `tools-list.snapshot.json` changes; no tool name,
+> argument, input schema, strict-input list, expected-context version or
+> consent hash changes, and `next-arguments-corpus.json` gains one row for the
+> new fixture site (the same `haven_sweep_delegate {}` step). `last-verified`
+> is not re-stamped: this block is the scope.
+
 > **Description-only change (#4796, 2026-11-10): four tool descriptions named
 > a tool their own surface does not register.** The shared description text in
 > `packages/sdk/src/tool-descriptions.ts` told a local-MCP agent to use

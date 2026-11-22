@@ -332,7 +332,7 @@ export const HAS_OPEN_SWEEPS_FOR_ACCOUNT_SQL = `SELECT EXISTS (
          FROM delegate_sweeps ds
          JOIN agents a ON a.id = ds.agent_id
          WHERE a.account_id = $1 AND a.user_id = $2 AND ds.user_id = $2
-           AND ds.status IN ('prepared', 'submitting')
+           AND ds.status IN ('prepared', 'submitting', 'outcome_unknown')
        ) AS open`
 
 export const HAS_IN_FLIGHT_REKEYS_FOR_ACCOUNT_SQL = `SELECT EXISTS (

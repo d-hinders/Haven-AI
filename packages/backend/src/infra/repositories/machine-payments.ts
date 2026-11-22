@@ -1154,6 +1154,112 @@ export async function markSweepSubmitted(
   await db.query(MARK_SWEEP_SUBMITTED_SQL, [txHash, sweepId])
 }
 
+// ── #5035: outcome-unknown sweeps ───────────────────────────────────────────
+//
+// A sweep whose receipt wait timed out (or whose broadcast answer was lost)
+// after the transaction was broadcast is NOT a failure: the tx may still land.
+// It is booked `outcome_unknown` with the hash it was broadcast under, and a
+// confirmer decides the real outcome from USDC `authorizationState(from, nonce)`
+// — independent of which hash mined. `outcome_unknown` is deliberately NOT
+// `submitted`: six queries read `ds.status = 'submitted'` as "landed"
+// (analytics.ts:184/:344/:447, dashboard.ts:550/:695,
+// transaction-history.ts:319), and an unconfirmed sweep must not count as one.
+
+export const MARK_SWEEP_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'outcome_unknown', tx_hash = $1
+       WHERE id = $2 AND status = 'submitting'`
+
+/** Book a broadcast sweep whose outcome is not confirmed yet, keeping its hash. */
+export async function markSweepOutcomeUnknown(
+  txHash: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(MARK_SWEEP_OUTCOME_UNKNOWN_SQL, [txHash, sweepId])
+}
+
+export const MARK_SWEEP_SUBMITTED_FROM_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'submitted', tx_hash = $1, submitted_at = NOW()
+       WHERE id = $2 AND status = 'outcome_unknown'`
+
+/**
+ * The confirmer's terminal write: the authorization is used on-chain, so the
+ * sweep landed. The hash is the one that actually mined (the first broadcast
+ * hash or a bump-worker replacement), which is what transaction-history
+ * attribution matches on.
+ */
+export async function markSweepSubmittedFromOutcomeUnknown(
+  txHash: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SWEEP_SUBMITTED_FROM_OUTCOME_UNKNOWN_SQL, [txHash, sweepId])
+  return (result.rowCount ?? 0) > 0
+}
+
+export const MARK_SWEEP_FAILED_FROM_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'failed', error_message = $1
+       WHERE id = $2 AND status = 'outcome_unknown'`
+
+/**
+ * The confirmer's other terminal write: the authorization expired unused, so
+ * the sweep can never land. Only reachable once `valid_before` has passed.
+ */
+export async function markSweepFailedFromOutcomeUnknown(
+  errorMessage: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SWEEP_FAILED_FROM_OUTCOME_UNKNOWN_SQL, [errorMessage, sweepId])
+  return (result.rowCount ?? 0) > 0
+}
+
+export interface OutcomeUnknownSweepRow extends DelegateSweepRow {
+  agent_id: string
+  user_id: string
+  created_at: Date
+}
+
+export const FIND_OUTCOME_UNKNOWN_SWEEPS_SQL = `SELECT id, agent_id, user_id, chain_id, token_address,
+              from_address, to_address, value_atomic, valid_after, valid_before,
+              nonce, status, tx_hash, created_at
+       FROM delegate_sweeps
+       WHERE status = 'outcome_unknown'
+       ORDER BY created_at, id
+       LIMIT $1`
+
+/** The confirmer's candidate set, oldest first. */
+export async function findOutcomeUnknownSweeps(
+  limit: number,
+  db: Executor = pool,
+): Promise<OutcomeUnknownSweepRow[]> {
+  const result = await db.query<OutcomeUnknownSweepRow>(FIND_OUTCOME_UNKNOWN_SWEEPS_SQL, [limit])
+  return result.rows
+}
+
+export const FIND_OPEN_OUTCOME_UNKNOWN_SWEEP_FOR_AGENT_SQL = `SELECT id, chain_id, token_address, from_address, to_address,
+              value_atomic, valid_after, valid_before, nonce, status, tx_hash
+       FROM delegate_sweeps
+       WHERE agent_id = $1 AND status = 'outcome_unknown'
+       ORDER BY created_at DESC
+       LIMIT 1`
+
+/**
+ * #5035: the in-flight sweep prepare must not mint a second authorization
+ * around. Returns the newest unresolved sweep for the agent, if any — the full
+ * row, so prepare can answer its current state instead of only refusing.
+ */
+export async function findOpenOutcomeUnknownSweepForAgent(
+  agentId: string,
+  db: Executor = pool,
+): Promise<DelegateSweepRow | null> {
+  const result = await db.query<DelegateSweepRow>(
+    FIND_OPEN_OUTCOME_UNKNOWN_SWEEP_FOR_AGENT_SQL,
+    [agentId],
+  )
+  return result.rows[0] ?? null
+}
+
 // ── Merchant receipts (#956, lib/merchant-receipt.ts) ────────────────────────
 
 // #2055: the `approval_requests` join half is gone with the table —

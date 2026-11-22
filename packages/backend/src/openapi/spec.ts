@@ -9209,7 +9209,38 @@ export const openapiSpec = {
           '401': errorResponse,
           '403': errorResponse,
           '404': errorResponse,
-          '409': errorResponse,
+          '409': {
+            description:
+              'The sweep is not in a state that can be relayed. `error_code: sweep_outcome_unknown` means the ' +
+              'transaction was broadcast but its receipt was not confirmed within the synchronous wait (or the ' +
+              'broadcast answer was lost): the body carries `tx_hash` and the sweep may still land. Do not prepare ' +
+              'a new sweep — re-submit the SAME authorization and signature (or call /sweep/prepare with no ' +
+              'authorization) to read the current state; a background confirmer resolves the row from the token\'s ' +
+              'authorization state. `error_code: sweep_expired` means the authorization expired unused. Other 409s ' +
+              'name the row\'s current status.',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    error: { type: 'string' },
+                    error_code: { type: 'string', examples: ['sweep_outcome_unknown', 'sweep_expired'] },
+                    tx_hash: { type: 'string', description: 'Present on sweep_outcome_unknown: the hash the sweep was broadcast under.' },
+                    asset: { type: 'string', examples: ['USDC'] },
+                    amount: { type: 'string' },
+                    amount_atomic: { type: 'string' },
+                    from_address: address,
+                    to_address: address,
+                    chain_id: { type: 'integer', examples: [8453] },
+                    explorer_url: { type: 'string' },
+                    next_step: { type: 'string' },
+                    status: { type: 'string' },
+                  },
+                  required: ['error'],
+                },
+              },
+            },
+          },
           '502': errorResponse,
         },
       },

@@ -1683,6 +1683,7 @@ export class HavenClient {
       checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, resumeUrl, {
         funded: true,
         requestHeaders: initialInit?.headers,
+        paymentId: input.paymentId,
       })
     let checkoutDetailsHeader: string | undefined
     let checkoutDetailsDecided = false

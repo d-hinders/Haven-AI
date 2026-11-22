@@ -30,7 +30,7 @@
  * `haven_get_payment_status`, which the local package has.
  */
 import { describe, expect, it } from 'vitest'
-import { HavenApiError } from '@haven_ai/sdk'
+import { HavenApiError, checkoutDetailsRefusalError } from '@haven_ai/sdk'
 import { PAYMENT_SCOPE_REFUSAL_CODES } from '@haven_ai/core'
 import { createToolHandlers as createLocalToolHandlers } from '@haven_ai/mcp'
 import { normalizeError } from './tools/support/errors.js'
@@ -211,5 +211,37 @@ describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
       if (local.code === 'API_ERROR') unanswered.push(code)
     }
     expect(unanswered).toEqual([])
+  })
+})
+
+/**
+ * #5031: the checkout-details refusal per stage. The five compared fields
+ * above use exact equality, and the two surfaces' `funded` reasons rightly
+ * differ (each names its own tools), so this class gets its own assertions:
+ * the same `phase` and code on both, the same `before_payment` reason, and a
+ * local `funded` reason that is NOT the fixed before-payment one — the
+ * fallback this test exists to catch.
+ */
+describe('#5031 checkout-details refusals per stage, local and hosted', () => {
+  const beforePayment = checkoutDetailsRefusalError(['receipt_email'], 'not_shared')
+  const funded = checkoutDetailsRefusalError(['receipt_email'], 'not_shared', { funded: true, paymentId: 'pay_5031' })
+
+  it('agrees on code and phase for each stage the local surface produces', async () => {
+    for (const refusal of [beforePayment, funded]) {
+      const hosted = normalizeError(refusal) as unknown as Record<string, unknown>
+      const local = await localAnswer(refusal)
+      expect(local.code).toBe(hosted.code)
+      expect(local.phase).toBe(hosted.phase)
+      expect(typeof local.phase).toBe('string')
+    }
+  })
+
+  it('gives the same before-payment reason, and a funded reason of its own that names the payment it resumes', async () => {
+    const localBefore = await localAnswer(beforePayment)
+    const localFunded = await localAnswer(funded)
+    expect(localBefore.next_tool_omitted_reason).toBe((normalizeError(beforePayment) as unknown as Record<string, unknown>).next_tool_omitted_reason)
+    expect(localFunded.next_tool_omitted_reason).not.toBe(localBefore.next_tool_omitted_reason)
+    expect(String(localFunded.next_tool_omitted_reason)).toContain('haven_resume_x402_payment')
+    expect(localFunded.paymentId).toBe('pay_5031')
   })
 })

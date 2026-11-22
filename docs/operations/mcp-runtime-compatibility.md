@@ -206,6 +206,34 @@ last-verified: "2026-11-12"
 > backend's own status-read and authorize suites.
 > `last-verified` is not re-stamped: this block is the scope.
 
+> **Contract change (#5031, 2026-11-22): the local MCP answers a
+> checkout-details refusal per stage.** `packages/mcp/**` is on this
+> contract's cover list. The local `normalizeError` answered every
+> `CHECKOUT_DETAILS_UNAVAILABLE` with one fixed "…then retry" step and no
+> `phase` or payment id; on `haven_resume_x402_payment` the payment is already
+> funded, so that step could lead an agent to buy again. It now adds `phase`
+> (`not_started` before payment, `funded_but_unsettled` on a funded resume —
+> the hosted MCP's words for the same stages) and, on a funded refusal,
+> `paymentId` and a step naming `haven_resume_x402_payment` with the same
+> `resume_state` — not `payment_id` alone, whose stored state carries no
+> checkout-details request — else `haven_get_payment_status` then
+> `haven_sweep_delegate`. The
+> before-payment step is unchanged and still equals the hosted one. The SDK's
+> `resumeX402Payment` now puts its `paymentId` on the refusal it throws.
+>
+> **What an installed client sees.** Two optional fields and a different
+> `next_tool_omitted_reason` on a funded checkout-details refusal; no tool
+> name, argument, input schema, description, strict-input list,
+> expected-context version or consent hash changes. The payment id reaches an
+> installed local MCP only after an SDK release and the pin bump
+> (`packages/mcp` pins `@haven_ai/sdk` exactly); without it the field is
+> absent. **How it is held.** `packages/mcp/src/checkout-details-refusal.test.ts`
+> (the real SDK resume over a stubbed wire), and a per-stage block in the
+> parity test above: same `code` and `phase` on both surfaces, the same
+> before-payment reason, and a local funded reason that is not the fixed one —
+> the five exact-equality fields could not catch that fallback.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4872, part 2a, 2026-11-19): checkout details on the
 > hosted MCP-merchant tools.** `packages/mcp-server/src/tools/**` is on this
 > contract's cover list. `haven_pay_mcp_tool` and

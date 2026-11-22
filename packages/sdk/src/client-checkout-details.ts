@@ -246,11 +246,25 @@ export async function checkoutDetailsHeaderFor(
   client: { getAgent: () => Promise<{ id: string }>; get: <T>(path: string) => Promise<T> },
   paymentRequired: X402PaymentRequired,
   url: string,
-  { funded = false, requestHeaders }: { funded?: boolean; requestHeaders?: HeadersInit } = {},
+  {
+    funded = false,
+    requestHeaders,
+    paymentId,
+  }: {
+    funded?: boolean
+    requestHeaders?: HeadersInit
+    /** #5031: on a resume, the payment the refusal is about — carried on the error so the agent can resume it again. */
+    paymentId?: string
+  } = {},
 ): Promise<string | undefined> {
   const decision = await resolveCheckoutDetails(client, paymentRequired, requestHeaders)
   logCheckoutDetailsOutcome(decision, url)
-  if (decision.kind === 'refuse') throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, { funded })
+  if (decision.kind === 'refuse') {
+    throw checkoutDetailsRefusalError(decision.missingFields, decision.reason, {
+      funded,
+      ...(paymentId !== undefined ? { paymentId } : {}),
+    })
+  }
   return decision.kind === 'answer' ? decision.header : undefined
 }
 

@@ -34,6 +34,7 @@ import {
   type X402PaymentOption,
   type X402Quote,
   type X402ResumeState,
+  type CheckoutDetailsRefusalStage,
 } from '@haven_ai/sdk'
 import { z } from 'zod/v3'
 
@@ -1932,6 +1933,33 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
 const CHECKOUT_DETAILS_OMITTED_REASON =
   'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
 
+/**
+ * #5031: the reason per checkout-details stage, in this surface's tool names.
+ * The local surface reaches two stages: `before_payment` (a pay call refused
+ * before anything was spent: the fixed reason above, identical to hosted) and
+ * `funded` (`haven_resume_x402_payment`, which decides after funding: the
+ * payment exists, so a NEW purchase would pay twice; and only a resume_state
+ * resume carries the merchant's request — a payment_id resume would deliver
+ * without the field). The other two are built
+ * only by the hosted surface; they are mapped for exhaustiveness.
+ */
+const LOCAL_CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
+  funded:
+    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_resume_x402_payment again with the same resume_state — not payment_id alone, whose stored state carries no checkout-details request, so the merchant would get no answer — and do not start a new purchase; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
+  unsent:
+    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase with the pay tool you used; do not resume this payment',
+  state_unknown:
+    "Haven could not read this payment's state, so it may already be funded: call haven_get_payment_status with this payment_id first, and do not pay again if it shows funded or settled",
+}
+/** The same phase words the hosted surface answers per stage. */
+const LOCAL_CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: 'not_started',
+  funded: 'funded_but_unsettled',
+  unsent: 'not_delivered',
+  state_unknown: 'unknown',
+}
+
 function normalizeError(err: unknown): ToolFailure {
   if (err instanceof MerchantNotReadyError) {
     return {
@@ -2008,11 +2036,13 @@ function normalizeError(err: unknown): ToolFailure {
       code: AgentPaymentFailureCode.CheckoutDetailsUnavailable,
       message: err.message,
       statusCode: err.statusCode,
+      ...(err.paymentId ? { paymentId: err.paymentId } : {}),
+      phase: LOCAL_CHECKOUT_DETAILS_STAGE_PHASE[err.stage],
       missing_fields: err.missingFields,
       reason: err.reason,
       nextAction: AgentPaymentNextAction.StopAndTellUser,
       next_action: AgentPaymentNextAction.StopAndTellUser,
-      next_tool_omitted_reason: CHECKOUT_DETAILS_OMITTED_REASON,
+      next_tool_omitted_reason: LOCAL_CHECKOUT_DETAILS_STAGE_REASON[err.stage],
     }
   }
 

@@ -1,6 +1,10 @@
 /**
  * The Stripe deposit-address registry's routes (#4952, epic #4886). Dev and
- * Stripe sandbox only.
+ * Stripe sandbox only, enforced per Sales account by #5028: every route answers
+ * 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` when the account's chain is not a
+ * testnet, and writes nothing. The gate runs right after `resolveSalesScope`
+ * and before any existence check, so `DEPOSIT_ADDRESS_ALREADY_REGISTERED` is
+ * never answered on a gated account. The ownership-proof slice removes it.
  *
  * `GET /merchant-deposit-addresses`, `POST /merchant-deposit-addresses` and
  * `POST /merchant-deposit-addresses/:id/retire`: owner-session routes
@@ -23,6 +27,8 @@ import { moneyPathRateLimit } from '../middleware/rate-limit.js'
 import { MERCHANT_ACCOUNT_REQUIRED } from '../domain/merchant-keys.js'
 import {
   DEPOSIT_ADDRESS_VERIFICATION_NOTE,
+  DEPOSIT_ADDRESSES_TESTNET_ONLY,
+  depositAddressRegistryOpen,
   listRegistrations,
   registerDepositAddress,
   resolveSalesScope,
@@ -43,13 +49,30 @@ const OFF = {
   error_code: MERCHANT_ACCOUNT_REQUIRED,
 }
 
+/**
+ * #5028: the registry is dev and Stripe sandbox only until a proof of address
+ * ownership exists. A Sales account whose chain is not a testnet gets this one
+ * refusal from every route, and nothing is written.
+ */
+const TESTNET_ONLY = {
+  error: 'Stripe deposit addresses are available on a test network only.',
+  error_code: DEPOSIT_ADDRESSES_TESTNET_ONLY,
+}
+
 export default async function merchantDepositAddressRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('onRequest', authMiddleware)
 
-  app.get('/', async (request) => {
+  app.get('/', async (request, reply) => {
     const { sub } = request.user as { sub: string }
     const scope = await resolveSalesScope(sub)
-    const rows = scope === null ? [] : await listRegistrations(scope)
+    if (scope === null) {
+      return {
+        verification: DEPOSIT_ADDRESS_VERIFICATION_NOTE,
+        addresses: [],
+      }
+    }
+    if (!depositAddressRegistryOpen(scope.chainId)) return reply.code(403).send(TESTNET_ONLY)
+    const rows = await listRegistrations(scope)
     return {
       verification: DEPOSIT_ADDRESS_VERIFICATION_NOTE,
       addresses: rows.map(serializeDepositAddress),
@@ -60,6 +83,7 @@ export default async function merchantDepositAddressRoutes(app: FastifyInstance)
     const { sub } = request.user as { sub: string }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return reply.code(409).send(OFF)
+    if (!depositAddressRegistryOpen(scope.chainId)) return reply.code(403).send(TESTNET_ONLY)
     const result = await registerDepositAddress(scope, request.body.address)
     if (!result.ok) {
       return reply.code(result.status).send({ error: result.message, error_code: result.code })
@@ -75,6 +99,7 @@ export default async function merchantDepositAddressRoutes(app: FastifyInstance)
     const { sub } = request.user as { sub: string }
     const scope = await resolveSalesScope(sub)
     if (scope === null) return reply.code(409).send(OFF)
+    if (!depositAddressRegistryOpen(scope.chainId)) return reply.code(403).send(TESTNET_ONLY)
     const result = await retireRegistration(scope, request.params.id)
     if (!result.ok) {
       return reply.code(result.status).send({ error: result.message, error_code: result.code })

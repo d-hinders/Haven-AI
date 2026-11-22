@@ -7,7 +7,10 @@
  *
  * Pass `enabled: false` to skip the read. The section that mounts this hook
  * lives on Sales → Setup (#4983), which renders only while Sales is on — the
- * Sales page answers not found otherwise — so its caller passes `true`.
+ * Sales page answers not found otherwise — so its caller passes `true`. Since
+ * #5028 that section renders only on a testnet Sales account: the routes answer
+ * 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` on any other chain, and the
+ * ownership-proof slice removes the gate.
  * A write that succeeds reads the list again rather than patching it, so the
  * order and the `active` flags are always the route's. A write whose outcome
  * is unknown (no answer, or a 5xx) also reads the list again: the address may
@@ -80,8 +83,14 @@ export function useMerchantDepositAddresses(enabled: boolean): UseMerchantDeposi
       } catch (err) {
         const refusal = classifyDepositAddressError(err)
         // The list may already say what happened: an unknown outcome, a
-        // retired or missing registration, or another tab's registration.
-        if (refusal.kind !== 'invalid' && refusal.kind !== 'own_address' && refusal.kind !== 'rate_limited') {
+        // retired or missing registration, or another tab's registration. A
+        // closed registry (#5028) is not one of them: the read would refuse too.
+        if (
+          refusal.kind !== 'invalid' &&
+          refusal.kind !== 'own_address' &&
+          refusal.kind !== 'rate_limited' &&
+          refusal.kind !== 'testnet_only'
+        ) {
           void load()
         }
         return { ok: false, refusal }

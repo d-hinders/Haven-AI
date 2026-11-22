@@ -138,6 +138,11 @@ test.describe('sales keys visual regression (#4905)', () => {
  * Sales → Setup, so their two captures moved here with them. Element clips, for
  * the reason the header gives; the dark capture is desktop-only, the same
  * convention the Settings specs follow.
+ *
+ * #5028: the registry is dev and Stripe sandbox only, enforced per Sales
+ * account, so these captures serve a Base Sepolia Sales account
+ * (`salesChainId: 84532`). On the fixture's Base account the section does not
+ * render at all.
  */
 test.describe('sales setup — Stripe deposit addresses (#4954, moved by #4983)', () => {
   test.skip(!VISUAL_SPECS_ENABLED, VISUAL_SKIP_REASON)
@@ -163,7 +168,7 @@ test.describe('sales setup — Stripe deposit addresses (#4954, moved by #4983)'
       await page.clock.setFixedTime(SALES_FROZEN_NOW)
       // `overview-stripe` serves the merchant-services ON state, the catalogue
       // and the two registered addresses (`salesDepositAddresses`).
-      await serveSales(page, 'overview-stripe')
+      await serveSales(page, 'overview-stripe', { salesChainId: 84532 })
       await serveSalesKeys(page)
 
       await page.setViewportSize({ width: vp.width, height: vp.height })
@@ -199,7 +204,7 @@ test.describe('sales setup — Stripe deposit addresses (#4954, moved by #4983)'
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
 
       await page.clock.setFixedTime(SALES_FROZEN_NOW)
-      await serveSales(page, 'overview-stripe')
+      await serveSales(page, 'overview-stripe', { salesChainId: 84532 })
       await serveSalesKeys(page)
 
       await page.setViewportSize({ width: vp.width, height: vp.height })

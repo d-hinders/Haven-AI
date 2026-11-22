@@ -614,7 +614,10 @@ to the runtime list when a QA leg reads the totals. The repository
 
 ### The Stripe deposit-address registry
 
-#4952 (dev and Stripe sandbox only). `GET`/`POST /merchant-deposit-addresses`
+#4952 (dev and Stripe sandbox only, enforced per Sales account by #5028: the
+registry is open only when the Sales account's chain is a testnet, and every
+route answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` otherwise; the ingest treats
+the registry as empty on any other chain). `GET`/`POST /merchant-deposit-addresses`
 and `POST /merchant-deposit-addresses/:id/retire` are where the Sales account's
 owner registers, lists and retires an address a payment processor receives on
 their behalf: dashboard JWT only, never the Sales key (a key route would let a
@@ -628,7 +631,8 @@ verify a registered address is the owner's: every registration is labelled
 "registered by you, not verified by Haven", and a proof of ownership is required
 before production. `modules/transactions/merchant-deposit-addresses.ts` holds
 the refusals (an invalid address, one already registered on the chain, one of
-the owner's own addresses) and `routes/merchant-deposit-addresses.ts` is the
+the owner's own addresses) and the testnet predicate
+(`depositAddressRegistryOpen`), and `routes/merchant-deposit-addresses.ts` is the
 auth door, the money-path rate limit and the status mapping.
 
 Control, not runtime (the same rule as the ingest and the reads): no QA scenario

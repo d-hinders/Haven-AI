@@ -1,6 +1,8 @@
 /**
  * The Stripe deposit-address registry (#4952, epic #4886). Dev and Stripe
  * sandbox only: a proof of address ownership is required before production.
+ * `depositAddressRegistryOpen` is the gate that makes that scope hold in code
+ * (#5028): the registry is open only on a testnet Sales account.
  *
  * The Sales account's OWNER registers the address a processor receives on the
  * merchant's behalf. Haven cannot verify it is theirs, so every registration is
@@ -31,8 +33,27 @@ import {
   type MerchantDepositAddressRow,
 } from '../../infra/repositories/merchant-deposit-addresses.js'
 import type { SalesScope } from '../../infra/repositories/merchant-sales-reads.js'
+import { isMainnetChain } from '../catalog/index.js'
 
 export const DEPOSIT_ADDRESS_VERIFICATION_NOTE = 'Registered by you, not verified by Haven.'
+
+/**
+ * The refusal a non-testnet Sales account gets from every registry route
+ * (#5028). The registry is dev and Stripe sandbox only until a proof of address
+ * ownership exists, and the gate is per Sales account: open only when the
+ * account's chain is a testnet.
+ */
+export const DEPOSIT_ADDRESSES_TESTNET_ONLY = 'DEPOSIT_ADDRESSES_TESTNET_ONLY'
+
+/**
+ * Whether the registry is open on `chainId` (#5028). The registry's chain is
+ * always the Sales account's own, so this is a pure function of it. The
+ * predicate is the existing fail-closed one: an unregistered chain counts as
+ * mainnet. The ownership-proof slice removes this gate.
+ */
+export function depositAddressRegistryOpen(chainId: number): boolean {
+  return !isMainnetChain(chainId)
+}
 
 const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/
 

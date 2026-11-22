@@ -4121,13 +4121,13 @@ export type paths = {
         };
         /**
          * The Sales account's registered Stripe deposit addresses, active and retired.
-         * @description The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as "registered by you, not verified by Haven", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.
+         * @description The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY`). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as "registered by you, not verified by Haven", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.
          */
         get: operations["listMerchantDepositAddresses"];
         put?: never;
         /**
          * Register a Stripe deposit address for the Sales account.
-         * @description The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only). The chain is the Sales account's own. The registration is the owner's word: it is labelled "registered by you, not verified by Haven" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
+         * @description The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). The chain is the Sales account's own. The registration is the owner's word: it is labelled "registered by you, not verified by Haven" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
          */
         post: operations["registerMerchantDepositAddress"];
         delete?: never;
@@ -4147,7 +4147,7 @@ export type paths = {
         put?: never;
         /**
          * Retire a registered Stripe deposit address.
-         * @description The owner retires a registration (#4952, epic #4886). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.
+         * @description The owner retires a registration (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.
          */
         post: operations["retireMerchantDepositAddress"];
         delete?: never;
@@ -26379,6 +26379,21 @@ export interface operations {
                     };
                 };
             };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
         };
     };
     registerMerchantDepositAddress: {
@@ -26423,6 +26438,21 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -26491,6 +26521,21 @@ export interface operations {
             };
             /** @description Error response */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

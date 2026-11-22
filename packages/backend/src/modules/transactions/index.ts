@@ -167,9 +167,12 @@ export {
   type SalesFilterInput,
 } from './merchant-sales-reads.js'
 // #4952: the Stripe deposit-address registry, consumed by
-// routes/merchant-deposit-addresses.ts.
+// routes/merchant-deposit-addresses.ts. #5028 adds the testnet gate both the
+// routes and the sales ingest ask.
 export {
   DEPOSIT_ADDRESS_VERIFICATION_NOTE,
+  DEPOSIT_ADDRESSES_TESTNET_ONLY,
+  depositAddressRegistryOpen,
   listRegistrations,
   registerDepositAddress,
   retireRegistration,

@@ -124,6 +124,11 @@ registered under the Sales account **at or before the payment's block time**
 (#4952). The demo merchant never resends a refused report, so a joke paid
 before registration is lost for good: it never appears on the Sales page.
 
+The registry is dev and Stripe sandbox only, enforced per Sales account
+(#5028): it is open only when the Sales account's chain is a testnet, and every
+registry route answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` otherwise. The
+demo's Sales account is on Base Sepolia, so the section is there.
+
 Signed in as the merchant user, open **Sales → Setup**. Under
 **Stripe deposit addresses**, choose **Register address**, paste
 `<STRIPE_DEPOSIT_ADDRESS>` and register it (#4954). The address is listed with
@@ -351,4 +356,7 @@ A report sent with a revoked key is refused, and is not resent.
 
 Production use is out of scope. Before any production use, a proof that the
 merchant owns its deposit address is required (owner decision 2026-11-18,
-#4902).
+#4902). Until then the registry is dev and Stripe sandbox only, enforced per
+Sales account (#5028): a Sales account whose chain is not a testnet gets 403
+`DEPOSIT_ADDRESSES_TESTNET_ONLY` from every registry route, the ingest treats
+the registry as empty, and the dashboard does not render the section.

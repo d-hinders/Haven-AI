@@ -1,20 +1,23 @@
 /**
  * The proxy's sales outbox (docs/architecture/12-merchant-kit.md §5 *Delivery*,
- * §12): a bounded, persistent JSON Lines file at `SALES_OUTBOX` holding the sale
- * records the core reporter could not deliver, replayed by a background task
- * every 60 s.
+ * §12): a bounded, persistent JSON Lines file at `SALES_OUTBOX` holding every
+ * sale record from the moment it is built, replayed by a background task every
+ * 60 s.
  *
- * What goes in it (#4898's decision, §5 leaves it to this issue): a record the
- * core reporter gave up on — a 5xx, a timeout, a network failure, or the route's
- * one retry answer, 425 `transaction_not_visible` — and a record Haven answered
- * 429 to. A 429 is the 120-a-minute limit, not a judgement on the record, so it
- * is "could not be sent" rather than "refused". Every other 4xx is a refusal:
- * the record's shape or key is wrong, resending it changes nothing, and the core
- * reporter has already logged it once.
+ * **Queue-first (#5032).** The record is written here *before* the first
+ * attempt, so a proxy that stops mid-delivery — between resends, or inside one —
+ * loses nothing: the file is the durable record a restart replays. The record is
+ * removed by key when Haven accepts it or refuses it for good (a 4xx other than
+ * 429 and 425); a record whose first delivery round ended without an answer
+ * stays and waits for a replay.
  *
- * The file is the record, and it is rewritten whole (temp file, then rename) on
- * every change, so a crash leaves either the old file or the new one, never a
- * half-written line. A replay takes a snapshot, attempts each record, and then
+ * A record in its first delivery round is **held**: the reporter is delivering
+ * it right now, so a replay skips it. The hold is in memory only — a restart
+ * holds nothing, which is exactly what makes the record replayable.
+ *
+ * The file is rewritten whole (temp file, then rename) on every change, so a
+ * crash leaves either the old file or the new one, never a half-written line. A
+ * replay takes a snapshot of the records waiting, attempts each one, and then
  * removes only the snapshot's entries by id: a sale that settles while a replay
  * is running is appended and survives the merge. A crash mid-replay leaves every
  * entry in the file, so the next replay sends it again — Haven's ingest is
@@ -76,11 +79,28 @@ export interface SalesOutboxDeps {
 }
 
 export interface SalesOutbox {
-  /** Queue a record the reporter could not deliver. Never throws. */
-  add(key: string, record: SaleRecord, outcome: SaleReportOutcome): Promise<void>
-  /** One pass over the outbox. Never throws. */
+  /**
+   * Write the record before the first attempt, and hold its key from replay
+   * until `release` or `remove`. Never throws.
+   */
+  queue(key: string, record: SaleRecord): Promise<void>
+  /**
+   * The first delivery round ended without an answer (a 5xx, a timeout, a
+   * network failure, 425, or 429): the record now waits for a replay. Never
+   * throws.
+   */
+  release(key: string, outcome: SaleReportOutcome): Promise<void>
+  /**
+   * Haven accepted the record, or refused it for good: remove it by key, so no
+   * restart sends it again. Never throws.
+   */
+  remove(key: string, reason: 'accepted' | 'refused'): Promise<void>
+  /** One pass over the records waiting for a replay. Never throws. */
   replay(): Promise<void>
-  /** How many records are waiting. */
+  /**
+   * How many records are waiting for a replay. A record in its first delivery
+   * round is not counted: the reporter is delivering it, not the outbox.
+   */
   depth(): number
   /** Start the 60 s replay task (unref'd: it never holds the process open). */
   start(): void
@@ -141,6 +161,15 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
   const entries = loadEntries(path, log)
   if (entries.length > 0) log('sales_outbox_loaded', { depth: entries.length })
 
+  // Keys whose first delivery round is running: a replay skips them. In memory
+  // only, so a restart holds nothing and replays everything the file holds.
+  const held = new Set<string>()
+
+  /** The records a replay may attempt: everything not in its first delivery round. */
+  function waiting(): SalesOutboxEntry[] {
+    return entries.filter((entry) => !held.has(entry.key))
+  }
+
   // Every change to `entries` and the file runs one at a time, in call order.
   let tail: Promise<unknown> = Promise.resolve()
   function serial<T>(op: () => Promise<T> | T): Promise<T> {
@@ -162,9 +191,12 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
   let timer: ReturnType<typeof setInterval> | undefined
 
   const outbox: SalesOutbox = {
-    async add(key, record, outcome) {
+    async queue(key, record) {
       try {
         await serial(() => {
+          held.add(key)
+          // One record per payment: a key already in the file is not added twice.
+          if (entries.some((entry) => entry.key === key)) return
           if (entries.length >= maxRecords) {
             log('sales_outbox_full', {
               tx_hash: record.tx_hash,
@@ -179,17 +211,10 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
             record,
             attempts: 0,
             queued_at: now().toISOString(),
-            last_status: outcome.status ?? null,
-            last_code: outcome.outcome === 'accepted' ? null : outcome.code,
+            last_status: null,
+            last_code: null,
           })
           persist()
-          log('sales_outbox_queued', {
-            tx_hash: record.tx_hash,
-            merchant_reference: record.merchant_reference,
-            status: outcome.status ?? null,
-            code: outcome.outcome === 'accepted' ? null : outcome.code,
-            depth: entries.length,
-          })
         })
       } catch (err) {
         // A full disk is not a reason to fail a settled call; the record is lost
@@ -202,9 +227,67 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
       }
     },
 
+    async release(key, outcome) {
+      let record: SaleRecord | undefined
+      try {
+        await serial(() => {
+          held.delete(key)
+          const index = entries.findIndex((entry) => entry.key === key)
+          if (index === -1) return
+          const entry = entries[index]!
+          record = entry.record
+          entries[index] = {
+            ...entry,
+            last_status: outcome.status ?? null,
+            last_code: outcome.outcome === 'accepted' ? null : outcome.code,
+          }
+          persist()
+          log('sales_outbox_queued', {
+            tx_hash: entry.record.tx_hash,
+            merchant_reference: entry.record.merchant_reference,
+            status: outcome.status ?? null,
+            code: outcome.outcome === 'accepted' ? null : outcome.code,
+            depth: waiting().length,
+          })
+        })
+      } catch (err) {
+        log('sales_outbox_write_failed', {
+          tx_hash: record?.tx_hash ?? null,
+          merchant_reference: record?.merchant_reference ?? null,
+          error: err instanceof Error ? err.name : 'UnknownError',
+        })
+      }
+    },
+
+    async remove(key, reason) {
+      let record: SaleRecord | undefined
+      try {
+        await serial(() => {
+          held.delete(key)
+          const index = entries.findIndex((entry) => entry.key === key)
+          if (index === -1) return
+          const [entry] = entries.splice(index, 1)
+          record = entry!.record
+          persist()
+          log('sales_outbox_removed', {
+            tx_hash: entry!.record.tx_hash,
+            merchant_reference: entry!.record.merchant_reference,
+            reason,
+            depth: waiting().length,
+          })
+        })
+      } catch (err) {
+        log('sales_outbox_write_failed', {
+          tx_hash: record?.tx_hash ?? null,
+          merchant_reference: record?.merchant_reference ?? null,
+          error: err instanceof Error ? err.name : 'UnknownError',
+        })
+      }
+    },
+
     async replay() {
       try {
-        const snapshot = await serial(() => entries.slice())
+        const snapshot = await serial(() => waiting())
         if (snapshot.length === 0) return
         const survivors: SalesOutboxEntry[] = []
         for (const entry of snapshot) {
@@ -256,7 +339,7 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
           log('sales_outbox_replayed', {
             attempted: snapshot.length,
             kept: survivors.length,
-            depth: entries.length,
+            depth: waiting().length,
           })
         })
       } catch (err) {
@@ -264,7 +347,7 @@ export function openSalesOutbox(deps: SalesOutboxDeps): SalesOutbox {
       }
     },
 
-    depth: () => entries.length,
+    depth: () => waiting().length,
 
     start() {
       if (timer !== undefined) return

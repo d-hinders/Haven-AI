@@ -172,6 +172,9 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       close: () =>
         new Promise<void>((resolve) => {
           const finish = (): void => {
+            // #5032: the reporter stops writing first. The record it was
+            // delivering is already in the outbox, and the next proxy replays it.
+            sales?.stop()
             outbox?.stop()
             store.close()
             restoreConsole()

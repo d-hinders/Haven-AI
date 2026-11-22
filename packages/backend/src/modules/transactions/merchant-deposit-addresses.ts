@@ -33,7 +33,7 @@ import {
   type MerchantDepositAddressRow,
 } from '../../infra/repositories/merchant-deposit-addresses.js'
 import type { SalesScope } from '../../infra/repositories/merchant-sales-reads.js'
-import { isMainnetChain } from '../catalog/marketplace-scope.js'
+import { isMainnetChain } from '../catalog/index.js'
 
 export const DEPOSIT_ADDRESS_VERIFICATION_NOTE = 'Registered by you, not verified by Haven.'
 

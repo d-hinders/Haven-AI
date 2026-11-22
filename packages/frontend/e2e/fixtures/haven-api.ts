@@ -1324,13 +1324,15 @@ export const salesPayments = [
  * #4954: the Stripe deposit addresses the owner registered (#4952,
  * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
  * retired. Lower-case on the wire, `verified: false` always. #5028: the
- * registry is open only on a testnet Sales account, so these are Base Sepolia
- * registrations and are served with `serveSales(..., { salesChainId: 84532 })`.
+ * registry is open only on a testnet Sales account, so these are served only
+ * for `serveSales(..., { salesChainId: 84532 })`. The rows carry no chain of
+ * their own — `serveSales` stamps the chain of the account it serves, so the
+ * fixture cannot claim a registration on a chain the account is not on.
  */
 export const salesStripeAddress = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
 export const salesDepositAddresses = [
-  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, chain: 'eip155:84532', registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
-  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', chain: 'eip155:84532', registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
 ]
 
 /**
@@ -1520,7 +1522,13 @@ export async function serveSales(
     if (path === '/merchant-catalogue') return fulfillJson(route, catalogue)
     if (path === '/merchant-keys') return fulfillJson(route, { keys: scenario === 'first-run' ? [] : salesKeys })
     if (path === '/merchant-deposit-addresses') {
-      return fulfillJson(route, { verification: 'Registered by you, not verified by Haven.', addresses: stripe ? salesDepositAddresses : [] })
+      // #5028: the registry is per Sales account, so the served registrations
+      // carry the chain of the account this scenario serves.
+      const chainId = opts.salesChainId ?? merchantServicesOn.merchant_account.chain_id
+      return fulfillJson(route, {
+        verification: 'Registered by you, not verified by Haven.',
+        addresses: stripe ? salesDepositAddresses.map((a) => ({ ...a, chain: `eip155:${chainId}` })) : [],
+      })
     }
     if (path === '/merchant-sales/summary') {
       const previous = url.searchParams.get('to') === '2026-10-18'

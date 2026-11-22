@@ -47,6 +47,7 @@ vi.mock('@/context/MerchantServicesContext', () => ({
 }))
 
 import { ApiRequestError } from '@/lib/api'
+import { LocaleProvider } from '@/context/LocaleContext'
 import { SalesPaymentPanel, payerPhrase } from '../SalesPaymentPanel'
 
 const HASH = `0x${'ab'.repeat(32)}`
@@ -75,7 +76,11 @@ function serve(detail: unknown) {
 }
 
 async function open(onClose = vi.fn(), extra: Partial<React.ComponentProps<typeof SalesPaymentPanel>> = {}) {
-  render(<SalesPaymentPanel txHash={HASH} onClose={onClose} {...extra} />)
+  render(
+    <LocaleProvider>
+      <SalesPaymentPanel txHash={HASH} onClose={onClose} {...extra} />
+    </LocaleProvider>,
+  )
   await screen.findByTestId('sales-payment-header')
 }
 
@@ -248,13 +253,21 @@ describe('the panel, by variant', () => {
 
   it('says so when the payment is not on the account, and when the read fails', async () => {
     mockGet.mockRejectedValueOnce(new ApiRequestError('No such payment on this account.', 404))
-    render(<SalesPaymentPanel txHash={HASH} onClose={vi.fn()} />)
+    render(
+      <LocaleProvider>
+        <SalesPaymentPanel txHash={HASH} onClose={vi.fn()} />
+      </LocaleProvider>,
+    )
     expect(await screen.findByText('This payment is not on your Sales account.')).toBeTruthy()
   })
 
   it('offers a retry when the read fails', async () => {
     mockGet.mockRejectedValueOnce(new Error('boom'))
-    render(<SalesPaymentPanel txHash={HASH} onClose={vi.fn()} />)
+    render(
+      <LocaleProvider>
+        <SalesPaymentPanel txHash={HASH} onClose={vi.fn()} />
+      </LocaleProvider>,
+    )
     const retry = await screen.findByRole('button', { name: 'Try again' })
     mockGet.mockResolvedValue(base)
     await userEvent.click(retry)
@@ -262,7 +275,11 @@ describe('the panel, by variant', () => {
   })
 
   it('stays closed with no payment, and reads nothing', () => {
-    render(<SalesPaymentPanel txHash={null} onClose={vi.fn()} />)
+    render(
+      <LocaleProvider>
+        <SalesPaymentPanel txHash={null} onClose={vi.fn()} />
+      </LocaleProvider>,
+    )
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(mockGet).not.toHaveBeenCalled()
   })
@@ -332,6 +349,33 @@ describe('clearing a sale record', () => {
     await waitFor(() =>
       expect(screen.getByRole('alert').textContent).toContain('It may already be cleared'),
     )
+  })
+
+  it('says the outcome is unknown, never "Nothing changed", when the answer is lost (#5038)', async () => {
+    serve(base)
+    mockDelete.mockRejectedValue(new TypeError('Failed to fetch'))
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: 'Clear sale record' }))
+    const dialog = screen.getByRole('dialog', { name: 'Clear this sale record?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Clear record' }))
+
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert.textContent).toContain('the sale record may have been cleared')
+    expect(alert.textContent).not.toContain('Nothing changed')
+    expect(mockToastSuccess).not.toHaveBeenCalled()
+  })
+
+  it('says the same for a 5xx, which may have committed before it answered (#5038)', async () => {
+    serve(base)
+    mockDelete.mockRejectedValue(new ApiRequestError('unavailable', 503))
+    await open()
+    await userEvent.click(screen.getByRole('button', { name: 'Clear sale record' }))
+    const dialog = screen.getByRole('dialog', { name: 'Clear this sale record?' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Clear record' }))
+
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert.textContent).toContain('the sale record may have been cleared')
+    expect(alert.textContent).not.toContain('Nothing changed')
   })
 
   it('sends the owner to Setup from the leaked-key notice, closing the confirmation', async () => {

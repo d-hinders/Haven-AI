@@ -740,6 +740,24 @@ export const en = {
         },
       },
 
+      /**
+       * #5038: the Sales key and sale-record actions' failure sentences. The
+       * backend commits before it answers, so a lost answer may still have
+       * made the change: `unknownOutcome` says to check, never "nothing
+       * changed". A 4xx did not commit and keeps its own sentence.
+       */
+      actions: {
+        rateLimited: 'Too many attempts in a short time. Wait a minute, then try again.',
+        unknownOutcome: {
+          createKey:
+            'Haven did not answer, so the key may have been created. Close this and check the list: if there is a key you did not copy, revoke it.',
+          revokeKey:
+            'Haven did not answer, so the key may have been revoked. Close this and check the list before you try again.',
+          clearRecord:
+            'Haven did not answer, so the sale record may have been cleared. Close this and check the payment.',
+        },
+      },
+
       dialog: {
         title: 'Turn on Sales',
         subtitle: 'A separate Haven account for the payments you take. It starts empty.',

@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
+import { ApiRequestError } from '@/lib/api'
 import {
   classifyDepositAddressError,
+  classifySalesActionError,
   isDepositAddressShape,
   ACCOUNT_CAP_REACHED,
   IDEMPOTENCY_KEY_REUSED,
@@ -186,5 +188,47 @@ describe('classifyDepositAddressError and isDepositAddressShape (#4954)', () => 
     expect(isDepositAddressShape('3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0')).toBe(false)
     expect(isDepositAddressShape('0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f')).toBe(false)
     expect(isDepositAddressShape('0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8fg')).toBe(false)
+  })
+})
+
+describe('classifySalesActionError — a Sales action whose answer was lost (#5038)', () => {
+  const err = (status: number | undefined, body: Record<string, unknown> = {}) => ({ status, body })
+
+  it('no status or a 5xx is an unknown outcome: the action may have committed', () => {
+    expect(classifySalesActionError(new TypeError('Failed to fetch'))).toEqual({ kind: 'unknown_outcome' })
+    expect(classifySalesActionError(undefined)).toEqual({ kind: 'unknown_outcome' })
+    expect(classifySalesActionError(err(500))).toEqual({ kind: 'unknown_outcome' })
+    expect(classifySalesActionError(err(502, { error: 'unavailable' }))).toEqual({ kind: 'unknown_outcome' })
+  })
+
+  it('a 429 is the rate limit', () => {
+    expect(classifySalesActionError(err(429))).toEqual({ kind: 'rate_limited' })
+  })
+
+  it('another 4xx is a refusal that did not commit, with the route sentence bounded', () => {
+    expect(classifySalesActionError(err(409, { error: 'no account' }))).toEqual({
+      kind: 'refused',
+      status: 409,
+      detail: 'no account',
+    })
+    expect(classifySalesActionError(err(422, { error: '  Not today.  ' }))).toEqual({
+      kind: 'refused',
+      status: 422,
+      detail: 'Not today.',
+    })
+    expect(classifySalesActionError(err(422, { error: 'x'.repeat(500) }))).toEqual({
+      kind: 'refused',
+      status: 422,
+      detail: 'x'.repeat(200),
+    })
+    expect(classifySalesActionError(err(400))).toEqual({ kind: 'refused', status: 400, detail: null })
+  })
+
+  it('falls back to the error message when the body carries no sentence', () => {
+    expect(classifySalesActionError(new ApiRequestError('Turn merchant services on', 409))).toEqual({
+      kind: 'refused',
+      status: 409,
+      detail: 'Turn merchant services on',
+    })
   })
 })

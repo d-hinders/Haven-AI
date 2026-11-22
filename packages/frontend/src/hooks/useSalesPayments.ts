@@ -19,12 +19,15 @@
  * the filter set, every page included: the list's "{shown} of {total}" and its
  * "Show N more" read it, never the loaded rows.
  *
- * #5012: `live` re-reads the FIRST page every 10 s while the tab is visible
- * (`useVisiblePolling`), silently, and merges it (`mergeLivePage`): new
- * payments appear on top, rows already shown keep their place, and pages the
- * owner loaded with "Show more" stay loaded. A failed re-read changes nothing.
- * Each read also asks the backend to refresh the account's index (throttled
- * there per account).
+ * #5012: `live` re-reads every 10 s while the tab is visible
+ * (`useVisiblePolling`), silently. When only the first page is loaded the
+ * fresh page IS the list. When the owner loaded more, the re-read walks the
+ * loaded window from the top, page by page, until it reaches the row that was
+ * last on screen (#5038): a fresh page 1 alone would leave a hole when more
+ * than a page of payments arrived since the last re-read, and would never show
+ * a payment the index added late with an older `block_time`. A failed re-read
+ * changes nothing. Each read also asks the backend to refresh the account's
+ * index (throttled there per account).
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -33,6 +36,7 @@ import { useVisiblePolling } from '@/hooks/useVisiblePolling'
 import {
   NO_SALES_FILTERS,
   SALES_PAGE_SIZE,
+  SALES_PAYMENTS_MAX_LIMIT,
   salesFilterQuery,
   type SalesDayRange,
   type SalesFilters,
@@ -66,16 +70,15 @@ function pagePath(range: SalesDayRange | null, limit: number, cursor: string | n
 }
 
 /**
- * Merge a freshly read first page into the rows on screen (#5012). When only
- * the first page is loaded, the fresh page IS the list. When the owner loaded
- * more, the fresh page replaces the rows it names and puts new ones on top,
- * and every other loaded row keeps its order below: the cursor of the last
- * loaded page stays valid because the list is keyed newest first.
+ * Whether `payment` sorts at or below `last` in the list's order — newest
+ * first, keyed on `(block_time, tx_hash)` (`merchant-sales-reads.ts`). The
+ * window re-read stops at the first row that is at or below the row that was
+ * last on screen: everything above it is the window, and a row that a filter
+ * or a record-clear removed leaves the next-older row in its place.
  */
-export function mergeLivePage(current: SalesPayment[], fresh: SalesPayment[], limit: number): SalesPayment[] {
-  if (current.length <= limit) return fresh
-  const freshKeys = new Set(fresh.map((payment) => payment.tx_hash))
-  return [...fresh, ...current.filter((payment) => !freshKeys.has(payment.tx_hash))]
+function isAtOrBelow(payment: SalesPayment, last: SalesPayment): boolean {
+  if (payment.block_time !== last.block_time) return payment.block_time < last.block_time
+  return payment.tx_hash <= last.tx_hash
 }
 
 export function useSalesPayments(
@@ -141,15 +144,46 @@ export function useSalesPayments(
     const shown = shownRef.current
     if (shown.loading || shown.loadingMore) return
     const requestId = requestIdRef.current
+    const scope = from !== null && to !== null ? { from, to } : null
     try {
-      const scope = from !== null && to !== null ? { from, to } : null
-      const page = await api.get<SalesPaymentsPage>(pagePath(scope, limit, null, filterQuery))
-      if (requestIdRef.current !== requestId) return
-      const firstPageOnly = shownRef.current.payments.length <= limit
-      setPayments((current) => mergeLivePage(current, page.payments, limit))
-      if (firstPageOnly) setCursor(page.next_cursor)
-      setTotal(page.total)
-      setUsdcRates(page.usdc_rates ?? null)
+      if (shown.payments.length <= limit) {
+        // Only the first page is loaded: the fresh page IS the list, and its
+        // cursor reaches whatever fell off it.
+        const page = await api.get<SalesPaymentsPage>(pagePath(scope, limit, null, filterQuery))
+        if (requestIdRef.current !== requestId) return
+        setPayments(page.payments)
+        setCursor(page.next_cursor)
+        setTotal(page.total)
+        setUsdcRates(page.usdc_rates ?? null)
+        setFailed(false)
+        return
+      }
+
+      // More than one page is loaded: re-read the whole loaded window from the
+      // top, page by page, until the read reaches the row that was last on
+      // screen (#5038). Each page asks for at most the backend's cap, so a
+      // window of more than 200 rows is read in several requests rather than
+      // one the route would reject with a 400.
+      const last = shown.payments[shown.payments.length - 1]
+      const windowLimit = Math.min(SALES_PAYMENTS_MAX_LIMIT, shown.payments.length)
+      const rows: SalesPayment[] = []
+      let next: string | null = null
+      let lastPage: SalesPaymentsPage | null = null
+      do {
+        const page: SalesPaymentsPage = await api.get<SalesPaymentsPage>(pagePath(scope, windowLimit, next, filterQuery))
+        if (requestIdRef.current !== requestId) return
+        rows.push(...page.payments)
+        lastPage = page
+        next = page.next_cursor
+        // An empty page ends the walk: nothing more can be reached from it.
+        if (page.payments.length === 0) break
+        if (page.payments.some((payment) => isAtOrBelow(payment, last))) break
+      } while (next !== null)
+      if (lastPage === null) return
+      setPayments(rows)
+      setCursor(next)
+      setTotal(lastPage.total)
+      setUsdcRates(lastPage.usdc_rates ?? null)
       setFailed(false)
     } catch {
       // Keep the rows on screen; the next tick tries again.

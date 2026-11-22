@@ -14,6 +14,7 @@ import {
   CHAT_PATH,
   CHAT_PRODUCT,
   PAY_TO,
+  SEPOLIA_USDC,
   UPSTREAM_KEY,
   chatRequest,
   newBuyer,
@@ -110,9 +111,9 @@ describe('a paid request', () => {
     // the upstream is called only after the facilitator has settled
     const order: string[] = []
     const settle = h.facilitator.settle.bind(h.facilitator)
-    h.facilitator.settle = async () => {
+    h.facilitator.settle = async (payload, requirements) => {
       order.push(`settle(upstream calls so far: ${h.upstream.seen.length})`)
-      return settle()
+      return settle(payload, requirements)
     }
     const { res } = await paidChat(buyer)
     expect(res.status).toBe(200)
@@ -122,6 +123,25 @@ describe('a paid request', () => {
     expect(settled).toMatchObject({ success: true, transaction: TX, network: 'eip155:84532', payer: buyer.address })
     expect(await res.json()).toMatchObject({ id: 'cmpl-1' })
     expect(h.facilitator.events).toEqual(['verify', 'settle'])
+    // #5033: what was settled is the configured receiving address, the
+    // product's price, the configured network and USDC — pinned against the
+    // configuration and the product, not only against what verify received,
+    // since a wrong edit to their shared source would pass that comparison.
+    expect(h.facilitator.settleArgs).toHaveLength(1)
+    const settledRequirements = h.facilitator.settleArgs[0].requirements
+    expect(settledRequirements).toMatchObject({
+      scheme: 'exact',
+      network: 'eip155:84532',
+      payTo: PAY_TO,
+      amount: CHAT_PRODUCT.price,
+      asset: SEPOLIA_USDC,
+    })
+    expect(h.facilitator.verifyArgs[0].requirements).toMatchObject({ payTo: PAY_TO, amount: CHAT_PRODUCT.price })
+    // The payload settled is the buyer's own signed authorization.
+    expect(h.facilitator.settleArgs[0].payload).toEqual(h.facilitator.verifyArgs[0].payload)
+    expect((h.facilitator.settleArgs[0].payload.payload as { authorization: { from: string } }).authorization.from).toBe(
+      buyer.address,
+    )
   })
 
   it('a request whose payment is rejected at verification is not forwarded and the upstream key is never sent', async () => {

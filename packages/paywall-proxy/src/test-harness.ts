@@ -176,9 +176,22 @@ export async function startHaven(
   return mock
 }
 
+/** One facilitator call's arguments, as the proxy passed them. */
+export interface FacilitatorCall {
+  payload: PaymentPayload
+  requirements: PaymentRequirements
+}
+
 export class FakeFacilitator implements CdpFacilitator {
   verifyCalls = 0
   settleCalls = 0
+  /**
+   * #5033: what the proxy asked the facilitator to verify and settle. The
+   * counts alone could not see a wrong `payTo` or amount — a settle with
+   * `payTo: 0x…dEaD, amount: '1'` left every kit test green.
+   */
+  verifyArgs: FacilitatorCall[] = []
+  settleArgs: FacilitatorCall[] = []
   events: string[] = []
   verifyResult: VerifyResponse | Error = { isValid: true }
   settleResult: SettleResponse | Error | (() => Promise<SettleResponse>) = {
@@ -187,15 +200,17 @@ export class FakeFacilitator implements CdpFacilitator {
     network: 'eip155:84532',
   }
 
-  async verify(): Promise<VerifyResponse> {
+  async verify(payload: PaymentPayload, requirements: PaymentRequirements): Promise<VerifyResponse> {
     this.verifyCalls += 1
+    this.verifyArgs.push({ payload, requirements })
     this.events.push('verify')
     if (this.verifyResult instanceof Error) throw this.verifyResult
     return this.verifyResult
   }
 
-  async settle(): Promise<SettleResponse> {
+  async settle(payload: PaymentPayload, requirements: PaymentRequirements): Promise<SettleResponse> {
     this.settleCalls += 1
+    this.settleArgs.push({ payload, requirements })
     this.events.push('settle')
     const result = this.settleResult
     if (result instanceof Error) throw result

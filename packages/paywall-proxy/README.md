@@ -594,8 +594,9 @@ The receipt carries:
 - the VAT treatment your rule gives that declaration, and the VAT figures it
   implies;
 - one line built from the products file entry: `<name> — <description>` (the
-  `id` when there is no name), the price, and no billing period for a
-  per-call product;
+  `id` when there is no name), the price that settled (the products file's
+  price when the payment was made, kept even if you change the price later),
+  and no billing period for a per-call product;
 - a receipt number derived from the settlement transaction hash, so the same
   transaction gives the same number after a restart and on a retry, and an OCR
   reference derived from it;

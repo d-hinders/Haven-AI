@@ -1033,6 +1033,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       return buildReceiptForPayment({
         settings,
         product,
+        settledAmountAtomic: BigInt(record.amount),
         chain: config.chain,
         payTo: config.payTo,
         payer: record.payer,

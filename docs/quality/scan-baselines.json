@@ -4,9 +4,9 @@
     {
       "id": "sizing-source-test-lines",
       "block": "sizing",
-      "name": "sizing: source / test lines per package (13 pairs, pinned with git ls-tree and git show)",
+      "name": "sizing: source / test lines per package (15 pairs, pinned with git ls-tree and git show)",
       "kind": "grows",
-      "command": "# Pairs, in order: backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp.\n# Each prints source lines, then test lines (.test. / __tests__ / .spec. split), .ts|.tsx|.mjs under packages/<p>/src.\nfor p in backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp; do\n  git ls-tree -r --name-only \"$SHA\" \"packages/$p/src\" | grep -E '\\.(ts|tsx|mjs)$' > \"$SCRATCH/sz-$p.txt\"\n  src=0; tst=0\n  while IFS= read -r f; do\n    n=$(git show \"$SHA:$f\" | wc -l)\n    if printf '%s' \"$f\" | grep -qE '\\.test\\.|__tests__|\\.spec\\.'; then tst=$((tst+n)); else src=$((src+n)); fi\n  done < \"$SCRATCH/sz-$p.txt\"\n  echo \"$src\"; echo \"$tst\"\ndone",
+      "command": "# Pairs, in order: backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp merchant-payments paywall-proxy.\n# Each prints source lines, then test lines (.test. / __tests__ / .spec. split), .ts|.tsx|.mjs under packages/<p>/src.\nfor p in backend frontend sdk core qa-agent mcp-server signer connect cli ops ui mcp demo-merchant-mcp merchant-payments paywall-proxy; do\n  git ls-tree -r --name-only \"$SHA\" \"packages/$p/src\" | grep -E '\\.(ts|tsx|mjs)$' > \"$SCRATCH/sz-$p.txt\"\n  src=0; tst=0\n  while IFS= read -r f; do\n    n=$(git show \"$SHA:$f\" | wc -l)\n    if printf '%s' \"$f\" | grep -qE '\\.test\\.|__tests__|\\.spec\\.'; then tst=$((tst+n)); else src=$((src+n)); fi\n  done < \"$SCRATCH/sz-$p.txt\"\n  echo \"$src\"; echo \"$tst\"\ndone",
       "figures": [
         137317,
         186022,
@@ -33,7 +33,11 @@
         3206,
         6130,
         6587,
-        10041
+        10041,
+        3517,
+        1751,
+        5689,
+        5056
       ],
       "sha": "682c5fc3e",
       "tolerance": 0.05,

@@ -1650,6 +1650,20 @@ const agentPaymentStatus = {
         'legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value ' +
         'outside this enum.',
     },
+    // #5030: the required checkout-details field names the merchant's challenge
+    // carried, recorded at authorize. Present only when it asked for at least
+    // one; absent otherwise (a challenge that asked for nothing, or a row
+    // authorized before #5030). `haven_submit` reads it when the stored
+    // challenge itself cannot be read, so a failed read still fails closed for
+    // a payment whose challenge asked for a required detail.
+    checkout_details_required_fields: {
+      type: 'array',
+      items: { type: 'string', enum: ['receipt_email', 'billing_address', 'shipping_address'] },
+      description:
+        'The required checkout-details field names the merchant challenge carried, recorded at ' +
+        'authorize (#5030). Field names only, never the owner\'s values. Omitted when the challenge ' +
+        'asked for no required field, and on rows authorized before #5030.',
+    },
     merchant_settlement_recorded: {
       type: 'boolean',
       description:

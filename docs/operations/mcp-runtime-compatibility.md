@@ -181,6 +181,31 @@ last-verified: "2026-11-12"
 > `packages/mcp-server/src/tools/checkout-details-plain-http.test.ts`.
 > `last-verified` is not re-stamped: this block is the scope.
 
+> **Contract change (#5030, 2026-11-22): the submit fails closed on a failed
+> stored-challenge read, and the pay tool's estimate counts the caller's
+> headers.** `packages/mcp-server/src/tools/**` is on this contract's cover
+> list. `haven_submit`'s stored-challenge read (`GET
+> /x402/:id/payment-required`) is rate-limited, so a 429 is realistic; when it
+> fails, the submit now refuses as `CHECKOUT_DETAILS_UNAVAILABLE` with
+> `reason: "challenge_unreadable"` — before the funding relay (EIP-3009) and
+> before the settlement child (erc7710) — ONLY for a payment whose challenge
+> asked for a required checkout detail (owner decision 2026-11-22, option b).
+> Every other payment proceeds as today: a challenge that asked for nothing, a
+> direct payment (a 409), a 200 with no stored challenge, and a payment whose
+> record cannot be read either. The fact is recorded at authorize on the intent
+> (`machine_metadata.checkout_details_required_fields`, field names only) and
+> served on `GET /machine-payments/:id/status` as the optional
+> `checkout_details_required_fields` array — present only when the challenge
+> asked for at least one. `haven_pay_x402_quote`'s 16 KB estimate now counts
+> the caller's own `headers` in both modes, so a 14.5 KB `Cookie` plus a
+> required answer refuses `over_budget` before any intent instead of answering
+> 431 at the merchant. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash or `next-arguments-corpus.json` row
+> changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-plain-http.test.ts`, plus the
+> backend's own status-read and authorize suites.
+> `last-verified` is not re-stamped: this block is the scope.
+
 > **Contract change (#4872, part 2a, 2026-11-19): checkout details on the
 > hosted MCP-merchant tools.** `packages/mcp-server/src/tools/**` is on this
 > contract's cover list. `haven_pay_mcp_tool` and

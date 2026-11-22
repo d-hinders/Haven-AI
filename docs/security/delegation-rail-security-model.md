@@ -1677,7 +1677,12 @@ signer imports:
   before it relays the funding signature or submits the settlement child, and
   still never stores or logs the values. The new read it uses, `GET
   /x402/:id/payment-required`, re-serves only the merchant's own challenge to
-  the agent that created the intent. The design is
+  the agent that created the intent. When that read fails, the submit fails
+  closed only for a payment whose challenge asked for a required detail
+  (#5030): the intent records those field NAMES at authorize
+  (`machine_metadata.checkout_details_required_fields`) and the payment status
+  read serves them, so the refusal needs no owner value and grants no
+  authority. The design is
   `docs/architecture/13-checkout-details.md`.
 
 The signer's x402 arm (#3281) signs only the first two shapes, however validly

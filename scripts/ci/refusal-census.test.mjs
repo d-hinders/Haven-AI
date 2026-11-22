@@ -25,6 +25,7 @@ import {
   assertPlausible,
   dedupeKey,
   emittedKeys,
+  genericReasonsOf,
   joinRefusals,
   mapperReadKeys,
   readRecording,
@@ -32,7 +33,15 @@ import {
   scanSdkSites,
   transportError,
 } from './refusal-census.mjs'
-import { FixtureHavenApiError, fixtureNormalize } from './fixtures/refusal-census/normalize.fixture.mjs'
+import {
+  FIXTURE_GENERIC_REASONS,
+  FIXTURE_RATE_LIMITED,
+  FIXTURE_REFUSED_AS_MADE,
+  FIXTURE_RELAYER_BUDGET_REASON,
+  FIXTURE_TRANSIENT,
+  FixtureHavenApiError,
+  fixtureNormalize,
+} from './fixtures/refusal-census/normalize.fixture.mjs'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REPO = resolve(HERE, '../..')
@@ -105,7 +114,7 @@ test('assertPlausible refuses a small recording and one without the control row'
 })
 
 test('the join can say no: a mapped code is not reported as unmapped', () => {
-  const result = joinRefusals({ rows, normalize: fixtureNormalize, HavenApiError: FixtureHavenApiError })
+  const result = joinRefusals({ rows, normalize: fixtureNormalize, genericReasons: FIXTURE_GENERIC_REASONS, HavenApiError: FixtureHavenApiError })
   const codes = result.typed.map((row) => row.code)
   assert.ok(!codes.includes('delegation_expired'), 'delegation_expired is answered by the fixture mapper')
   assert.ok(!codes.includes('submission_outcome_unknown'), 'submission_outcome_unknown is answered by the fixture mapper')
@@ -113,7 +122,7 @@ test('the join can say no: a mapped code is not reported as unmapped', () => {
 })
 
 test('the join can say yes: a seeded unmapped code is reported', () => {
-  const result = joinRefusals({ rows, normalize: fixtureNormalize, HavenApiError: FixtureHavenApiError })
+  const result = joinRefusals({ rows, normalize: fixtureNormalize, genericReasons: FIXTURE_GENERIC_REASONS, HavenApiError: FixtureHavenApiError })
   const codes = result.typed.map((row) => row.code)
   assert.ok(codes.includes('task_budget_not_open'), 'an unmarked typed code must be reported')
   assert.ok(result.control.unmappedReported)
@@ -125,14 +134,53 @@ test('the positive control refuses a mapper that answers nothing', () => {
   // that reports nothing would pass the test above.
   const answersNothing = (err) => ({ success: false, code: err.code, statusCode: err.statusCode, next_action: 'stop_and_tell_user' })
   assert.throws(
-    () => joinRefusals({ rows, normalize: answersNothing, HavenApiError: FixtureHavenApiError }),
+    () => joinRefusals({ rows, normalize: answersNothing, genericReasons: FIXTURE_GENERIC_REASONS, HavenApiError: FixtureHavenApiError }),
     /positive control failed: delegation_expired is not answered/,
   )
 })
 
+test('#5040: a typed stop answered inside API_ERROR is not reported as unanswered', () => {
+  const relayer = [
+    ...rows,
+    { method: 'POST', route: '/x402/authorize', status: 429, body: { error_code: 'relayer_budget_exceeded', error: 'budget' } },
+  ]
+  const result = joinRefusals({ rows: relayer, normalize: fixtureNormalize, genericReasons: FIXTURE_GENERIC_REASONS, HavenApiError: FixtureHavenApiError })
+  const codes = result.typed.map((row) => row.code)
+  assert.ok(!codes.includes('relayer_budget_exceeded'), 'its own reason answers it, inside API_ERROR')
+  // The generic branch is still counted: a typed code with no arm of its own stays reported.
+  assert.ok(codes.includes('task_budget_not_open'))
+})
+
+test('#5040: the control uses the same predicate — a set missing the generic reasons makes the join refuse', () => {
+  // As if the predicate read every API_ERROR with any reason as answered: the
+  // seeded unmapped code then reads answered, and the join must refuse to
+  // report rather than report nothing.
+  assert.throws(
+    () => joinRefusals({ rows, normalize: fixtureNormalize, genericReasons: new Set(['not a generic reason']), HavenApiError: FixtureHavenApiError }),
+    /positive control failed: .* is not reported as unmapped/,
+  )
+})
+
+test('#5040: the generic reasons are read from the mapper itself', () => {
+  assert.deepEqual(genericReasonsOf(fixtureNormalize, FixtureHavenApiError), FIXTURE_GENERIC_REASONS)
+  // Without an explicit set, the join derives the same one and reports as before.
+  const derived = joinRefusals({ rows, normalize: fixtureNormalize, HavenApiError: FixtureHavenApiError })
+  assert.ok(derived.typed.map((row) => row.code).includes('task_budget_not_open'))
+  // A mapper whose untyped answers carry no reason cannot be probed.
+  const noReasons = (err) => ({ success: false, code: err.code, statusCode: err.statusCode, next_action: 'stop_and_tell_user' })
+  assert.throws(() => genericReasonsOf(noReasons, FixtureHavenApiError), /did not answer API_ERROR with a reason/)
+})
+
+test('#5040: the fixture\'s reasons are the real mapper\'s strings', () => {
+  const errorsSource = readFileSync(join(REPO, 'packages/mcp-server/src/tools/support/errors.ts'), 'utf8')
+  for (const reason of [FIXTURE_REFUSED_AS_MADE, FIXTURE_RATE_LIMITED, FIXTURE_TRANSIENT, FIXTURE_RELAYER_BUDGET_REASON]) {
+    assert.ok(errorsSource.includes(`'${reason}'`), `errors.ts carries: ${reason.slice(0, 60)}…`)
+  }
+})
+
 test('the join applies the allowlist and separates the agent payment routes', () => {
   const allowlist = new Map([['prepare_failed', { code: 'prepare_failed', disposition: 'deliberately-transient', reason: 'retry can change it' }]])
-  const result = joinRefusals({ rows, normalize: fixtureNormalize, allowlist, HavenApiError: FixtureHavenApiError })
+  const result = joinRefusals({ rows, normalize: fixtureNormalize, genericReasons: FIXTURE_GENERIC_REASONS, allowlist, HavenApiError: FixtureHavenApiError })
   const prepare = result.typed.find((row) => row.code === 'prepare_failed')
   assert.equal(prepare.disposition, 'deliberately-transient')
   assert.equal(prepare.reason, 'retry can change it')
@@ -142,7 +190,7 @@ test('the join applies the allowlist and separates the agent payment routes', ()
 })
 
 test('the join lists 5xx answered transient and non-answers', () => {
-  const result = joinRefusals({ rows, normalize: fixtureNormalize, HavenApiError: FixtureHavenApiError })
+  const result = joinRefusals({ rows, normalize: fixtureNormalize, genericReasons: FIXTURE_GENERIC_REASONS, HavenApiError: FixtureHavenApiError })
   const routes = result.transient5xx.map((row) => row.route)
   assert.ok(routes.includes('POST /payments'), 'a 500 with no code reads transient')
   assert.ok(routes.includes('GET /contacts/boom'), 'a test stub route is listed, not filtered')

@@ -6245,6 +6245,8 @@ export type components = {
             submission_outcome_pending?: boolean;
             /** @description Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value outside this enum. */
             settlement_scheme?: ("eip3009" | "erc7710") | null;
+            /** @description The required checkout-details field names the merchant challenge carried, recorded at authorize (#5030). Field names only, never the owner's values. Omitted when the challenge asked for no required field, and on rows authorized before #5030. */
+            checkout_details_required_fields?: ("receipt_email" | "billing_address" | "shipping_address")[];
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
             /** @description The merchant settlement transaction Haven recorded and verified on-chain (#4530) — the transaction `merchant_settlement_recorded` reports, named so a status read can confirm WHICH one was recorded (the settlement sweep records one the agent never reported). Present only when `merchant_settlement_recorded` is; omitted otherwise, and never the merchant's unverified echo. A public on-chain transaction id, not a secret. */

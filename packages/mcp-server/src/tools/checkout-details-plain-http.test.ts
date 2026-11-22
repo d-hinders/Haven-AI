@@ -14,7 +14,7 @@
  * - **Never logged.** No value reaches console/stdout/stderr.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HavenClient, X402Erc7710AlreadySettledError, X_CHECKOUT_DETAILS_HEADER, x402RetryHeadersFor } from '@haven_ai/sdk'
+import { HavenClient, X402Erc7710AlreadySettledError, X_CHECKOUT_DETAILS_HEADER, resolveCheckoutDetails, x402RetryHeadersFor } from '@haven_ai/sdk'
 import { createToolHandlers } from '../tools.js'
 import {
   AGENT_RESPONSE,
@@ -140,6 +140,61 @@ describe('#4872 hosted plain HTTP: haven_pay_x402_quote refuses before any inten
     expect(out.message).not.toContain('No payment was created')
     expect(intentCalls()).toEqual([])
   })
+
+  // #5030: the caller's own headers ride the paid request, so the 16 KB block
+  // estimate must count them. The SDK's estimate does; the hosted pay tool now
+  // passes them through, so a 14.5 KB Cookie plus a required answer refuses
+  // here instead of answering 431 at the merchant.
+  const COOKIE = 'x'.repeat(14_500)
+
+  it('payment_required mode: a 14.5 KB caller Cookie plus a required receipt_email refuses over_budget before POST /x402', async () => {
+    stubFetch(payStubs(STORED))
+    const out = fail(await client().haven_pay_x402_quote({ ...PAY(REQUIRED_EMAIL), headers: { Cookie: COOKIE } }))
+    expect(out).toMatchObject({
+      code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+      reason: 'over_budget',
+      missing_fields: ['receipt_email'],
+      phase: 'not_started',
+    })
+    expect(intentCalls()).toEqual([])
+  })
+
+  it('request mode: the same refusal, before POST /x402', async () => {
+    stubFetch({
+      ...payStubs(STORED),
+      'GET /paid': { status: 402, body: challenge(REQUIRED_EMAIL) },
+    })
+    const out = fail(
+      await fixtureHandlers().haven_pay_x402_quote({
+        url: PAYMENT_REQUIRED.resource.url,
+        max_amount_human: '2',
+        headers: { Cookie: COOKIE },
+      }),
+    )
+    expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', reason: 'over_budget', missing_fields: ['receipt_email'] })
+    expect(intentCalls()).toEqual([])
+  })
+
+  it('the refusal matches the SDK estimate for the same request', async () => {
+    // The SDK's own decision for the same challenge and the same caller
+    // headers: the hosted estimate must agree with it, or the two surfaces
+    // answer the same request differently.
+    const sdkClient = {
+      getAgent: async () => ({ id: AGENT_RESPONSE.id }),
+      get: async <T>(path: string): Promise<T> => {
+        if (path.endsWith('/checkout-details')) return STORED as T
+        throw new Error(`unexpected read: ${path}`)
+      },
+    }
+    const decision = await resolveCheckoutDetails(sdkClient, challenge(REQUIRED_EMAIL), { Cookie: COOKIE })
+    expect(decision).toMatchObject({ kind: 'refuse', reason: 'over_budget', missingFields: ['receipt_email'] })
+  })
+
+  it('without the caller Cookie the same request proceeds: the headers are what tip the estimate', async () => {
+    stubFetch(payStubs(STORED))
+    ok(await client().haven_pay_x402_quote(PAY(REQUIRED_EMAIL)))
+    expect(intentCalls()).toHaveLength(1)
+  })
 })
 
 describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () => {
@@ -149,6 +204,8 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
     opts: {
       stored?: { status: number; body: unknown }
       status?: Record<string, unknown> | 'unreadable'
+      /** #5030: the required checkout-details fields the intent recorded at authorize. */
+      requiredFields?: string[]
       relay?: { status: number; body: unknown }
       flow?: 'plain_http' | 'mcp_tool'
     } = {},
@@ -160,8 +217,16 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       [DETAILS_PATH]: { status: 200, body: details },
       ...(opts.status === 'unreadable'
         ? { 'GET /machine-payments/pay_x402/status': { status: 500, body: { error: 'boom' } } }
-        : opts.status
-          ? { 'GET /machine-payments/pay_x402/status': { status: 200, body: x402PreflightStatus(opts.status) } }
+        : opts.status || opts.requiredFields
+          ? {
+              'GET /machine-payments/pay_x402/status': {
+                status: 200,
+                body: x402PreflightStatus({
+                  ...(opts.status ?? {}),
+                  ...(opts.requiredFields ? { checkout_details_required_fields: opts.requiredFields } : {}),
+                }),
+              },
+            }
           : {}),
       'POST /payments/pay_x402/sign': opts.relay ?? { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
       'GET /x402/pay_x402/merchant-call-context':
@@ -260,8 +325,68 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       expect(submit).not.toHaveBeenCalled()
     })
 
-    it('the stored challenge cannot be read: the submit proceeds as today, with no answer and no details read', async () => {
+    it('the stored challenge cannot be read and the intent recorded no required detail: the submit proceeds as today, with no answer and no details read', async () => {
       const { haven, submit } = erc7710(REQUIRED_EMAIL, STORED, HEADER, { stored: { status: 500, body: { error: 'boom' } } })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(result.data.retry_headers).toEqual(x402RetryHeadersFor(HEADER))
+      expect(detailReads()).toEqual([])
+    })
+
+    // #5030 (owner decision 2026-11-22, option b): a failed stored-challenge
+    // read fails closed ONLY for a payment whose challenge asked for a required
+    // detail — the intent records that at authorize, and the status read (not
+    // rate-limited) answers when the challenge read cannot.
+    for (const [label, status] of [
+      ['503', 503],
+      ['429 (the money-path rate limit)', 429],
+    ] as const) {
+      it(`the stored challenge cannot be read (${label}) and the intent recorded a required detail: refused BEFORE the settlement child is submitted`, async () => {
+        const { haven, submit } = erc7710(REQUIRED_EMAIL, STORED, HEADER, {
+          stored: { status, body: { error: 'unavailable' } },
+          requiredFields: ['receipt_email'],
+          status: { status: 'pending_signature' },
+        })
+        const out = fail(await createToolHandlers(haven).haven_submit(SUBMIT))
+        expect(out).toMatchObject({
+          code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+          reason: 'challenge_unreadable',
+          phase: 'not_started',
+          paymentId: 'pay_x402',
+        })
+        // The read gave no field names, so the message names none.
+        expect(out.message).toContain('Nothing was funded, submitted or sent for this payment')
+        expect(out.message).not.toContain('The merchant requires the')
+        expect(submit).not.toHaveBeenCalled()
+        expect(detailReads()).toEqual([])
+      })
+    }
+
+    it('the stored challenge cannot be read and the intent recorded no required detail: the submit proceeds (503)', async () => {
+      const { haven, submit } = erc7710(REQUIRED_EMAIL, STORED, HEADER, {
+        stored: { status: 503, body: { error: 'unavailable' } },
+        requiredFields: [],
+      })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(result.data.retry_headers).toEqual(x402RetryHeadersFor(HEADER))
+      expect(detailReads()).toEqual([])
+    })
+
+    it('a 200 with no stored challenge: the submit proceeds as today', async () => {
+      const { haven, submit } = erc7710(undefined, STORED, HEADER, {
+        stored: { status: 200, body: { payment_id: 'pay_x402', payment_required: null } },
+      })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(submit).toHaveBeenCalledTimes(1)
+      expect(result.data.retry_headers).toEqual(x402RetryHeadersFor(HEADER))
+      expect(detailReads()).toEqual([])
+    })
+
+    it('a direct payment (a 409): nothing is read and the submit proceeds as today', async () => {
+      const { haven, submit } = erc7710(undefined, STORED, HEADER, {
+        stored: { status: 409, body: { error: 'Not an x402 intent', error_code: 'payment_required_unavailable' } },
+      })
       const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
       expect(submit).toHaveBeenCalledTimes(1)
       expect(result.data.retry_headers).toEqual(x402RetryHeadersFor(HEADER))
@@ -331,6 +456,54 @@ describe('#4872 hosted plain HTTP: haven_submit decides before it spends', () =>
       expect(detailReads()).toEqual([])
       expect(result.data.additional_retry_headers).toBeUndefined()
       expect(fundingRelays()).toHaveLength(1)
+    })
+
+    // #5030 (owner decision 2026-11-22, option b): a failed stored-challenge
+    // read fails closed ONLY for a payment whose challenge asked for a required
+    // detail, and the refusal lands BEFORE the funding relay.
+    for (const [label, status] of [
+      ['503', 503],
+      ['429 (the money-path rate limit)', 429],
+    ] as const) {
+      it(`the stored challenge cannot be read (${label}) and the intent recorded a required detail: refused BEFORE the funding relay`, async () => {
+        const haven = submitHaven(REQUIRED_EMAIL, STORED, {
+          stored: { status, body: { error: 'unavailable' } },
+          requiredFields: ['receipt_email'],
+          status: { status: 'pending_signature' },
+        })
+        const out = fail(await createToolHandlers(haven).haven_submit(SUBMIT))
+        expect(out).toMatchObject({
+          code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+          reason: 'challenge_unreadable',
+          phase: 'not_started',
+          paymentId: 'pay_x402',
+        })
+        expect(out.message).toContain('Nothing was funded, submitted or sent for this payment')
+        expect(out.message).not.toContain('The merchant requires the')
+        expect(fundingRelays()).toEqual([])
+        expect(detailReads()).toEqual([])
+      })
+    }
+
+    it('the stored challenge cannot be read and the intent recorded no required detail: the relay proceeds as today', async () => {
+      const haven = submitHaven(REQUIRED_EMAIL, STORED, {
+        stored: { status: 503, body: { error: 'unavailable' } },
+        requiredFields: [],
+      })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(fundingRelays()).toHaveLength(1)
+      expect(result.data.additional_retry_headers).toBeUndefined()
+      expect(detailReads()).toEqual([])
+    })
+
+    it('a 200 with no stored challenge: the relay proceeds as today', async () => {
+      const haven = submitHaven(undefined, STORED, {
+        stored: { status: 200, body: { payment_id: 'pay_x402', payment_required: null } },
+      })
+      const result = ok<Record<string, any>>(await createToolHandlers(haven).haven_submit(SUBMIT))
+      expect(fundingRelays()).toHaveLength(1)
+      expect(result.data.additional_retry_headers).toBeUndefined()
+      expect(detailReads()).toEqual([])
     })
 
     it('a REPEATED submit of a confirmed intent, sharing now off: the relay answers (409), never the checkout refusal', async () => {

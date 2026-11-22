@@ -1,5 +1,6 @@
 import { x402Description } from '../../domain/x402-description.js'
 import {
+  checkoutDetailsRequiredFieldsOf,
   machineMetadataOrNull,
   machineMetadataRecord,
   settlementSchemeOf,
@@ -120,6 +121,18 @@ export interface AgentPaymentStatus {
    * does not declare.
    */
   settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #5030: the required checkout-details field names the merchant's challenge
+   * carried, recorded on the intent at authorize
+   * (`machine_metadata.checkout_details_required_fields`). Present only when
+   * the challenge asked for at least one required field; absent otherwise —
+   * a challenge that asked for nothing, and a row authorized before #5030.
+   * `haven_submit` reads it when the stored challenge itself cannot be read,
+   * so a failed read still fails closed for a payment whose challenge asked
+   * for a required detail (owner decision 2026-11-22, option b). Field names
+   * only, never the owner's values.
+   */
+  checkout_details_required_fields?: string[]
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified
@@ -1075,6 +1088,14 @@ function statusFromRow(
       // `isFundedX402AwaitingMerchantLeg` already performs, surfaced so a
       // caller does not have to re-derive it from `machine_metadata`.
       settlement_scheme: narrowSettlementScheme(settlementSchemeOf(payment.machine_metadata)),
+      // #5030: the required checkout-details field names the challenge carried,
+      // recorded at authorize. Present only when it asked for at least one —
+      // absent, never an empty array, so the wire keeps its "absent = nothing
+      // required" rule. `haven_submit` reads it when the stored challenge
+      // itself cannot be read.
+      ...(checkoutDetailsRequiredFieldsOf(payment.machine_metadata).length > 0
+        ? { checkout_details_required_fields: checkoutDetailsRequiredFieldsOf(payment.machine_metadata) }
+        : {}),
       // #3518: WHICH budget metered this payment, recorded at authorize —
       // the settle summary joins its allowance rows on this instead of
       // re-deriving a (token, payee) selection whose winner can move

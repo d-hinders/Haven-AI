@@ -1368,8 +1368,11 @@ export function createPlainHttpX402Handlers(
             // share refuses HERE — after the cap and the scheme, before any
             // funding intent or settlement child exists — sized for the option
             // actually paid. The pay tools on the MCP-merchant flow do the same.
+            // #5030: the caller's own headers ride the paid request too, so the
+            // estimate counts them (the catalog tools have none to pass).
             await refuseUnshareableCheckoutDetails(haven, payReq, selection.option, {
               idempotencyKey: args.idempotency_key ?? derivedKey,
+              requestHeaders: args.headers,
             })
           }
 

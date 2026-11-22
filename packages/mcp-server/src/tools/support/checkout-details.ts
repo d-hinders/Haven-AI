@@ -24,7 +24,11 @@
  *   the funding relay (`checkoutDetailsBeforeSubmit`), on erc7710 availability
  *   before the settlement child is submitted and the real block right after
  *   it (`checkoutDetailsAfterSubmit`). The agent sends this paid request
- *   itself, so the answer rides the tool result's retry headers.
+ *   itself, so the answer rides the tool result's retry headers. When the
+ *   stored-challenge read itself fails, the submit fails closed ONLY for a
+ *   payment whose challenge asked for a required detail — the intent records
+ *   that at authorize (#5030, owner decision 2026-11-22 option b) — and every
+ *   other payment proceeds as today.
  *
  * The values pass through this server only in memory. They are never stored,
  * logged or merged into the echoed `extensions`. On the MCP-merchant paths
@@ -36,11 +40,13 @@
  */
 import {
   actualPaidHeaderBlockBytes,
+  checkoutDetailsChallengeUnreadableError,
   checkoutDetailsRefusalError,
   CheckoutDetailsUnavailableError,
   checkoutDetailsRequestOf,
   decideCheckoutDetails,
   estimatePaidHeaderBlockBytes,
+  HavenApiError,
   isErc7710Option,
   parseCheckoutDetailsRequest,
   selectStandardPaymentOption,
@@ -65,12 +71,18 @@ const STORED_CHALLENGE_MAX_BYTES = 65536
  * sized for the option that will actually be paid. A challenge that asks for
  * nothing reads nothing. A required request whose challenge is too large to be
  * stored is refused too: settle could never read it back to answer it.
+ *
+ * `requestHeaders` are the caller's own headers on the paid request (the
+ * plain-HTTP pay tool has them; the catalog tools do not). They ride that
+ * request too, so the SDK's estimate counts them (#5030) — without them a
+ * 14.5 KB `Cookie` plus a required answer could pass this check and then
+ * answer 431 at the merchant.
  */
 export async function refuseUnshareableCheckoutDetails(
   haven: CheckoutReader,
   paymentRequired: X402PaymentRequired,
   paidOption: X402PaymentOption,
-  { idempotencyKey }: { idempotencyKey?: string } = {},
+  { idempotencyKey, requestHeaders }: { idempotencyKey?: string; requestHeaders?: HeadersInit } = {},
 ): Promise<void> {
   const request = checkoutDetailsRequestOf(paymentRequired)
   if (request === null) return
@@ -81,7 +93,7 @@ export async function refuseUnshareableCheckoutDetails(
   }
   const availability = await haven.readCheckoutDetails()
   const decided = withinHeaderBlock(decideCheckoutDetails(request, availability), request, (answerHeader) =>
-    estimatePaidHeaderBlockBytes({ paymentRequired, accepted: paidOption, isErc7710: isErc7710Option(paidOption), answerHeader }),
+    estimatePaidHeaderBlockBytes({ paymentRequired, accepted: paidOption, isErc7710: isErc7710Option(paidOption), answerHeader, requestHeaders }),
   )
   if (decided.kind === 'refuse') throw checkoutDetailsRefusalError(decided.missingFields, decided.reason, { priorPaymentPossible })
 }
@@ -210,19 +222,43 @@ export async function checkoutDetailsWhilePending(
 }
 
 /**
- * #4872 part 2b: the merchant's challenge as stored at authorize, read for
- * `haven_submit`. `null` when the payment is not x402 (a direct payment's
- * 409), stored no challenge, or the read failed: the submit then proceeds as
- * it does today and sends no answer. That degrades to the unsupported-path
- * rule (the merchant serves the paid request without the field, §5); the pay
- * tool already refused before any intent if a required field could not be
- * shared.
+ * #4872 part 2b / #5030: the merchant's challenge as stored at authorize, read
+ * for `haven_submit`.
+ *
+ * `paymentRequired` is `null` when the payment is not x402 (a direct payment's
+ * 409), stored no challenge, or the read failed. `requiredFields` is the
+ * required checkout-details field names the intent recorded at authorize
+ * (#5030): read from the payment status when the challenge read failed, so a
+ * failed read can still fail closed for a payment whose challenge asked for a
+ * required detail. `null` when neither read could answer.
  */
+export interface StoredChallengeForSubmit {
+  paymentRequired: X402PaymentRequired | null
+  requiredFields: string[] | null
+}
+
 export async function storedChallengeForSubmit(
-  haven: Pick<HavenClient, 'getX402StoredPaymentRequired'>,
+  haven: Pick<HavenClient, 'getX402StoredPaymentRequired' | 'getPaymentStatus'>,
   paymentId: string,
-): Promise<X402PaymentRequired | null> {
-  return haven.getX402StoredPaymentRequired(paymentId).catch(() => null)
+): Promise<StoredChallengeForSubmit> {
+  try {
+    return { paymentRequired: await haven.getX402StoredPaymentRequired(paymentId), requiredFields: null }
+  } catch (err) {
+    // A 404 (unknown or foreign) and a 409 (a direct payment) are answers, not
+    // failures: neither can carry a stored checkout-details request.
+    if (err instanceof HavenApiError && (err.statusCode === 404 || err.statusCode === 409)) {
+      return { paymentRequired: null, requiredFields: null }
+    }
+    // The read failed — a 429 from the money-path rate limit is realistic. The
+    // intent recorded whether the challenge asked for a required detail, and
+    // the status read is not rate-limited, so it answers when the challenge
+    // read cannot. A failed status read leaves the fact unknown (`null`).
+    const requiredFields = await haven.getPaymentStatus(paymentId).then(
+      (status) => status.checkoutDetailsRequiredFields ?? [],
+      () => null,
+    )
+    return { paymentRequired: null, requiredFields }
+  }
 }
 
 /**
@@ -233,14 +269,25 @@ export async function storedChallengeForSubmit(
  * erc7710 only availability is decided here, and the real block right after
  * the submit (`checkoutDetailsAfterSubmit`). Refuses as `before_payment` —
  * nothing was funded, submitted or sent.
+ *
+ * #5030: when the stored-challenge read failed and the intent recorded a
+ * required checkout detail, this refuses as `challenge_unreadable` — the read
+ * gave no field names, so the message names none. A payment whose challenge
+ * asked for nothing (or whose record cannot be read either) proceeds as today.
  */
 export async function checkoutDetailsBeforeSubmit(
   haven: CheckoutReader,
-  input: { paymentRequired: X402PaymentRequired | null; scheme: 'erc7710' | 'eip3009'; paymentId: string },
+  input: { stored: StoredChallengeForSubmit; scheme: 'erc7710' | 'eip3009'; paymentId: string },
 ): Promise<SettleCheckoutDetails> {
-  const paymentRequired = input.paymentRequired
-  const request = paymentRequired ? checkoutDetailsRequestOf(paymentRequired) : null
-  if (paymentRequired === null || request === null) return { request: null, availability: null, header: undefined }
+  const paymentRequired = input.stored.paymentRequired
+  if (paymentRequired === null) {
+    if (input.stored.requiredFields !== null && input.stored.requiredFields.length > 0) {
+      throw checkoutDetailsChallengeUnreadableError(input.stored.requiredFields, { intentExists: true, paymentId: input.paymentId })
+    }
+    return { request: null, availability: null, header: undefined }
+  }
+  const request = checkoutDetailsRequestOf(paymentRequired)
+  if (request === null) return { request: null, availability: null, header: undefined }
   const availability = await haven.readCheckoutDetails()
   const base = decideCheckoutDetails(request, availability)
   const option = input.scheme === 'eip3009' ? selectStandardPaymentOption(paymentRequired.accepts) : null

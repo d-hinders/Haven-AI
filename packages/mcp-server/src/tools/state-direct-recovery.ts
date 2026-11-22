@@ -1024,10 +1024,16 @@ export function createStateDirectRecoveryHandlers(
           // refusal before the submit stands only while the intent is still
           // pending (`checkoutDetailsWhilePending`); one after it returns no
           // payment_header, so nothing can be redeemed (`unsent`).
-          const checkoutChallenge = await storedChallengeForSubmit(haven, args.payment_id)
-          const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, () =>
-            checkoutDetailsBeforeSubmit(haven, { paymentRequired: checkoutChallenge, scheme: 'erc7710', paymentId: args.payment_id }),
-          )
+          //
+          // #5030: the stored-challenge read itself moves INSIDE the guard, so
+          // a failed read is decided under the same pending rule. When it fails
+          // and the intent recorded a required checkout detail, the submit
+          // refuses before the child is submitted; every other payment
+          // proceeds as today (owner decision 2026-11-22, option b).
+          const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, async () => {
+            const stored = await storedChallengeForSubmit(haven, args.payment_id)
+            return checkoutDetailsBeforeSubmit(haven, { stored, scheme: 'erc7710', paymentId: args.payment_id })
+          })
           // #2041 (haven-reviewer, SHOULD-FIX): route this through the SAME
           // expiry mapping the 3009 relay uses. The settlement child's own
           // expiry is the binding window on this scheme and it is the SHORTEST
@@ -1112,10 +1118,16 @@ export function createStateDirectRecoveryHandlers(
         // block (this tool never sees the agent's payment header). A direct
         // payment has no stored challenge (a 409), so nothing is read. A
         // refusal stands only while the intent is still pending.
-        const checkoutChallenge = await storedChallengeForSubmit(haven, args.payment_id)
-        const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, () =>
-          checkoutDetailsBeforeSubmit(haven, { paymentRequired: checkoutChallenge, scheme: 'eip3009', paymentId: args.payment_id }),
-        )
+        //
+        // #5030: the stored-challenge read itself moves INSIDE the guard, so a
+        // failed read is decided under the same pending rule. When it fails and
+        // the intent recorded a required checkout detail, the submit refuses
+        // before the relay; every other payment proceeds as today (owner
+        // decision 2026-11-22, option b).
+        const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, async () => {
+          const stored = await storedChallengeForSubmit(haven, args.payment_id)
+          return checkoutDetailsBeforeSubmit(haven, { stored, scheme: 'eip3009', paymentId: args.payment_id })
+        })
         const result = await submitSignatureWithExpiryMapping(
           haven,
           args.payment_id,

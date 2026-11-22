@@ -143,15 +143,27 @@ export function supplierNameFor(tx: FeedTransaction): string {
 }
 
 /**
- * Fortnox's Comments field rejects characters outside this set (error 2000359,
- * found live in the sandbox). The #4532 description carries a route with `/`
- * separators, which the field refuses — folded to `-` rather than dropped, so
- * `invoice/pay` still reads as a route instead of two words.
+ * The exact character set Fortnox's `Comments` and supplier `Name` fields
+ * accept (error 2000359, found live in the sandbox). Declared once and
+ * exported so the tests assert THIS set rather than a wider copy of it: a test
+ * regex that admits `:`, `_` or `/` passes while the field refuses them, which
+ * is how #5036's resource host reached a live push.
+ */
+export const FORTNOX_SAFE_TEXT_CHARS = 'A-Za-z0-9 .,()-'
+/** A whole string inside the declared set. */
+export const FORTNOX_SAFE_TEXT = new RegExp(`^[${FORTNOX_SAFE_TEXT_CHARS}]*$`)
+const FORTNOX_UNSAFE_TEXT = new RegExp(`[^${FORTNOX_SAFE_TEXT_CHARS}]`, 'g')
+
+/**
+ * Fold a value to the declared set. The #4532 description carries a route with
+ * `/` separators, which the field refuses — folded to `-` rather than dropped,
+ * so `invoice/pay` still reads as a route instead of two words. Everything
+ * else outside the set becomes a space.
  */
 function fortnoxSafeText(value: string): string {
   return value
     .replace(/\//g, '-')
-    .replace(/[^A-Za-z0-9 .,()-]/g, ' ')
+    .replace(FORTNOX_UNSAFE_TEXT, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -167,7 +179,14 @@ export function feedDescription(tx: FeedTransaction): string {
   const resourceHost = (() => {
     if (!tx.resourceUrl) return null
     try {
-      return new URL(tx.resourceUrl).host
+      // #5036: `URL.host` keeps a non-default port and an IPv6 literal's
+      // brackets, and `URL.hostname` keeps the brackets and an underscore —
+      // none of which the Comments field accepts. Fold the host through the
+      // same sanitiser the kind line uses; a host already inside the set
+      // renders byte-identically. A host that folds to nothing is dropped
+      // rather than sent as a bare `Resource .`.
+      const safe = fortnoxSafeText(new URL(tx.resourceUrl).host)
+      return safe.length > 0 ? safe : null
     } catch {
       return null
     }
@@ -185,9 +204,12 @@ export function feedDescription(tx: FeedTransaction): string {
     'Agent payment, already settled on-chain.',
     // #3917: scaled token amount first, the atomic figure as a labelled
     // annotation — same reasoning as the receipt underlag's Amount line.
+    // #5036: the token symbol is `token_symbol` from the payment row, so it
+    // goes through the sanitiser too — a symbol carrying `_`, `·` or `:` is
+    // outside the declared set just as the resource host was.
     tx.amount != null
-      ? `Amount ${tx.amount} ${tx.token} (${tx.amountAtomic} atomic).`
-      : `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
+      ? `Amount ${tx.amount} ${fortnoxSafeText(tx.token)} (${tx.amountAtomic} atomic).`
+      : `Amount ${tx.amountAtomic} ${fortnoxSafeText(tx.token)} atomic.`,
     // #4532: what KIND of transaction this is — the same line the receipt
     // underlag carries, so the comment and the attached document agree. Placed
     // before the booked hash for the same reason the hash is placed before

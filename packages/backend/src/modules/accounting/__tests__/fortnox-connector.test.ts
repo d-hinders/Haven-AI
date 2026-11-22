@@ -38,6 +38,7 @@ const {
   feedDescription,
   lateAttachMerchantReceipt,
   verifyFortnoxInvoice,
+  FORTNOX_SAFE_TEXT,
 } = await import('../fortnox-connector.js')
 
 const TX = {
@@ -390,6 +391,8 @@ describe('helpers', () => {
     expect(desc).not.toMatch(/:\/\//) // full URLs rejected — host only
     expect(desc).toMatch(/merchant\.example/)
     expect(desc).toMatch(/pay-123/)
+    // #5036: the declared set itself, not a wider copy of it.
+    expect(desc).toMatch(FORTNOX_SAFE_TEXT)
   })
 
   it('feedDescription states the scaled token amount, atomic only as a labelled annotation (#3917)', () => {
@@ -761,7 +764,7 @@ describe('feedDescription (#3767)', () => {
     })
     const d = feedDescription(worst)
     expect(d.length).toBeLessThanOrEqual(512)
-    expect(d).toMatch(/^[A-Za-z0-9 ,.:+/@()#&=_-]*$/)
+    expect(d).toMatch(FORTNOX_SAFE_TEXT)
   })
 
   it('CONTROL: the settled hash and the funding hash are distinct strings', () => {
@@ -819,7 +822,119 @@ describe('feedDescription (#4532)', () => {
 
   it('keeps every character Fortnox-safe', () => {
     const d = feedDescription(tx())
-    expect(d).toMatch(/^[A-Za-z0-9 ,.:+/@()#&=_-]*$/)
+    expect(d).toMatch(FORTNOX_SAFE_TEXT)
     expect(d).not.toMatch(/:\/\//)
+  })
+})
+
+/**
+ * #5036: the `Resource` host reaches the Comments field through the sanitiser.
+ * `URL.host` keeps a non-default port and an IPv6 literal's brackets, and
+ * `URL.hostname` keeps the brackets and an underscore — none of which the
+ * field accepts (error 2000359).
+ */
+describe('feedDescription (#5036)', () => {
+  function tx(over: Record<string, unknown> = {}) {
+    return {
+      paymentId: 'pi1', settledAt: '2026-11-21T10:00:00.000Z', direction: 'out' as const,
+      counterparty: { address: '0xabc', name: null },
+      resourceUrl: 'https://api.bitrefill.com/x402/invoice/pay',
+      chainId: 84532,
+      txHash: null, txHashIsFunding: false, fundingTxHash: null,
+      token: 'USDC', amountAtomic: '10000', amount: '0.01',
+      receiptRef: 'receipt-1', merchantReceipt: null,
+      transactionKind: 'purchase' as const,
+      description: 'api.bitrefill.com - invoice/pay (purchase)',
+      suggestedAccount: null,
+      ...over,
+    } as never
+  }
+
+  it('folds a non-default port, an IPv6 literal and an underscore host into the declared set', () => {
+    // Red at the scan SHA: `URL.host` carried `:8443`, `[2001:db8::1]` and
+    // `my_api` straight into Comments.
+    const cases: Array<[string, string]> = [
+      ['https://merchant.example.com:8443/pay', 'Resource merchant.example.com 8443.'],
+      ['https://[2001:db8::1]/pay', 'Resource 2001 db8 1.'],
+      ['https://my_api.example.com/', 'Resource my api.example.com.'],
+    ]
+    for (const [resourceUrl, resourcePart] of cases) {
+      const d = feedDescription(tx({ resourceUrl }))
+      expect(d).toContain(resourcePart)
+      expect(d).toMatch(FORTNOX_SAFE_TEXT)
+    }
+  })
+
+  it('a host already inside the set renders exactly as today', () => {
+    expect(feedDescription(tx())).toContain('Resource api.bitrefill.com.')
+  })
+
+  it('GENERATED: every generated input renders inside the declared set', () => {
+    // Seeded and hand-rolled — the backend has no fast-check. The alphabet is
+    // the characters the field refuses mixed with the ones it accepts, so a
+    // field that skips the sanitiser fails here instead of in a live push.
+    const mulberry32 = (seed: number) => {
+      let a = seed >>> 0
+      return () => {
+        a = (a + 0x6d2b79f5) >>> 0
+        let t = a
+        t = Math.imul(t ^ (t >>> 15), t | 1)
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61)
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+      }
+    }
+    const rand = mulberry32(0x5036)
+    const int = (n: number) => Math.floor(rand() * n)
+    const pick = <T>(xs: readonly T[]): T => xs[int(xs.length)]!
+    const text = (alphabet: string, min: number, max: number): string => {
+      let out = ''
+      for (let i = min + int(max - min + 1); i > 0; i -= 1) out += alphabet[int(alphabet.length)]
+      return out
+    }
+    const HOSTILE = "abcXYZ019 /:._-[]()%'…·å€&@#+="
+    const HOSTS = [
+      'merchant.example.com:8443', '[2001:db8::1]', 'my_api.example.com',
+      'api.bitrefill.com', 'r.example', 'xn--bcher-kva.example', 'a.b.c:1',
+    ]
+    const receipt = () => ({
+      rader: Array.from({ length: 1 + int(3) }, () => ({
+        beskrivning: text(HOSTILE, 1, 40),
+        antal: 1 + int(5),
+        apris_exkl_moms: '10.00',
+        moms_procent: 25,
+        moms_belopp: '2.50',
+        totalt_inkl_moms: '12.50',
+      })),
+      valuta: pick(['USDC', 'SEK', 'US_DC', 'EUR']),
+      belopp_exkl_moms: '10.00',
+      moms_procent: 25,
+      moms_belopp: '2.50',
+      totalt_inkl_moms: '12.50',
+      momsbehandling: pick([undefined, 'SE_25', 'REVERSE_CHARGE']),
+    })
+    for (let i = 0; i < 200; i += 1) {
+      const generated = tx({
+        resourceUrl: pick([
+          null,
+          'not a url',
+          `https://${pick(HOSTS)}/${text(HOSTILE, 0, 20)}`,
+          `https://${text('abcXYZ019.:_-[]', 1, 20)}/pay`,
+        ]),
+        token: text('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789·:_-', 1, 8),
+        description: text(HOSTILE, 0, 60),
+        amount: pick([null, '0.01', '1.5']),
+        amountAtomic: pick(['10000', '1500']),
+        txHash: pick([null, `0x${'5e'.repeat(32)}`]),
+        merchantReceipt: rand() < 0.5 ? null : { url: null, inlineJson: receipt() },
+        productSources: rand() < 0.5 ? undefined : {
+          catalogName: text(HOSTILE, 0, 30),
+          quoteDescription: text(HOSTILE, 0, 30),
+          deliveryReference: text(HOSTILE, 0, 30),
+        },
+      })
+      const d = feedDescription(generated)
+      expect(d, JSON.stringify(generated)).toMatch(FORTNOX_SAFE_TEXT)
+      expect(d.length).toBeLessThanOrEqual(512)
+    }
   })
 })

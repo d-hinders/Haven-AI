@@ -281,8 +281,11 @@ labels are in [`accounting-feed.md`](../../../../../docs/operations/accounting-f
 A connector carries the two values where its API allows it — Fortnox's
 free-text `Comments` field does, with `/` folded to `-` for its character
 restriction (error 2000359); Accounted's upload takes exactly `file` +
-`upload_source`, so the PDF is the carrier there. A new connector should carry
-them if it has a free-text field and otherwise rely on the document.
+`upload_source`, so the PDF is the carrier there. Every part of that comment is
+folded to the declared set, the `Resource` host included (#5036): a non-default
+port, an IPv6 literal's brackets and an underscore in a host name become a
+space. A new connector should carry them if it has a free-text field and
+otherwise rely on the document.
 
 ## OAuth `state`, and why the callback consumes it
 

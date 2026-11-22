@@ -1614,8 +1614,9 @@ describe('timeout shapes (#4175)', () => {
 
 // ── The silence watchdog (#4276) ─────────────────────────────────────────────
 //
-// Every live test here runs a REAL gate with sub-second knobs and carries its
-// own `{ timeout }`: a watchdog removed by a future edit must fail RED, not
+// Every live test here runs a REAL gate — with sub-second knobs, or with the
+// clock and the polls driven by the test (#5055) — and carries its own
+// `{ timeout }`: a watchdog removed by a future edit must fail RED, not
 // hang the `ci_config_checks` job (5-minute budget, no workspace install).
 // The stalling fixtures also carry a self-cap (`process.exit`, or `exit 9` in
 // the sh gate), so a removed watchdog leaves nothing hung behind a failed red
@@ -1803,9 +1804,11 @@ describe('the silence watchdog (#4276)', () => {
    *   is the output handler's reset (the init read happens at spawn);
    * - `schedulePoll` hands the watchdog's poll to the test, which calls it.
    *
-   * The kill grace stays a real timer. The gate carries a self-cap (exit 9
-   * after about 200 loop turns) so a watchdog that never fires fails red
-   * instead of hanging the file.
+   * The kill grace stays a real timer. The gate carries a self-cap: exit 9
+   * after 400 loop turns (at least 20 s) WITHOUT a tick, so a watchdog that
+   * never fires fails red instead of hanging the file. The count restarts on
+   * every tick, so only a harness frozen for 20 s between two ticks could
+   * trip it on a healthy watchdog; the 15 s tick wait below fails first.
    */
   const drivenGate = (dir, silenceMs) => {
     const script = path.join(dir, 'driven.sh')
@@ -1815,8 +1818,8 @@ describe('the silence watchdog (#4276)', () => {
       [
         `k=0; n=0`,
         `while [ ! -e ${d}/done ]; do`,
-        `  if [ -e ${d}/go-$k ]; then echo "tick $k"; k=$((k + 1)); fi`,
-        `  n=$((n + 1)); [ "$n" -gt 200 ] && exit 9 # self-cap: fails red, never hangs`,
+        `  if [ -e ${d}/go-$k ]; then echo "tick $k"; k=$((k + 1)); n=0; fi`,
+        `  n=$((n + 1)); [ "$n" -gt 400 ] && exit 9 # self-cap: fails red, never hangs`,
         `  sleep 0.05`,
         `done`,
         ``,
@@ -1868,6 +1871,11 @@ describe('the silence watchdog (#4276)', () => {
         }
       },
       release: () => writeFileSync(path.join(dir, 'done'), ''),
+      /** Release the gate and wait (bounded) for it to end, so a failed test leaves no child behind its rmSync. */
+      cleanup: async () => {
+        writeFileSync(path.join(dir, 'done'), '')
+        await Promise.race([pending, sleep(5000)])
+      },
     }
   }
 
@@ -1894,7 +1902,7 @@ describe('the silence watchdog (#4276)', () => {
       assert.equal(result.ok, true, result.output)
       assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'all output captured')
     } finally {
-      gate.release()
+      await gate.cleanup()
       rmSync(dir, { recursive: true, force: true })
     }
   })
@@ -1919,7 +1927,7 @@ describe('the silence watchdog (#4276)', () => {
       assert.equal(result.signal, 'SIGTERM')
       assert.equal((result.output.match(/tick/g) ?? []).length, TICKS, 'output before the stall is kept')
     } finally {
-      gate.release()
+      await gate.cleanup()
       rmSync(dir, { recursive: true, force: true })
     }
   })

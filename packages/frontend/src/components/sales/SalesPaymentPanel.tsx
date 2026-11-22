@@ -16,11 +16,13 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
 import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
+import { useT } from '@/context/LocaleContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useSalesPaymentDetail } from '@/hooks/useSalesPaymentDetail'
-import { api, ApiRequestError } from '@/lib/api'
+import { api } from '@/lib/api'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import { formatDateTime, truncate } from '@/lib/format'
+import { classifySalesActionError } from '@/lib/merchant-services'
 import { SALES_STATUS } from '@/lib/payment-status'
 import {
   STRIPE_MARK,
@@ -124,6 +126,7 @@ function OpenPanel({
   const { currency } = usePreferences()
   const { merchantAccount } = useMerchantServicesContext()
   const { toast } = useToast()
+  const copy = useT().settings.sales.actions
   const { detail, loading, notFound, failed, refetch } = useSalesPaymentDetail(txHash)
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [clearing, setClearing] = useState(false)
@@ -155,13 +158,20 @@ function OpenPanel({
       refetch()
       onCleared?.()
     } catch (err) {
-      if (err instanceof ApiRequestError && err.status === 404) {
+      // The clear may have committed before the answer was lost (#5038): that
+      // case says to check the payment, never "Nothing changed".
+      const outcome = classifySalesActionError(err)
+      if (outcome.kind === 'unknown_outcome') {
+        setClearError(copy.unknownOutcome.clearRecord)
+      } else if (outcome.kind === 'rate_limited') {
+        setClearError(copy.rateLimited)
+      } else if (outcome.status === 404) {
         // Already gone (cleared elsewhere, or never there): the panel is stale, not the action wrong.
         setClearError('This payment has no sale record to clear. It may already be cleared.')
         refetch()
         onCleared?.()
-      } else if (err instanceof ApiRequestError && err.message) {
-        setClearError(err.message)
+      } else if (outcome.detail !== null) {
+        setClearError(outcome.detail)
       } else {
         setClearError('The sale record could not be cleared. Nothing changed. Try again.')
       }

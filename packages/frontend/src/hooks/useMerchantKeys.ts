@@ -57,15 +57,23 @@ export function useMerchantKeys(): UseMerchantKeysResult {
   }, [load])
 
   const create = useCallback(async () => {
-    const created = await api.post<CreatedSalesKey>('/merchant-keys')
-    void load()
-    return created
+    try {
+      return await api.post<CreatedSalesKey>('/merchant-keys')
+    } finally {
+      // The backend commits the key before it answers (#5038): a lost answer
+      // may still have created one, so the list is re-read either way.
+      void load()
+    }
   }, [load])
 
   const revoke = useCallback(
     async (id: string) => {
-      await api.delete(`/merchant-keys/${encodeURIComponent(id)}`)
-      void load()
+      try {
+        await api.delete(`/merchant-keys/${encodeURIComponent(id)}`)
+      } finally {
+        // A lost answer may still have revoked the key (#5038).
+        void load()
+      }
     },
     [load],
   )

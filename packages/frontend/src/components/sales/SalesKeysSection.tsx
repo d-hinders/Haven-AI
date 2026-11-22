@@ -10,8 +10,10 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { useToast } from '@/components/ui/Toast'
 import { useOptionalAuth } from '@/context/AuthContext'
+import { useT } from '@/context/LocaleContext'
 import { salesKeyLabel, useMerchantKeys } from '@/hooks/useMerchantKeys'
 import { timeAgo } from '@/lib/format'
+import { classifySalesActionError } from '@/lib/merchant-services'
 import { SALES_KEY_CANT_SENTENCE, type SalesKey } from '@/lib/sales'
 import { CreateSalesKeyDialog } from './CreateSalesKeyDialog'
 
@@ -36,6 +38,7 @@ export function SalesKeysSection() {
   const { keys, loading, failed, create, revoke } = useMerchantKeys()
   const userId = useOptionalAuth()?.user?.id ?? null
   const { toast } = useToast()
+  const copy = useT().settings.sales.actions
   const [creating, setCreating] = useState(false)
   const [revoking, setRevoking] = useState<SalesKey | null>(null)
   const [revokeBusy, setRevokeBusy] = useState(false)
@@ -53,8 +56,13 @@ export function SalesKeysSection() {
       await revoke(revoking.id)
       toast.success('Key revoked.')
       setRevoking(null)
-    } catch {
-      setRevokeError('Haven could not revoke the key. It still works. Try again.')
+    } catch (caught) {
+      // The revoke may have committed before the answer was lost (#5038): that
+      // case says to check the list, never "It still works".
+      const outcome = classifySalesActionError(caught)
+      if (outcome.kind === 'unknown_outcome') setRevokeError(copy.unknownOutcome.revokeKey)
+      else if (outcome.kind === 'rate_limited') setRevokeError(copy.rateLimited)
+      else setRevokeError('Haven could not revoke the key. It still works. Try again.')
     } finally {
       setRevokeBusy(false)
     }

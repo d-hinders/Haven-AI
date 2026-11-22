@@ -32,7 +32,12 @@ vi.mock('@/components/ui/Toast', () => ({
 vi.mock('@/context/AuthContext', () => ({ useOptionalAuth: () => ({ user: { id: 'u1' } }) }))
 
 import { ApiRequestError } from '@/lib/api'
+import { LocaleProvider } from '@/context/LocaleContext'
 import { SalesKeysSection } from '../SalesKeysSection'
+
+/** #5038: a lost answer says to check the list, never "Nothing was created". */
+const CREATE_UNKNOWN = 'Haven did not answer, so the key may have been created.'
+const REVOKE_UNKNOWN = 'Haven did not answer, so the key may have been revoked.'
 
 const live = {
   id: 'k1',
@@ -81,7 +86,11 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks())
 
 async function renderSection() {
-  render(<SalesKeysSection />)
+  render(
+    <LocaleProvider>
+      <SalesKeysSection />
+    </LocaleProvider>,
+  )
   await screen.findByText(`${LABEL}`)
 }
 
@@ -107,11 +116,19 @@ describe('the list', () => {
 
   it('has an empty state and an error state, and never an empty list that hides a failed read', async () => {
     mockGet.mockResolvedValue({ keys: [] })
-    const { unmount } = render(<SalesKeysSection />)
+    const { unmount } = render(
+      <LocaleProvider>
+        <SalesKeysSection />
+      </LocaleProvider>,
+    )
     expect(await screen.findByText(/No Sales keys yet/)).toBeTruthy()
     unmount()
     mockGet.mockRejectedValue(new Error('boom'))
-    render(<SalesKeysSection />)
+    render(
+      <LocaleProvider>
+        <SalesKeysSection />
+      </LocaleProvider>,
+    )
     expect(await screen.findByText('Your Sales keys could not load. Your payments are unchanged.')).toBeTruthy()
   })
 })
@@ -189,6 +206,47 @@ describe('create', () => {
     expect(screen.getByRole('dialog', { name: 'Create Sales key' })).toBeTruthy()
   })
 
+  it('says the outcome is unknown, never "Nothing was created", when the answer is lost, and re-reads the list (#5038)', async () => {
+    mockPost.mockRejectedValue(new TypeError('Failed to fetch'))
+    await renderSection()
+    const reads = mockGet.mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Create Sales key' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create Sales key' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create Sales key' }))
+
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert.textContent).toContain(CREATE_UNKNOWN)
+    expect(alert.textContent).not.toContain('Nothing was created')
+    // The key may exist: the list is re-read even though the create failed.
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(reads))
+  })
+
+  it('says the same for a 5xx, which may have committed before it answered (#5038)', async () => {
+    mockPost.mockRejectedValue(new ApiRequestError('unavailable', 502))
+    await renderSection()
+    const reads = mockGet.mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Create Sales key' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create Sales key' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create Sales key' }))
+
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert.textContent).toContain(CREATE_UNKNOWN)
+    expect(alert.textContent).not.toContain('Nothing was created')
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(reads))
+  })
+
+  it('keeps "Nothing was created" for a 4xx, which did not commit (#5038)', async () => {
+    mockPost.mockRejectedValue(new ApiRequestError('bad request', 400))
+    await renderSection()
+    await userEvent.click(screen.getByRole('button', { name: 'Create Sales key' }))
+    const dialog = screen.getByRole('dialog', { name: 'Create Sales key' })
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Create Sales key' }))
+
+    const alert = await within(dialog).findByRole('alert')
+    expect(alert.textContent).toContain('Nothing was created')
+    expect(alert.textContent).not.toContain(CREATE_UNKNOWN)
+  })
+
   it('never writes the secret to storage, the console or the URL', async () => {
     const dialog = await openCreated()
     await userEvent.click(within(dialog).getByRole('button', { name: 'Copy Sales key' }))
@@ -215,13 +273,26 @@ describe('revoke', () => {
     await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(reads))
   })
 
-  it('keeps the dialog open and says so when the revoke fails', async () => {
+  it('keeps the dialog open and says the outcome is unknown when the answer is lost (#5038)', async () => {
     mockDelete.mockRejectedValue(new Error('down'))
+    await renderSection()
+    const reads = mockGet.mock.calls.length
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
+    await userEvent.click(screen.getByRole('button', { name: 'Revoke key' }))
+    expect(await screen.findByText(new RegExp(REVOKE_UNKNOWN))).toBeTruthy()
+    expect(screen.queryByText(/could not revoke the key/)).toBeNull()
+    expect(toastSuccess).not.toHaveBeenCalled()
+    // The revoke may have committed: the list is re-read even though it failed.
+    await waitFor(() => expect(mockGet.mock.calls.length).toBeGreaterThan(reads))
+  })
+
+  it('keeps "It still works" for a 4xx, which did not commit (#5038)', async () => {
+    mockDelete.mockRejectedValue(new ApiRequestError('refused', 409))
     await renderSection()
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
     await userEvent.click(screen.getByRole('button', { name: 'Revoke key' }))
     expect(await screen.findByText(/could not revoke the key/)).toBeTruthy()
-    expect(toastSuccess).not.toHaveBeenCalled()
+    expect(screen.queryByText(new RegExp(REVOKE_UNKNOWN))).toBeNull()
   })
 
   it('does not carry a failed revoke\'s error into the next confirm (#4905 review)', async () => {
@@ -229,10 +300,10 @@ describe('revoke', () => {
     await renderSection()
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
     await userEvent.click(screen.getByRole('button', { name: 'Revoke key' }))
-    expect(await screen.findByText(/could not revoke the key/)).toBeTruthy()
+    expect(await screen.findByText(new RegExp(REVOKE_UNKNOWN))).toBeTruthy()
     await userEvent.click(screen.getByRole('button', { name: 'Cancel' }))
     await userEvent.click(screen.getByRole('button', { name: 'Revoke' }))
     expect(screen.getByRole('dialog', { name: `Revoke ${LABEL}?` })).toBeTruthy()
-    expect(screen.queryByText(/could not revoke the key/)).toBeNull()
+    expect(screen.queryByText(new RegExp(REVOKE_UNKNOWN))).toBeNull()
   })
 })

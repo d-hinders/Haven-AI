@@ -7,12 +7,23 @@ import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Modal } from '@/components/ui/Modal'
 import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock'
 import { CloseGuardPanel } from '@/components/connect-agent/CloseGuardPanel'
-import { ApiRequestError } from '@/lib/api'
+import { useT } from '@/context/LocaleContext'
 import { salesKeyLabel, type CreatedSalesKey } from '@/hooks/useMerchantKeys'
+import { classifySalesActionError } from '@/lib/merchant-services'
 import { SALES_KEY_CANT_SENTENCE } from '@/lib/sales'
+import type { Messages } from '@/lib/i18n'
 
-function refusal(error: unknown): string {
-  if (error instanceof ApiRequestError && error.status === 409) {
+/**
+ * What a failed create says (#5038). The backend commits the key before it
+ * answers, so a lost answer may still have created one: that case says to
+ * check the list, never "Nothing was created". A 4xx did not commit and keeps
+ * its own sentence.
+ */
+function refusal(error: unknown, copy: Messages['settings']['sales']['actions']): string {
+  const outcome = classifySalesActionError(error)
+  if (outcome.kind === 'unknown_outcome') return copy.unknownOutcome.createKey
+  if (outcome.kind === 'rate_limited') return copy.rateLimited
+  if (outcome.status === 409) {
     return 'There is no Sales account to put a key on yet. Turn on Sales in Settings, then create the key.'
   }
   return 'Haven could not create the key. Nothing was created. Try again.'
@@ -43,6 +54,7 @@ export function CreateSalesKeyDialog({
   const [guarding, setGuarding] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const copy = useT().settings.sales.actions
 
   const submit = async () => {
     setBusy(true)
@@ -50,7 +62,7 @@ export function CreateSalesKeyDialog({
     try {
       setCreated(await create())
     } catch (caught) {
-      setError(refusal(caught))
+      setError(refusal(caught, copy))
     } finally {
       setBusy(false)
     }

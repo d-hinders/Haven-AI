@@ -30,6 +30,14 @@ export type SalesKind = SalesPayment['kind']
 export const SALES_PAGE_SIZE = 50
 
 /**
+ * The backend's cap on one payments page (`PAYMENTS_MAX_LIMIT`,
+ * `packages/backend/src/modules/transactions/merchant-sales-reads.ts`): the
+ * route rejects `limit=201` with a 400. The live re-read walks the loaded
+ * window in pages of at most this many rows (#5038).
+ */
+export const SALES_PAYMENTS_MAX_LIMIT = 200
+
+/**
  * The one sentence that says what a Sales key cannot do (#4984). The Setup
  * tab's keys section and the create dialog both read it, so those two carry
  * one wording rather than two. The first-run checklist keeps its own shorter

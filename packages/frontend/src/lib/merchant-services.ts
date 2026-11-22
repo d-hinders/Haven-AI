@@ -270,3 +270,30 @@ export function classifyDepositAddressError(err: unknown): DepositAddressRefusal
   const sentence = typeof body.error === 'string' ? body.error.trim() : ''
   return { kind: 'refused', detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
 }
+
+// ── A Sales action whose answer was lost (#5038) ───────────────────────────
+
+/**
+ * How a failed Sales key create or revoke, or a failed sale-record clear,
+ * reads. The backend commits before it answers (`routes/merchant-keys.ts`
+ * creates the key, then responds), so a dropped connection or a 5xx may have
+ * left the change made: `unknown_outcome` says to check, never "nothing
+ * changed". A 429 is the route's rate limit; any other 4xx is a refusal that
+ * did not commit.
+ */
+export type SalesActionOutcome =
+  | { kind: 'unknown_outcome' }
+  | { kind: 'rate_limited' }
+  /** A 4xx: the action did not commit. `detail` is the route's sentence, bounded, or null. */
+  | { kind: 'refused'; status: number; detail: string | null }
+
+export function classifySalesActionError(err: unknown): SalesActionOutcome {
+  const body = readBody(err)
+  const status = (err as { status?: unknown } | null)?.status
+  if (typeof status !== 'number' || status < 400 || status >= 500) return { kind: 'unknown_outcome' }
+  if (status === 429) return { kind: 'rate_limited' }
+  const fromBody = typeof body.error === 'string' ? body.error.trim() : ''
+  const fromMessage = err instanceof Error ? err.message.trim() : ''
+  const sentence = fromBody || fromMessage
+  return { kind: 'refused', status, detail: sentence ? sentence.slice(0, MAX_DETAIL_CHARS) : null }
+}

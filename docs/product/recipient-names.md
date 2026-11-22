@@ -7,7 +7,7 @@ covers:
   - packages/backend/src/infra/repositories/merchants.ts
   - packages/backend/src/routes/agent-activity.ts
   - packages/backend/src/modules/transactions/csv-export.ts
-last-verified: "2026-11-17"
+last-verified: "2026-11-22"
 ---
 
 # How Haven names who you paid
@@ -28,8 +28,9 @@ Haven names the other side of a payment in **one order** (#4882, epic
 - **The analytics kind line** under a name reads "Paid API" for a catalog
   merchant, as for a host-named one.
 - **Search and exports:** transactions search matches every name the order
-  can find for a row (all of steps 1–4, not only the winner); the
-  transactions CSV and the agent ledger CSV name rows in this order.
+  can find for a row (all of steps 1–4, not only the winner), and, for a paid
+  API call, its resource host (step 5, #5037); the export's search is the
+  same. The transactions CSV and the agent ledger CSV name rows in this order.
 
 ## The order
 

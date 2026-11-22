@@ -3,7 +3,8 @@
  *
  * The rule: search matches WHAT THE ROW SHOWS — the counterparty's resolved
  * names (another of the user's own accounts, an address-book contact, the
- * catalog merchant, the receipt seller — #4882's naming sources), the agent
+ * catalog merchant, the receipt seller — #4882's naming sources — and, for a
+ * paid API call, the resource host, naming step 5: #5037), the agent
  * name, the product label of a recorded sale (#5000: the row reads
  * "Sale · <product>"), and the counterparty address itself. Name
  * resolution therefore happens BEFORE filtering, on the server, for both
@@ -15,6 +16,7 @@
  * Addresses match as case-insensitive SUBSTRINGS, so a pasted partial
  * address finds its row.
  */
+import { parseX402Hostname } from '@haven_ai/core'
 import type { EnrichedTransaction } from './types.js'
 import {
   EMPTY_RECIPIENT_NAME_INDEX,
@@ -67,6 +69,13 @@ export function transactionMatchesSearch(
 ): boolean {
   if (foldedTerm === '') return true
   const haystacks = resolvedCounterpartyNames(tx, index).map(foldForSearch)
+  // #5037: naming step 5 — a paid API call with no other name shows its
+  // resource host, so search must find it by that host. Every source, not only
+  // the winner (as `allRecipientNames` says), so the host is always searchable
+  // when the row has a resource URL. `allRecipientNames` stays steps 1–4: it is
+  // keyed on the counterparty address, and the host is not.
+  const host = parseX402Hostname(tx.x402ResourceUrl)
+  if (host) haystacks.push(foldForSearch(host))
   if (tx.agentName) haystacks.push(foldForSearch(tx.agentName))
   if (tx.sale?.productName) haystacks.push(foldForSearch(tx.sale.productName))
   haystacks.push(counterpartyAddressOf(tx).toLowerCase())

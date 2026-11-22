@@ -142,6 +142,19 @@ describe('filterEnrichedTransactions search (#4095)', () => {
     expect(search(MERCHANT.toLowerCase()).map((t) => t.hash)).toEqual(['0x2'])
   })
 
+  it('#5037 — finds a paid-API row named by its resource host, by the host and by a fragment', () => {
+    // No contact, catalog, receipt or own-account name: the row shows the host
+    // (naming step 5), so search must find it by what it shows.
+    const rows = [
+      tx({ hash: '0xa', to: UNRELATED, x402ResourceUrl: 'https://api.weatherly.example/v1/forecast?city=1' }),
+      tx({ hash: '0xb', to: UNRELATED }),
+    ]
+    expect(search('api.weatherly.example', rows).map((t) => t.hash)).toEqual(['0xa'])
+    expect(search('Weatherly', rows).map((t) => t.hash)).toEqual(['0xa'])
+    // The path and query are not what the row shows; only the host is.
+    expect(search('forecast', rows)).toEqual([])
+  })
+
   it('returns nothing for a term no row shows, rather than everything', () => {
     expect(search('zanzibar')).toEqual([])
   })

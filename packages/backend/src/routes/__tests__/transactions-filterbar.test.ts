@@ -197,7 +197,8 @@ function x402AgentPayment(now: number) {
       amount_raw: '1000000',
       amount_human: '1',
       x402_merchant_address: null,
-      x402_resource_url: null,
+      // #5037: a resource host search must find (naming step 5).
+      x402_resource_url: 'https://api.weatherly.example/v1/forecast',
       payment_proof_status: 'payment_confirmed',
       payment_reconciliation_event_type: null,
       amount_sek: null,
@@ -411,6 +412,13 @@ describe('GET /transactions + export.csv — FilterBar dimensions (#4095)', () =
     )
   })
 
+  it('#5037 — search finds the x402 row by its resource host', async () => {
+    resetFixture()
+    const response = await getList('?fresh=1&search=weatherly&limit=100')
+    expect(response.json().total).toBe(1)
+    expect(response.json().transactions.map((tx: { hash: string }) => tx.hash)).toEqual([R5])
+  })
+
   it('a search matching nothing returns nothing, not everything', async () => {
     resetFixture()
     const response = await getList('?fresh=1&search=zanzibar&limit=100')
@@ -553,6 +561,12 @@ describe('GET /transactions + export.csv — FilterBar dimensions (#4095)', () =
       const response = await getCsv('?fresh=1&search=cafe')
       expect(response.statusCode).toBe(200)
       expect(csvHashes(response.body)).toEqual([R1, R2, R6].sort())
+    })
+
+    it('#5037 — the export finds the x402 row by its resource host', async () => {
+      resetFixture()
+      const response = await getCsv('?fresh=1&search=weatherly')
+      expect(csvHashes(response.body)).toEqual([R5])
     })
 
     it('the own-account name search covers the internal transfer', async () => {

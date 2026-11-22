@@ -35,6 +35,7 @@ import {
 } from './refusal-census.mjs'
 import {
   FIXTURE_GENERIC_REASONS,
+  FIXTURE_RATE_LIMITED,
   FIXTURE_REFUSED_AS_MADE,
   FIXTURE_RELAYER_BUDGET_REASON,
   FIXTURE_TRANSIENT,
@@ -172,7 +173,7 @@ test('#5040: the generic reasons are read from the mapper itself', () => {
 
 test('#5040: the fixture\'s reasons are the real mapper\'s strings', () => {
   const errorsSource = readFileSync(join(REPO, 'packages/mcp-server/src/tools/support/errors.ts'), 'utf8')
-  for (const reason of [FIXTURE_REFUSED_AS_MADE, FIXTURE_TRANSIENT, FIXTURE_RELAYER_BUDGET_REASON]) {
+  for (const reason of [FIXTURE_REFUSED_AS_MADE, FIXTURE_RATE_LIMITED, FIXTURE_TRANSIENT, FIXTURE_RELAYER_BUDGET_REASON]) {
     assert.ok(errorsSource.includes(`'${reason}'`), `errors.ts carries: ${reason.slice(0, 60)}…`)
   }
 })

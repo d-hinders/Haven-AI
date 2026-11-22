@@ -264,10 +264,14 @@ export function loadAllowlist(path = ALLOWLIST_PATH) {
 /**
  * #5040: the generic branch's reasons, read from the mapper itself. Untyped
  * answers — no `error_code` — can only reach the generic branch, so feeding
- * the mapper one per status class (a 4xx, a 429, a 5xx, a non-answer to a read
- * and to a write) yields exactly the reasons a typed code gets when the mapper
- * has no arm for it. No second copy of the strings, and nothing exported from
- * `errors.ts` for an instrument's sake.
+ * the mapper one per status class (a 4xx, a 429, a 5xx) yields the reasons a
+ * recorded typed code gets when the mapper has no arm for it. No second copy
+ * of the strings, and nothing exported from `errors.ts` for an instrument's
+ * sake. The two non-JSON probes land in the 4xx reason today: `transportError`
+ * sets no failure cause, so the mapper's cause-based reasons (no answer to a
+ * read or a write, a deterministic refusal) are not in the set — and no census
+ * row can reach them. If `transportError` ever sets a cause, those reasons
+ * must join the set.
  */
 export function genericReasonsOf(normalize, HavenApiError) {
   const probes = [

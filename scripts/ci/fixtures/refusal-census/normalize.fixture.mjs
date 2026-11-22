@@ -36,7 +36,9 @@ export const FIXTURE_REFUSED_AS_MADE =
   'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed'
 export const FIXTURE_TRANSIENT =
   'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
-export const FIXTURE_GENERIC_REASONS = new Set([FIXTURE_REFUSED_AS_MADE, FIXTURE_TRANSIENT])
+export const FIXTURE_RATE_LIMITED =
+  'the upstream call was rate-limited; wait (retry_after_seconds when the answer carries it), then re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
+export const FIXTURE_GENERIC_REASONS = new Set([FIXTURE_REFUSED_AS_MADE, FIXTURE_RATE_LIMITED, FIXTURE_TRANSIENT])
 
 /**
  * A typed stop the real mapper answers INSIDE `API_ERROR` (#4844): the code
@@ -69,6 +71,9 @@ export function fixtureNormalize(err) {
   }
   // The generic branch: a 5xx (or a status-less answer) reads transient, a 4xx
   // reads "refused as made" — each with the real branch's reason (#5040).
+  if (err.statusCode === 429) {
+    return { success: false, code: err.code, statusCode: 429, next_action: 'retry_with_explicit_context', next_tool_omitted_reason: FIXTURE_RATE_LIMITED }
+  }
   const transient = err.statusCode === undefined || err.statusCode >= 500 || err.statusCode === 0
   return {
     success: false,

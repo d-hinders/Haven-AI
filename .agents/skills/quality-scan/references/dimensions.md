@@ -602,8 +602,9 @@ section adds `POST /payments/:id/sign`, which the rule already covers.
 when the mapper answers it with `API_ERROR` **and** one of the generic branch's
 reasons, or no reason at all. The instrument reads those reasons from the
 mapper itself (`genericReasonsOf`): it feeds `normalizeError` untyped answers —
-a 4xx, a 429, a 5xx, a non-answer to a read and to a write — which can only
-reach the generic branch. `API_ERROR` alone is not the test: a typed stop can live inside
+a 4xx, a 429, a 5xx — which can only reach the generic branch. The mapper's
+cause-based reasons (no answer, a deterministic refusal) are not in the set:
+the census's transport model sets no cause, so no recorded row reaches them. `API_ERROR` alone is not the test: a typed stop can live inside
 it with its own reason (`relayer_budget_exceeded`, #4844), and counting it
 reported three answered rows as unmarked on 2026-11-21 (204 typed rows with
 the code-only test, 201 without, on that run's recording). The seeded control

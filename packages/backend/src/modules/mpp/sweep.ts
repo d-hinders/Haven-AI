@@ -15,10 +15,12 @@ import { config } from '../../config.js'
 import {
   claimPreparedSweepForBoundAgent,
   expirePreparedSweep,
+  findOpenOutcomeUnknownSweepForAgent,
   findSweepById,
   findSweepByNonce,
   insertPreparedSweepForBoundAgent,
   markSweepFailed,
+  markSweepOutcomeUnknown,
   markSweepSubmitted,
   releaseSweepClaim,
   resolveStrandedEventsForAgent,
@@ -31,7 +33,9 @@ import {
   signSweepExpectedContext,
   recoverSweepSigner,
   relaySweepAuthorization,
+  SweepOutcomeUnknownError,
 } from '../../rails/sweep.js'
+import { confirmOutcomeUnknownSweep } from './sweep-confirmer.js'
 import {
   isSweepableChain,
   sweepUsdcAddress,
@@ -66,6 +70,40 @@ function sweepResultBody(fields: {
     chain_id: fields.chainId,
     explorer_url: getExplorerUrl(fields.chainId, 'tx', fields.txHash),
     ...(fields.idempotent ? { idempotent_replay: true } : {}),
+  }
+}
+
+/**
+ * #5035: the typed `error_code` on the non-2xx answer for a sweep that was
+ * broadcast but whose outcome is not confirmed yet. The body carries the hash.
+ * The hosted MCP's error mapper answers this code
+ * (`packages/mcp-server/src/tools/support/errors.ts`); the two are pinned by
+ * the mapper's fixtures.
+ */
+export const SWEEP_OUTCOME_UNKNOWN_ERROR_CODE = 'sweep_outcome_unknown'
+
+/**
+ * #5035: the answer for a sweep that was broadcast but whose outcome is not
+ * confirmed yet. Non-2xx on purpose — an installed SDK's `submitSweep` reads
+ * any 2xx as swept (`packages/sdk/src/delegate-sweep.ts`), and this sweep is
+ * not known to have landed. The hash rides the body so the agent can watch it,
+ * and `next_step` names the call that reads the current state.
+ */
+function sweepOutcomeUnknownBody(row: DelegateSweepRow, txHash: string) {
+  return {
+    error: 'Sweep was broadcast but its outcome is not confirmed yet — it may still land.',
+    error_code: SWEEP_OUTCOME_UNKNOWN_ERROR_CODE,
+    ...sweepResultBody({
+      txHash,
+      valueAtomic: row.value_atomic,
+      from: row.from_address,
+      to: row.to_address,
+      chainId: row.chain_id,
+    }),
+    next_step:
+      'Do not prepare a new sweep. Call /machine-payments/sweep/submit again with the SAME ' +
+      'authorization and signature to read the current state — it answers swept once the ' +
+      'authorization is used on-chain, or expired once it can no longer be used.',
   }
 }
 
@@ -168,6 +206,17 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
     }
   }
 
+  // #5035: a sweep that was broadcast but whose outcome is not confirmed yet
+  // is still in flight. Minting a second authorization now would spend relayer
+  // gas on a second submission while the first may still land. Answer the
+  // CURRENT state instead — the same decision the confirmer and the submit
+  // replay make — so "call haven_sweep_delegate with no arguments" is a real
+  // status read, not a dead end.
+  const inFlight = await findOpenOutcomeUnknownSweepForAgent(agent.id)
+  if (inFlight) {
+    return answerOutcomeUnknown(inFlight, agent)
+  }
+
   const authorization = buildSweepAuthorization({
     delegateAddress: agent.delegate_address,
     accountAddress: agent.account_address,
@@ -214,6 +263,70 @@ export async function prepareSweep(agent: AgentContext): Promise<MppHandlerResul
 }
 
 /**
+ * #5035: answer the current state of a sweep booked `outcome_unknown`.
+ *
+ * The decision is the SAME one the confirmer tick makes (`confirmOutcomeUnknownSweep`),
+ * read from the token's `authorizationState(from, nonce)` — so a re-submit with
+ * the same authorization answers "swept" once the nonce is used, "expired" once
+ * it can no longer be used, and "still unknown" (with the hash) otherwise. It
+ * never broadcasts again.
+ */
+async function answerOutcomeUnknown(
+  row: DelegateSweepRow,
+  agent: AgentContext,
+): Promise<MppHandlerResult> {
+  let decision: Awaited<ReturnType<typeof confirmOutcomeUnknownSweep>>
+  try {
+    decision = await confirmOutcomeUnknownSweep({
+      id: row.id,
+      agentId: agent.id,
+      chainId: row.chain_id,
+      tokenAddress: row.token_address,
+      fromAddress: row.from_address,
+      nonce: row.nonce,
+      validBefore: String(row.valid_before),
+      txHash: row.tx_hash,
+    })
+  } catch {
+    // A chain read failure confirms nothing — answer "still unknown" with the
+    // hash we already have rather than a 500.
+    decision = { outcome: 'unresolved' }
+  }
+  if (decision.outcome === 'submitted' && decision.txHash) {
+    return {
+      statusCode: 200,
+      body: sweepResultBody({
+        txHash: decision.txHash,
+        valueAtomic: row.value_atomic,
+        from: row.from_address,
+        to: row.to_address,
+        chainId: row.chain_id,
+        idempotent: true,
+      }),
+    }
+  }
+  if (decision.outcome === 'failed_expired') {
+    return {
+      statusCode: 409,
+      body: {
+        error: 'Sweep authorization expired unused — the transaction never landed. Call /sweep/prepare again.',
+        error_code: 'sweep_expired',
+      },
+    }
+  }
+  if (!row.tx_hash) {
+    return {
+      statusCode: 409,
+      body: {
+        error: 'Sweep was broadcast but its outcome is not confirmed yet.',
+        error_code: SWEEP_OUTCOME_UNKNOWN_ERROR_CODE,
+      },
+    }
+  }
+  return { statusCode: 409, body: sweepOutcomeUnknownBody(row, row.tx_hash) }
+}
+
+/**
  * `POST /sweep/submit` — relays a signed sweep authorization. Trusts nothing
  * from the client payload: the authorization is re-derived from the prepared
  * row, the delegate signature is verified off-chain, and the balance is
@@ -246,6 +359,11 @@ export async function submitSweep(
         idempotent: true,
       }),
     }
+  }
+  if (row.status === 'outcome_unknown') {
+    // #5035: the sweep was broadcast but its outcome is not confirmed yet.
+    // Answer the CURRENT state from chain — never broadcast again.
+    return answerOutcomeUnknown(row, agent)
   }
   if (row.status !== 'prepared') {
     return {
@@ -361,6 +479,11 @@ export async function submitSweep(
         }),
       }
     }
+    if (current?.status === 'outcome_unknown') {
+      // #5035: the winner broadcast and booked outcome-unknown. Answer the
+      // current state from chain instead of a bare "already being submitted".
+      return answerOutcomeUnknown(current, agent)
+    }
     return {
       statusCode: 409,
       body: {
@@ -380,6 +503,14 @@ export async function submitSweep(
       // would strand the funds path.
       await releaseSweepClaim(row.id)
       return { statusCode: 429, body: { error: err.message, error_code: RELAYER_BUDGET_EXCEEDED_ERROR_CODE } }
+    }
+    if (err instanceof SweepOutcomeUnknownError) {
+      // #5035: the transaction was broadcast but its receipt was not confirmed
+      // (or the broadcast's answer was lost). Book it outcome-unknown WITH the
+      // hash — never `failed`, which would strand the funds path and lose the
+      // hash. The confirmer resolves it from chain state.
+      await markSweepOutcomeUnknown(err.txHash, row.id)
+      return { statusCode: 409, body: sweepOutcomeUnknownBody(row, err.txHash) }
     }
     const errorMsg = err instanceof Error ? err.message : String(err)
     await markSweepFailed(errorMsg, row.id)

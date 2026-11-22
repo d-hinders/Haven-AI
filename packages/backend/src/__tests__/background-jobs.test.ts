@@ -76,7 +76,7 @@ beforeEach(() => {
 })
 
 describe('the background-job table', () => {
-  it('is exactly these eleven jobs — a removed or added row fails', () => {
+  it('is exactly these twelve jobs — a removed or added row fails', () => {
     const rows = createBackgroundJobs({ log, pool })
     expect(rows.map((r) => r.name).sort()).toEqual([
       'catalog ingest',
@@ -90,6 +90,7 @@ describe('the background-job table', () => {
       'relayer balance monitor',
       'settlement sweep',
       'submission reconcile',
+      'sweep confirmer',
     ])
   })
 
@@ -106,6 +107,8 @@ describe('the background-job table', () => {
       'settlement sweep': 120_000,
       'submission reconcile': 60_000,
       'passport sweep': 300_000,
+      // #5035: the delegate-sweep confirmer.
+      'sweep confirmer': 60_000,
       // #4899: the mockup's 15 minutes for an unreachable kit, and the
       // schedule for a reachable one.
       'merchant catalogue refresh': 900_000,
@@ -125,6 +128,7 @@ describe('the background-job table', () => {
       'settlement sweep': LEADER_LOCK_KEYS.settlementSweep,
       'submission reconcile': LEADER_LOCK_KEYS.submissionReconcile,
       'passport sweep': LEADER_LOCK_KEYS.passportSweep,
+      'sweep confirmer': LEADER_LOCK_KEYS.sweepConfirmer,
       'merchant catalogue refresh': LEADER_LOCK_KEYS.merchantCatalogueRefresh,
     })
   })
@@ -140,8 +144,8 @@ describe('the background-job table', () => {
     expect(rows.some((r) => r.lockKey === LEADER_LOCK_KEYS.relayerBalanceMonitor)).toBe(false)
 
     const keys = rows.filter((r) => r.lockKey !== undefined).map((r) => r.lockKey)
-    expect(keys).toHaveLength(10)
-    expect(new Set(keys).size).toBe(10)
+    expect(keys).toHaveLength(11)
+    expect(new Set(keys).size).toBe(11)
   })
 
   it('builds the catalog-ingest monitor ONCE and holds it across ticks (#4407)', async () => {
@@ -176,7 +180,7 @@ describe('startBackgroundJobs', () => {
 
     expect(mocks.startJobs).toHaveBeenCalledTimes(1)
     const [rows, deps] = mocks.startJobs.mock.calls[0]!
-    expect(rows).toHaveLength(11)
+    expect(rows).toHaveLength(12)
     expect(deps.log).toBe(log)
 
     // The thirteenth job is NOT a row: it self-registers inside

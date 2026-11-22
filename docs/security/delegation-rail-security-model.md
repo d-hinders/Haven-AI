@@ -248,6 +248,21 @@ loser runs no side effect. Nothing here signs, broadcasts or widens a
 delegation: the reconciler only reads a receipt for a hash the route already
 recorded, and the change is what Haven records after the signer has signed.
 
+**Outcome-unknown sweeps (#5035) — the same honesty, on the sweep rail:** a
+delegate sweep whose receipt wait timed out after broadcast (ethers 6 rejects a
+timed-out `waitForTransaction` with a `TIMEOUT` error carrying no hash) or whose
+broadcast answer was lost is booked `outcome_unknown` with the hash it was
+broadcast under — never `failed`, and never `submitted` (the six queries that
+read `submitted` as "landed" do not count it). A leader-gated confirmer decides
+the real outcome from the token's `authorizationState(from, nonce)`, which is
+independent of which hash mined: used → `submitted` with the mined hash (so
+transaction history attributes it) and the stranded-funds event resolves;
+unused past `validBefore` → `failed`. The EIP-3009 nonce stays single-use, the
+relayer is still only the gas payer, and a second prepare is refused while one
+sweep is in flight — so the double-spend path is unchanged. Nothing here signs,
+broadcasts or widens a delegation: the confirmer only reads chain state for an
+authorization the route already broadcast.
+
 ## 3. Delegation custody semantics (#828's contract)
 
 **Where the signed delegation lives:** Haven stores it server-side for
@@ -431,7 +446,9 @@ either way. Conversely,
 the account unlink route (`DELETE /user/accounts/:accountId`) refuses with
 `409` while any of the account's agents has a live delegation — `pending`,
 `active` or `replaced`, the same `stillEnabledDelegationSql` predicate — or a
-recovery sweep that is `prepared` or `submitting`, so an in-flight live
+recovery sweep that is `prepared`, `submitting` or `outcome_unknown` (#5035: a
+broadcast sweep whose receipt was not confirmed may still land, so it is still
+an in-flight live operation), so an in-flight live
 operation cannot lose its account binding. The guard only ever
 REFUSES or files a record — it grants nothing, signs nothing, and touches no
 chain.

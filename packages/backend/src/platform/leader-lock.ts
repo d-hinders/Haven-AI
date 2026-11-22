@@ -122,6 +122,14 @@ export const LEADER_LOCK_KEYS = {
    * merchant's access log would show Haven reading twice for no reason.
    */
   merchantCatalogueRefresh: 811014,
+  /**
+   * Delegate-sweep confirmer (#5035) — resolves a sweep booked
+   * `outcome_unknown` (broadcast, receipt not confirmed) from the token's
+   * `authorizationState(from, nonce)`, independent of which hash mined.
+   * Leader-gated because the RPC reads are the expensive part; correctness does
+   * not depend on it (both terminal writes are CASes on `outcome_unknown`).
+   */
+  sweepConfirmer: 811015,
 } as const
 
 /**

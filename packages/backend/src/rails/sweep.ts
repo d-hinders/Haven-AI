@@ -8,6 +8,7 @@ import {
 } from '@haven_ai/sdk'
 import { getRelayerWallet } from '../infra/chain/relayer-reads.js'
 import { openOutboundRecord, submitRecorded } from '../infra/outbound-queue.js'
+import { findOutboundTxById } from '../infra/repositories/outbound-txs.js'
 
 /**
  * #4655 (owner decision 1): the binding wallet is constructed in exactly ONE
@@ -93,6 +94,41 @@ export function recoverSweepSigner(auth: SweepAuthorization, signature: string):
   )
 }
 
+/**
+ * #5035: the sweep was broadcast but its on-chain outcome is not known yet.
+ *
+ * Raised when the receipt wait rejects (ethers 6 rejects a timed-out
+ * `waitForTransaction` with a `TIMEOUT` error that carries no hash) or when the
+ * broadcast's own answer is lost after the record was stamped. The transaction
+ * is durable and may still land, so this is NOT a failure — it carries the hash
+ * so the caller can record it and a confirmer can decide from chain state.
+ */
+export class SweepOutcomeUnknownError extends Error {
+  readonly txHash: string
+  constructor(txHash: string, cause?: unknown) {
+    super(
+      `Sweep tx ${txHash} was broadcast but its outcome is not confirmed yet — ` +
+        'it may still land; do not prepare a new sweep',
+    )
+    this.name = 'SweepOutcomeUnknownError'
+    this.txHash = txHash
+    this.cause = cause
+  }
+}
+
+/**
+ * How long the rail waits for a receipt synchronously (#5035).
+ *
+ * The hosted MCP path reaches this rail through the SDK transport, whose
+ * default request timeout is 30 s (`packages/sdk/src/haven-api-transport.ts`).
+ * A 90 s wait meant the client gave up long before the rail answered, so the
+ * agent saw a transport timeout and never learned the hash. 15 s leaves room
+ * for the pre-broadcast work (balance read, claim CAS, nonce read, sign, stamp)
+ * and the response, and anything slower than that is answered as
+ * outcome-unknown WITH the hash — the confirmer resolves it later.
+ */
+export const SWEEP_SYNC_CONFIRMATION_TIMEOUT_MS = 15_000
+
 /** Relay a signed sweep authorization on-chain. The relayer pays gas. */
 export async function relaySweepAuthorization(
   auth: SweepAuthorization,
@@ -138,36 +174,64 @@ export async function relaySweepAuthorization(
   // (#692/#718), on this replica or any other. Except when the record failed
   // open: `record.id` is then null, the stamp is skipped, and only the
   // in-process lock serialises (see `infra/outbound-queue.ts`).
-  const tx = await submitRecorded({
-    chainId: auth.chainId,
-    recordId: record.id,
-    to: auth.token,
-    data: new ethers.Interface(USDC_TRANSFER_WITH_AUTHORIZATION_ABI).encodeFunctionData(
-      'transferWithAuthorization',
-      [...callArgs],
-    ),
-  })
-  // `tx.wait()` can return null (or race) on a lagging RPC even when the tx has
-  // landed — which previously surfaced as a spurious "Sweep relay failed" while
-  // the funds had actually moved. Poll for the receipt by hash with a timeout,
-  // then assert it didn't revert. The tx is already broadcast and the EIP-3009
-  // nonce makes it idempotent, so we never re-submit.
+  let tx: Awaited<ReturnType<typeof submitRecorded>>
+  try {
+    tx = await submitRecorded({
+      chainId: auth.chainId,
+      recordId: record.id,
+      to: auth.token,
+      data: new ethers.Interface(USDC_TRANSFER_WITH_AUTHORIZATION_ABI).encodeFunctionData(
+        'transferWithAuthorization',
+        [...callArgs],
+      ),
+    })
+  } catch (err) {
+    // #5035: the record is stamped `broadcast` BEFORE the send (#1559), so a
+    // throw from the send may still have broadcast the transaction. Read the
+    // record: if it carries a hash, the outcome is unknown, not failure — the
+    // bump worker may land it and a confirmer can decide from chain state.
+    // Stamp the relayer-spend hash too, so the row carries it even when the
+    // wait never runs.
+    const stamped = record.id
+      ? await findOutboundTxById(record.id).catch(() => null)
+      : null
+    if (stamped?.status === 'broadcast' && stamped.tx_hash) {
+      await finishRelayerSpend(spendId, { txHash: stamped.tx_hash })
+      throw new SweepOutcomeUnknownError(stamped.tx_hash, err)
+    }
+    throw err
+  }
+  // #5035: stamp the relayer-spend hash BEFORE the wait. ethers 6 REJECTS a
+  // timed-out `waitForTransaction` with a `TIMEOUT` error carrying no hash, so
+  // the old `if (!receipt)` branch below never ran and this stamp was skipped —
+  // leaving the relayer-spend row without its hash.
+  await finishRelayerSpend(spendId, { txHash: tx.hash })
   const provider = relayer.provider
   if (!provider) {
-    throw new Error(`Relayer provider not configured for chain ${auth.chainId}`)
+    // Unreachable in practice (submitRecorded requires a provider to send),
+    // but the tx is already broadcast: outcome unknown, never failure.
+    throw new SweepOutcomeUnknownError(tx.hash)
   }
-  const receipt = await provider.waitForTransaction(tx.hash, 1, 90_000)
+  let receipt: Awaited<ReturnType<typeof provider.waitForTransaction>>
+  try {
+    receipt = await provider.waitForTransaction(tx.hash, 1, SWEEP_SYNC_CONFIRMATION_TIMEOUT_MS)
+  } catch (err) {
+    // #5035: a rejection here is a TIMEOUT (or an RPC read failure) AFTER the
+    // broadcast — the tx may still land. Raise the typed outcome-unknown error
+    // carrying the hash instead of letting a hashless ethers error reach the
+    // route, which used to book the sweep `failed` with no hash.
+    throw new SweepOutcomeUnknownError(tx.hash, err)
+  }
   await finishRelayerSpend(spendId, {
     txHash: tx.hash,
     gasUsed: receipt ? BigInt(receipt.gasUsed.toString()) : null,
     effectiveGasPrice: receipt?.gasPrice != null ? BigInt(receipt.gasPrice.toString()) : null,
   })
   if (!receipt) {
-    // Timeout is NOT failure: the tx is broadcast and may still land, so the
-    // record stays at `broadcast` for the #1558 unmined scan — closing it
-    // failed here would tell the bump worker to act on a tx that often mines
-    // seconds later.
-    throw new Error(`Sweep tx ${tx.hash} not confirmed within 90s`)
+    // Some providers resolve null instead of rejecting. Same reading: the tx is
+    // broadcast and may still land, so the record stays at `broadcast` for the
+    // #1558 unmined scan and the sweep is booked outcome-unknown with its hash.
+    throw new SweepOutcomeUnknownError(tx.hash)
   }
   if (receipt.status === 0) {
     // waitForTransaction RESOLVES a reverted receipt (unlike tx.wait, which

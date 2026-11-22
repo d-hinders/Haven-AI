@@ -4,7 +4,7 @@ import machinePaymentRoutes from '../machine-payments.js'
 // #3031: production wiring for the enforced module (see beforeAll).
 import { installRequestValidation } from '../../openapi/request-validation.js'
 
-const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
+const { mockQuery, allowanceMocks, sweepMocks, confirmerMocks } = vi.hoisted(() => ({
   mockQuery: vi.fn(),
   allowanceMocks: {
     getTokenBalance: vi.fn(),
@@ -15,13 +15,20 @@ const { mockQuery, allowanceMocks, sweepMocks } = vi.hoisted(() => ({
     recoverSweepSigner: vi.fn(),
     relaySweepAuthorization: vi.fn(),
   },
+  confirmerMocks: {
+    confirmOutcomeUnknownSweep: vi.fn(),
+  },
 }))
 
 vi.mock('../../db.js', () => ({
   default: { query: (...args: unknown[]) => mockQuery(...args) },
 }))
 vi.mock('../../infra/chain/relayer-reads.js', () => allowanceMocks)
-vi.mock('../../rails/sweep.js', () => sweepMocks)
+vi.mock('../../rails/sweep.js', async () => {
+  const actual = await vi.importActual<typeof import('../../rails/sweep.js')>('../../rails/sweep.js')
+  return { ...sweepMocks, SweepOutcomeUnknownError: actual.SweepOutcomeUnknownError }
+})
+vi.mock('../../modules/mpp/sweep-confirmer.js', () => confirmerMocks)
 
 const DELEGATE = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 const SAFE = '0x135a9215604711AC70d970e12Caa812c53537EF4'
@@ -98,11 +105,17 @@ function sweepRoutes(opts: {
   prepared?: Record<string, unknown> | null
   preparedAfterLostClaim?: Record<string, unknown>
   claimWins?: boolean
+  /** #5035: the in-flight outcome-unknown row prepare answers instead of minting. */
+  openOutcomeUnknown?: Record<string, unknown> | null
 }): DbRoute[] {
   let reads = 0
   return [
     AUTH_ROUTE,
     BOUND_AGENT_ROUTE,
+    // #5035: the in-flight read (and the outcome-unknown booking UPDATE) — must
+    // come BEFORE the generic `FROM delegate_sweeps` route, which would
+    // otherwise answer it with the prepared row.
+    [/status = 'outcome_unknown'/, () => ({ rows: opts.openOutcomeUnknown ? [opts.openOutcomeUnknown] : [] })],
     [/SET status = 'submitting'/, () => ({ rows: opts.claimWins ? [{ id: 'sweep-id' }] : [] })],
     [/FROM delegate_sweeps/, () => {
       reads += 1
@@ -133,6 +146,7 @@ describe('machine payment sweep routes', () => {
     mockQuery.mockResolvedValue({ rows: [] })
     for (const m of Object.values(allowanceMocks)) m.mockReset()
     for (const m of Object.values(sweepMocks)) m.mockReset()
+    for (const m of Object.values(confirmerMocks)) m.mockReset()
   })
 
   const headers = { authorization: 'Bearer sk_agent_test' }
@@ -501,6 +515,84 @@ describe('machine payment sweep routes', () => {
       // sweep that fails to record 'submitted' must not silently resolve
       // reconciliation for a transfer that never landed.
       expect(submittedIndex).toBeLessThan(resolveIndex)
+    })
+
+    // ── #5035: outcome-unknown sweeps ──────────────────────────────────────
+
+    it('#5035: a relay whose receipt wait timed out books the row outcome_unknown WITH the hash and answers 409 sweep_outcome_unknown', async () => {
+      primeDb(...sweepRoutes({ prepared: preparedRow(), claimWins: true }))
+      sweepMocks.recoverSweepSigner.mockReturnValueOnce(DELEGATE)
+      allowanceMocks.getTokenBalance.mockResolvedValue(40000n)
+      const { SweepOutcomeUnknownError } = await import('../../rails/sweep.js')
+      sweepMocks.relaySweepAuthorization.mockRejectedValueOnce(new SweepOutcomeUnknownError(TX))
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'sweep_outcome_unknown', tx_hash: TX })
+
+      // The row keeps the hash under the NEW status — never `failed`.
+      const bookCall = findCall(/SET status = 'outcome_unknown'/)
+      expect(bookCall).toBeDefined()
+      expect(bookCall!.sql).toContain("WHERE id = $2 AND status = 'submitting'")
+      expect(bookCall!.params).toEqual([TX, preparedRow().id])
+      expect(findCall(/SET status = 'failed'/)).toBeUndefined()
+    })
+
+    it('#5035: re-submitting an outcome_unknown sweep answers the current state (swept) without relaying', async () => {
+      primeDb(...sweepRoutes({ prepared: preparedRow({ status: 'outcome_unknown', tx_hash: TX }) }))
+      confirmerMocks.confirmOutcomeUnknownSweep.mockResolvedValue({ outcome: 'submitted', txHash: TX })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(200)
+      expect(res.json()).toMatchObject({ tx_hash: TX, idempotent_replay: true })
+      expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
+      expect(confirmerMocks.confirmOutcomeUnknownSweep).toHaveBeenCalledOnce()
+    })
+
+    it('#5035: re-submitting an outcome_unknown sweep that is still unresolved answers 409 with the hash', async () => {
+      primeDb(...sweepRoutes({ prepared: preparedRow({ status: 'outcome_unknown', tx_hash: TX }) }))
+      confirmerMocks.confirmOutcomeUnknownSweep.mockResolvedValue({ outcome: 'unresolved' })
+
+      const res = await app.inject({
+        method: 'POST',
+        url: '/machine-payments/sweep/submit',
+        headers,
+        payload: { authorization: { ...AUTHZ }, signature: SIG },
+      })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'sweep_outcome_unknown', tx_hash: TX })
+      expect(sweepMocks.relaySweepAuthorization).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('POST /sweep/prepare — #5035 in-flight sweep', () => {
+    it('answers the in-flight sweep state instead of minting a second authorization', async () => {
+      primeDb(
+        AUTH_ROUTE,
+        BOUND_AGENT_ROUTE,
+        [/status = 'outcome_unknown'/, () => ({ rows: [preparedRow({ status: 'outcome_unknown', tx_hash: TX })] })],
+      )
+      allowanceMocks.getTokenBalance.mockResolvedValue(2_000_000n)
+      confirmerMocks.confirmOutcomeUnknownSweep.mockResolvedValue({ outcome: 'unresolved' })
+
+      const res = await app.inject({ method: 'POST', url: '/machine-payments/sweep/prepare', headers })
+
+      expect(res.statusCode).toBe(409)
+      expect(res.json()).toMatchObject({ error_code: 'sweep_outcome_unknown', tx_hash: TX })
+      expect(sweepMocks.buildSweepAuthorization).not.toHaveBeenCalled()
     })
   })
 })

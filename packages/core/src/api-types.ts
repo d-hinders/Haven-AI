@@ -23752,7 +23752,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The sweep is not in a state that can be relayed. `error_code: sweep_outcome_unknown` means the transaction was broadcast but its receipt was not confirmed within the synchronous wait (or the broadcast answer was lost): the body carries `tx_hash` and the sweep may still land. Do not prepare a new sweep — re-submit the SAME authorization and signature (or call /sweep/prepare with no authorization) to read the current state; a background confirmer resolves the row from the token's authorization state. `error_code: sweep_expired` means the authorization expired unused. Other 409s name the row's current status. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -23760,10 +23760,26 @@ export interface operations {
                 content: {
                     "application/json": {
                         error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
+                        /**
+                         * @example sweep_outcome_unknown
+                         * @example sweep_expired
+                         */
+                        error_code?: string;
+                        /** @description Present on sweep_outcome_unknown: the hash the sweep was broadcast under. */
+                        tx_hash?: string;
+                        /** @example USDC */
+                        asset?: string;
+                        amount?: string;
+                        amount_atomic?: string;
+                        /** @example 0x1111111111111111111111111111111111111111 */
+                        from_address?: string;
+                        /** @example 0x1111111111111111111111111111111111111111 */
+                        to_address?: string;
+                        /** @example 8453 */
+                        chain_id?: number;
+                        explorer_url?: string;
+                        next_step?: string;
+                        status?: string;
                     };
                 };
             };

@@ -71,8 +71,8 @@ mutations → 4 caught); #2444 is the *not load-bearing at the tested
 condition* diagnosis in the wild (a PASS with the payment still on the
 delegate).
 
-**Sample: money-path guard files that carry no recorded mutation, oldest
-first.** A *guard file* is a test file whose path, with `.test.` removed,
+**Sample: money-path guard files that carry no recorded mutation, rotated by
+the scan SHA.** A *guard file* is a test file whose path, with `.test.` removed,
 matches a money-path glob (`.github/money-path-globs.json`, through the
 classifier's own matcher) — `packages/backend/src/modules/x402/__tests__/foo.test.ts`
 is one because `…/foo.ts` matches `packages/backend/src/modules/x402/**`.
@@ -98,16 +98,31 @@ used, so the change is which side of the window, not a new window. A file no
 landing has touched in 20 landings is the code least likely to have been
 mutated already, which is the property the sample wants.
 
+The list is ordered by last touch, oldest first, and the run takes five
+consecutive files from it. Taking the first five every run would sample the
+same five forever: mutating a file does not change its last-touch commit, so
+the same five come first at `8486093df`, `9871885a9` and `682c5fc3e` (#5039).
+The start is therefore rotated by the scan SHA — the SHA's leading hex digits
+modulo the candidate count — so consecutive runs start at different files and
+over many runs every file is reached. The order and the candidate list are
+unchanged; only the start moves, and the "oldest first" reason for the start
+position is dropped. Skipping files a previous run sampled is not an option: it
+needs a machine-readable per-file record, and the ledger's block-1 lines are
+prose (above).
+
 ```bash
 # Sample: money-path guard files NOT changed by the last 20 first-parent
-# landings on dev, oldest first (the file that has gone longest without a
-# landing goes first). Falls back to the previous sample — test files changed
-# by those landings whose diff also touched a money-path file, newest landing
-# first — when the filtered set is empty.
+# landings on dev, in last-touch order (oldest first), rotated so the run
+# starts at an offset derived from the scan SHA (origin/dev's tip — the SHA
+# the scan is pinned to). Falls back to the previous sample — test files
+# changed by those landings whose diff also touched a money-path file, newest
+# landing first — when the filtered set is empty; that branch keeps its
+# newest-landing order.
 node -e '
-import("./scripts/ci/qa-freshness.mjs").then(async (q) => {
+Promise.all([import("./scripts/ci/qa-freshness.mjs"), import("./scripts/ci/prove-red.mjs")]).then(async ([q, pr]) => {
   const cp = await import("node:child_process")
   const git = (...a) => cp.execFileSync("git", a).toString()
+  const scan = git("rev-parse", "--short=9", "origin/dev").trim()
   const globs = q.loadMoneyPathGlobs()
   const landings = git("log", "--first-parent", "origin/dev", "-n", "20", "--format=%h").trim().split("\n")
   const recent = new Set()
@@ -117,7 +132,7 @@ import("./scripts/ci/qa-freshness.mjs").then(async (q) => {
     .map((f) => ({ f, sha: git("log", "-1", "--format=%h", "--", f).trim(), at: Number(git("log", "-1", "--format=%ct", "--", f).trim()) }))
     .sort((a, b) => a.at - b.at)
   if (rows.length) {
-    for (const r of rows) console.log(r.sha, r.f)
+    for (const r of pr.rotateCensus(rows, scan)) console.log(r.sha, r.f)
     console.log("candidate guard files:", rows.length)
     return
   }
@@ -130,21 +145,22 @@ import("./scripts/ci/qa-freshness.mjs").then(async (q) => {
   console.log("candidate guard files:", seen.size)
 })'
 # Budget (below): 5 census mutations, one per file, in the order the census
-# lists them (oldest first), plus up to 2 targeted probes — never promise the
-# whole sample. Per mutation: invert or delete the condition the guard names in
-# its own title. Save the output above to $SCRATCH/census-<scan>.txt, write one
-# `census` cell per sampled file (plus the probes) to
-# $SCRATCH/prove-red-<scan>-cells.json, then:
+# lists them (rotated by the scan SHA), plus up to 2 targeted probes — never
+# promise the whole sample. Per mutation: invert or delete the condition the
+# guard names in its own title. Save the output above to
+# $SCRATCH/census-<scan>.txt, write one `census` cell per sampled file (plus
+# the probes) to $SCRATCH/prove-red-<scan>-cells.json, then:
 node scripts/ci/prove-red.mjs census --issue <scan> --candidates "$SCRATCH/census-<scan>.txt"
 ```
 
 **The output is a contract `prove-red` consumes.** `parseCandidates`
 (`scripts/ci/prove-red.mjs:419`) reads `<sha> <file>` lines and a
-`candidate guard files: N` line, and `selectCensus` (`:449`) takes the first
+`candidate guard files: N` line, and `selectCensus` (`:483`) takes the first
 five listed. The command keeps that shape and lists files in the order the
-runner should take them — oldest first — printing, per file, the commit that
-last touched it. The fallback branch prints the landing that changed the file,
-which is the same field under the old sample's meaning.
+runner should take them — the last-touch order rotated by the scan SHA, so the
+first five are the sample — printing, per file, the commit that last touched
+it. The fallback branch prints the landing that changed the file, which is the
+same field under the old sample's meaning.
 
 **Fallback, not a second sample.** When every money-path guard file changed in
 the last 20 landings, the filtered set is empty and the command prints the
@@ -172,8 +188,9 @@ first; the first five are `packages/mcp-server/src/auth.test.ts` (`f5f259f0d`),
 (`78107695c`) and `packages/signer/src/node-version.test.ts` (`ba14f39e4`).
 
 **Budget: 5 census mutations plus up to 2 targeted probes.** The five are the
-first five files the census lists, one mutation each, in that order (oldest
-first). A probe is one of two kinds, the two that found the 2026-10-19 run's
+first five files the census lists, one mutation each, in that order (the
+last-touch order rotated by the scan SHA). A probe is one of two kinds, the two
+that found the 2026-10-19 run's
 weak guards: the
 *second copy* of a guard a census mutation caught (M5, `client.ts:1936`,
 green in its own package and caught only across a package boundary → C3; M5

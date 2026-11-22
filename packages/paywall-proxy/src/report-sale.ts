@@ -114,6 +114,7 @@ export async function reportSaleAgain(
         ? buildReceiptForPayment({
             settings: config.receipt,
             product,
+            settledAmountAtomic: BigInt(payment.amount),
             chain: config.chain,
             payTo: config.payTo,
             payer: payment.payer,

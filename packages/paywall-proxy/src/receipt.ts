@@ -62,8 +62,15 @@ export interface ReceiptSettings {
 
 export interface ReceiptParams {
   settings: ReceiptSettings
-  /** The products-file entry the payment bought. */
+  /** The products-file entry the payment bought: its name and description. */
   product: Product
+  /**
+   * The amount that settled, in atomic units — the consumed-payment record's
+   * `amount`, fixed when the payment was reserved. Required, and never the
+   * products file's current price: a price changed after settlement must not
+   * reprice a receipt for a payment that already settled (#5033).
+   */
+  settledAmountAtomic: bigint
   chain: ProxyChain
   /** The address the payment was made out to (`PAY_TO`). */
   payTo: string
@@ -81,8 +88,10 @@ export interface ReceiptParams {
 
 /**
  * Build the receipt document for one settled payment. The receipt number comes
- * from the transaction hash alone, so the same settled transaction yields the
- * same receipt after a restart and on a retry.
+ * from the transaction hash alone, and the line's price is the amount that
+ * settled, so the same settled transaction yields the same receipt number and
+ * price after a restart and on a retry (#5033). The seller details and the VAT
+ * rule come from the current configuration.
  */
 export function buildReceiptForPayment(params: ReceiptParams): InvoiceJson {
   // Display only: a declaration that fails any check is treated as absent and
@@ -101,7 +110,7 @@ export function buildReceiptForPayment(params: ReceiptParams): InvoiceJson {
     line: {
       name: params.product.name ?? params.product.id,
       description: params.product.description,
-      priceAtomic: params.product.price,
+      priceAtomic: params.settledAmountAtomic,
     },
     seller: params.settings.seller,
     receivingAddress: params.payTo,

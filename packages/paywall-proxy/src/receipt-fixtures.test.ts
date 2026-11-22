@@ -45,6 +45,7 @@ const PARAMS: ReceiptParams = {
     price: 10000n,
     description: 'One chat completion on your-provider/your-model, up to 1,000 output tokens.',
   },
+  settledAmountAtomic: 10000n,
   chain: CHAIN,
   payTo: '0x1111111111111111111111111111111111111111',
   payer: PAYER,

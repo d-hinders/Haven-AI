@@ -257,10 +257,10 @@ describe('the verify cap (§7)', () => {
     })
     let verifies = 0
     const realVerify = h.facilitator.verify.bind(h.facilitator)
-    h.facilitator.verify = async (): Promise<VerifyResponse> => {
+    h.facilitator.verify = async (payload, requirements): Promise<VerifyResponse> => {
       verifies += 1
       if (verifies === 1) await held
-      return realVerify()
+      return realVerify(payload, requirements)
     }
 
     const first = paidChat(newBuyer())

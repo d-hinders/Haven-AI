@@ -5,6 +5,8 @@
  * file, a mocked facilitator, chain reader and upstream, and a buyer that
  * signs real EIP-3009 authorizations and real tax declarations.
  */
+import { readFileSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { receiptNumberForTransaction } from '@haven_ai/merchant-payments'
 import { MAX_RECEIPT_HEADER_CHARS } from './receipt.js'
@@ -220,5 +222,36 @@ describe('the receipt on a paid call (#4913)', () => {
     expect((await served.json()).choices).toBeDefined()
     expect(receiptOf(served)!.fakturanummer).toBe(receiptNumberForTransaction(TX as `0x${string}`))
     expect(receiptOf(served)!.blockkedje_referens).toBe(`Tx: ${TX}`)
+  })
+
+  it('#5033 — after a price change and a restart, the receipt for an earlier settled call states the price that settled', async () => {
+    h = await startHarness({ env: RECEIPT_ENV, upstream: { status: 503 } })
+    const buyer = newBuyer()
+    const { res: failed, paid } = await paidChat(buyer)
+    expect((await failed.json()).error).toBe('upstream_failed_after_settlement')
+    const settledValue = (paid.payload.payload as { authorization: { value: string } }).authorization.value
+
+    // The merchant raises the price in the products file, then restarts.
+    const productsFile = join(h.dir, 'products.json')
+    const doc = JSON.parse(readFileSync(productsFile, 'utf8')) as { products: Array<{ price: string }> }
+    const raised = (BigInt(doc.products[0]!.price) * 3n).toString()
+    doc.products[0]!.price = raised
+    writeFileSync(productsFile, JSON.stringify(doc))
+    h.upstream.behaviour.status = 200
+    await h.restart()
+
+    const challenge = (await (await fetch(`${h.base}${CHAT_PATH}`, chatRequest({ 'payment-signature': paid.header }))).json())
+      .sign_in_with_x
+    const proof = await buyer.signIn(challenge, RESOURCE)
+    const served = await fetch(
+      `${h.base}${CHAT_PATH}`,
+      chatRequest({ 'payment-signature': paid.header, 'sign-in-with-x': proof }),
+    )
+    expect(served.status).toBe(200)
+    const receipt = receiptOf(served)!
+    // The settled amount in whole USDC (6 decimals), as the receipt writes it.
+    const settledUsdc = (Number(settledValue) / 1_000_000).toString()
+    expect(receipt.totalt_inkl_moms).toBe(settledUsdc)
+    expect(receipt.totalt_inkl_moms).not.toBe((Number(raised) / 1_000_000).toString())
   })
 })

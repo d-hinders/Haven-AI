@@ -1682,8 +1682,8 @@ contact.
 | `betalningssatt` | Deployment configuration: the network name from `NETWORK`. |
 | `momsbehandling`, `moms_procent` | Deployment configuration (`VAT_RULE`) applied to the payment's declaration (below). |
 | `rader[].beskrivning` | Products file: `<name> — <description>` (the `id` when there is no name), with no billing period for a per-call product. The composed line is at most 300 characters (section 3). |
-| `totalt_inkl_moms` and the line's total | Products file: `price`, which is also the settled amount. |
-| `belopp_exkl_moms`, `moms_belopp`, the line's VAT figures | Computed from the price and the treatment (below). |
+| `totalt_inkl_moms` and the line's total | The amount that settled: the consumed-payment record's `amount`, fixed when the payment was reserved at the products file's price then. A price changed later does not reprice the receipt (#5033). |
+| `belopp_exkl_moms`, `moms_belopp`, the line's VAT figures | Computed from the settled price and the treatment (below). |
 | `fakturanummer` (the receipt number) | The payment: `FAK-` and the settlement transaction hash modulo 10^16 as 16 digits, the demo's `receiptNumberForTransaction`. The same transaction gives the same number after a restart. |
 | `ocr_nummer` | The payment: the receipt number's digits plus a Luhn check digit. |
 | `fakturadatum`, `forfallodatum` | The payment: the date of `settledAt` in the consumed-payment store, and 30 days later, so a retry on a later day gives the same receipt. |

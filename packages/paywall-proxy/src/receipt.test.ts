@@ -59,6 +59,7 @@ const SETTINGS: ReceiptSettings = {
 const PARAMS: ReceiptParams = {
   settings: SETTINGS,
   product: PRODUCT,
+  settledAmountAtomic: PRODUCT.price,
   chain: CHAIN,
   payTo: PAY_TO,
   payer: PAYER,
@@ -184,6 +185,14 @@ describe('buildReceiptForPayment (#4913)', () => {
     expect(buildReceiptForPayment({ ...PARAMS, txHash: `0x${'ab'.repeat(32)}` }).fakturanummer).not.toBe(
       first.fakturanummer,
     )
+  })
+
+  it('#5033 — prices the line at the amount that settled, never the products file\'s current price', () => {
+    // The products file now says 30000; the payment settled at 10000.
+    const repriced = buildReceiptForPayment({ ...PARAMS, product: { ...PRODUCT, price: 30000n }, settledAmountAtomic: 10000n })
+    expect(repriced.totalt_inkl_moms).toBe(buildReceiptForPayment(PARAMS).totalt_inkl_moms)
+    expect(repriced.totalt_inkl_moms).toBe('0.01')
+    expect(repriced.rader[0]).toMatchObject({ totalt_inkl_moms: '0.01' })
   })
 
   it('uses the product id when the products file has no name, and no billing period for a per-call product', () => {

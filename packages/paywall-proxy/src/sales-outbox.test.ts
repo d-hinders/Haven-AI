@@ -41,25 +41,95 @@ afterEach(() => {
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true })
 })
 
-describe('the sales outbox (#4898)', () => {
-  it('queues a record the reporter gave up on and replays it until Haven accepts', async () => {
+describe('the sales outbox (#4898, #5032)', () => {
+  it('writes the record before the first attempt, and holds it from a replay until the first round ends', async () => {
     const path = outboxPath()
-    const logs: Record<string, unknown>[] = []
+    let sends = 0
     const outbox = openSalesOutbox({
       path,
-      log: (event, fields) => logs.push({ event, ...fields }),
-      send: async () => ACCEPTED,
+      log: () => undefined,
+      send: async () => {
+        sends += 1
+        return ACCEPTED
+      },
     })
 
-    await outbox.add('key', RECORD, GAVE_UP)
-    expect(outbox.depth()).toBe(1)
+    await outbox.queue('key', RECORD)
+    // The file is the durable record from the first moment...
     expect(lines(path)).toHaveLength(1)
-    expect(logs.map((line) => line.event)).toContain('sales_outbox_queued')
-
+    // ...but the reporter is delivering it, so it is not waiting for a replay.
+    expect(outbox.depth()).toBe(0)
     await outbox.replay()
+    expect(sends).toBe(0)
+
+    // The first round ended without an answer: now it waits.
+    await outbox.release('key', GAVE_UP)
+    expect(outbox.depth()).toBe(1)
+    await outbox.replay()
+    expect(sends).toBe(1)
     expect(outbox.depth()).toBe(0)
     expect(lines(path)).toHaveLength(0)
-    expect(logs.map((line) => line.event)).toContain('sales_outbox_accepted')
+  })
+
+  it('removes a record by key when Haven accepts it, and a restart does not send it again', async () => {
+    const path = outboxPath()
+    const logs: Record<string, unknown>[] = []
+    const first = openSalesOutbox({ path, log: (event, fields) => logs.push({ event, ...fields }), send: async () => ACCEPTED })
+    await first.queue('key', RECORD)
+    await first.remove('key', 'accepted')
+    expect(lines(path)).toHaveLength(0)
+    expect(logs.find((line) => line.event === 'sales_outbox_removed')).toMatchObject({ reason: 'accepted', depth: 0 })
+    first.stop()
+
+    let sends = 0
+    const second = openSalesOutbox({
+      path,
+      log: () => undefined,
+      send: async () => {
+        sends += 1
+        return ACCEPTED
+      },
+    })
+    expect(second.depth()).toBe(0)
+    await second.replay()
+    expect(sends).toBe(0)
+  })
+
+  it('removes a record Haven refuses for good, and a restart does not send it again', async () => {
+    const path = outboxPath()
+    const first = openSalesOutbox({ path, log: () => undefined, send: async () => REFUSED_422 })
+    await first.queue('key', RECORD)
+    await first.remove('key', 'refused')
+    expect(lines(path)).toHaveLength(0)
+    first.stop()
+
+    let sends = 0
+    const second = openSalesOutbox({
+      path,
+      log: () => undefined,
+      send: async () => {
+        sends += 1
+        return ACCEPTED
+      },
+    })
+    expect(second.depth()).toBe(0)
+    await second.replay()
+    expect(sends).toBe(0)
+  })
+
+  it('replays a record whose first delivery round never ended: the file is the record', async () => {
+    // The proxy stopped mid-delivery: the first outbox queued the record and
+    // never released or removed it. A new outbox on the same file replays it.
+    const path = outboxPath()
+    const first = openSalesOutbox({ path, log: () => undefined, send: async () => ACCEPTED })
+    await first.queue('key', RECORD)
+    first.stop()
+
+    const second = openSalesOutbox({ path, log: () => undefined, send: async () => ACCEPTED })
+    expect(second.depth()).toBe(1)
+    await second.replay()
+    expect(second.depth()).toBe(0)
+    expect(lines(path)).toHaveLength(0)
   })
 
   it('keeps a record Haven asks to be retried, and drops it after the attempt limit', async () => {
@@ -71,7 +141,8 @@ describe('the sales outbox (#4898)', () => {
       send: async () => GAVE_UP,
     })
 
-    await outbox.add('key', RECORD, GAVE_UP)
+    await outbox.queue('key', RECORD)
+    await outbox.release('key', GAVE_UP)
     for (let attempt = 1; attempt < SALES_OUTBOX_MAX_ATTEMPTS; attempt += 1) {
       await outbox.replay()
       expect(outbox.depth()).toBe(1)
@@ -96,7 +167,8 @@ describe('the sales outbox (#4898)', () => {
       },
     })
 
-    await outbox.add('key', RECORD, REFUSED_422)
+    await outbox.queue('key', RECORD)
+    await outbox.release('key', REFUSED_422)
     await outbox.replay()
     expect(outbox.depth()).toBe(0)
     expect(sends).toBe(1)
@@ -110,7 +182,8 @@ describe('the sales outbox (#4898)', () => {
     const path = outboxPath()
     const outbox = openSalesOutbox({ path, log: () => undefined, send: async () => REFUSED_429 })
 
-    await outbox.add('key', RECORD, REFUSED_429)
+    await outbox.queue('key', RECORD)
+    await outbox.release('key', REFUSED_429)
     await outbox.replay()
     expect(outbox.depth()).toBe(1)
     expect(lines(path)).toHaveLength(1)
@@ -121,13 +194,23 @@ describe('the sales outbox (#4898)', () => {
     const logs: Record<string, unknown>[] = []
     const outbox = openSalesOutbox({ path, log: (event, fields) => logs.push({ event, ...fields }), send: async () => ACCEPTED, maxRecords: 1 })
 
-    await outbox.add('key', RECORD, GAVE_UP)
-    await outbox.add('key2', { ...RECORD, merchant_reference: 'sale_second' }, GAVE_UP)
+    await outbox.queue('key', RECORD)
+    await outbox.release('key', GAVE_UP)
+    await outbox.queue('key2', { ...RECORD, merchant_reference: 'sale_second' })
     expect(outbox.depth()).toBe(1)
     expect(logs.filter((line) => line.event === 'sales_outbox_full')).toHaveLength(1)
   })
 
-  it('keeps a record added while a replay is running', async () => {
+  it('does not add a second entry for a key it already holds', async () => {
+    const path = outboxPath()
+    const outbox = openSalesOutbox({ path, log: () => undefined, send: async () => ACCEPTED })
+
+    await outbox.queue('key', RECORD)
+    await outbox.queue('key', { ...RECORD, merchant_reference: 'sale_second' })
+    expect(lines(path)).toHaveLength(1)
+  })
+
+  it('keeps a record queued while a replay is running', async () => {
     const path = outboxPath()
     let release: (() => void) | undefined
     const gate = new Promise<void>((resolve) => {
@@ -142,9 +225,11 @@ describe('the sales outbox (#4898)', () => {
       },
     })
 
-    await outbox.add('key', RECORD, GAVE_UP)
+    await outbox.queue('key', RECORD)
+    await outbox.release('key', GAVE_UP)
     const replaying = outbox.replay()
-    await outbox.add('key3', { ...RECORD, merchant_reference: 'sale_added_during_replay' }, GAVE_UP)
+    await outbox.queue('key3', { ...RECORD, merchant_reference: 'sale_added_during_replay' })
+    await outbox.release('key3', GAVE_UP)
     release?.()
     await replaying
 
@@ -169,7 +254,8 @@ describe('the sales outbox (#4898)', () => {
   it('survives a restart: the file is the record', async () => {
     const path = outboxPath()
     const first = openSalesOutbox({ path, log: () => undefined, send: async () => ACCEPTED })
-    await first.add('key', RECORD, GAVE_UP)
+    await first.queue('key', RECORD)
+    await first.release('key', GAVE_UP)
     first.stop()
 
     const second = openSalesOutbox({ path, log: () => undefined, send: async () => ACCEPTED })

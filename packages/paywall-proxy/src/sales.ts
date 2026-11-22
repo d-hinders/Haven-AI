@@ -14,9 +14,10 @@
  * - **fire-and-forget**: `report` returns at once and never throws, so the
  *   buyer's answer and its timing do not depend on Haven — accepted, refused,
  *   slow or unreachable;
- * - **the outbox** (`sales-outbox.ts`): a record the core reporter gave up on,
- *   or one Haven answered 429 to, is queued for a later resend; any other 4xx is
- *   a refusal, logged once by the core reporter and never resent;
+ * - **the outbox** (`sales-outbox.ts`): the record is written there *before* the
+ *   first attempt (#5032), so a proxy that stops mid-delivery loses nothing; it
+ *   is removed by key when Haven accepts it or refuses it for good, and a record
+ *   whose first delivery round ended without an answer waits there for a replay;
  * - **`saleReported`** in the store is set when Haven accepts, so a payment is
  *   never reported twice.
  *
@@ -89,7 +90,7 @@ export interface SalesStats {
   reported: number
   /** Refused by Haven: logged, never resent. */
   refused: number
-  /** Queued in the outbox for a later resend. */
+  /** Waiting in the outbox for a replay. */
   queued: number
 }
 
@@ -102,8 +103,13 @@ export interface SalesReporter {
   stats(): SalesStats
   /** Resolves when every report in flight has ended (tests and shutdown). */
   idle(): Promise<void>
-  /** How many records the outbox is holding. */
+  /** How many records the outbox is holding for a replay. */
   outboxDepth(): number
+  /**
+   * Shutdown: the reporter stops writing to the store and the outbox. The record
+   * it was delivering is already in the outbox, so the next proxy replays it.
+   */
+  stop(): void
 }
 
 export interface SalesReporterDeps {
@@ -123,9 +129,14 @@ export function createSalesReporter(deps: SalesReporterDeps): SalesReporter {
   // A payment whose report is in flight is not reported again.
   const inFlight = new Map<string, Promise<void>>()
   const counts = { reported: 0, refused: 0, queued: 0 }
+  let stopped = false
 
   async function deliver(key: string, sale: SaleRecord): Promise<void> {
     try {
+      if (stopped) return
+      // #5032: the record is durable before the first attempt, so a proxy that
+      // stops between resends — or inside one — loses nothing.
+      await outbox.queue(key, sale)
       const outcome: SaleReportOutcome = await reportSale({
         havenBaseUrl: settings.havenBaseUrl,
         salesKey: settings.merchantKey,
@@ -136,19 +147,25 @@ export function createSalesReporter(deps: SalesReporterDeps): SalesReporter {
         ...(deps.attemptTimeoutMs !== undefined ? { attemptTimeoutMs: deps.attemptTimeoutMs } : {}),
         log: (event, fields) => log(event, fields),
       })
+      // Shutdown: the record is in the outbox and the next proxy replays it.
+      // Writing to a closed store or a stopped outbox would only corrupt what is
+      // already durable.
+      if (stopped) return
       if (outcome.outcome === 'accepted') {
         await store.markSaleReported(key)
+        await outbox.remove(key, 'accepted')
         counts.reported += 1
         return
       }
       // A 429 is the route's rate limit, not a judgement on the record: it is
-      // "could not be sent", so the outbox takes it. Every other 4xx is a
+      // "could not be sent", so the outbox keeps it. Every other 4xx is a
       // refusal and resending it changes nothing.
       if (outcome.outcome === 'gave_up' || (outcome.outcome === 'refused' && outcome.status === 429)) {
-        await outbox.add(key, sale, outcome)
+        await outbox.release(key, outcome)
         counts.queued += 1
         return
       }
+      await outbox.remove(key, 'refused')
       counts.refused += 1
     } catch (err) {
       // `reportSale` never throws; this guards the store and the outbox, and
@@ -160,6 +177,7 @@ export function createSalesReporter(deps: SalesReporterDeps): SalesReporter {
   return {
     report(record, product, receipt) {
       try {
+        if (stopped) return
         if (record.saleReported) return
         if (!record.txHash || !record.settledAt) return
         if (inFlight.has(record.key)) return
@@ -181,5 +199,9 @@ export function createSalesReporter(deps: SalesReporterDeps): SalesReporter {
     },
 
     outboxDepth: () => outbox.depth(),
+
+    stop() {
+      stopped = true
+    },
   }
 }

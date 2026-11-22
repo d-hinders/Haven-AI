@@ -423,8 +423,9 @@ function checkOutbox(path: string): CheckLine {
   if (problem !== undefined) return { name: 'outbox', status: 'fail', reason: problem }
   if (!existsSync(path)) return { name: 'outbox', status: 'ok', reason: `will be created at ${path}` }
   try {
-    // Opening the outbox only reads it; `add` and `replay` are what write, and
-    // `check` calls neither. The `send` below is never reached.
+    // Opening the outbox only reads it; `queue`, `release`, `remove` and
+    // `replay` are what write, and `check` calls none of them. The `send` below
+    // is never reached.
     const outbox = openSalesOutbox({
       path,
       send: async (): Promise<SaleReportOutcome> => ({ outcome: 'gave_up', status: null, code: null, attempts: 0 }),

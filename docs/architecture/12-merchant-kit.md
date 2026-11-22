@@ -747,19 +747,23 @@ happens to the upstream call: the payment settled either way.
 retried call never sends a second, different record (#4897 refuses a second
 record for the same transaction that differs from the first).
 
-Delivery is at-least-once. The core reporter retries a 5xx, a timeout (no
-answer in 10 s) or a network failure, and the answer #4897 defines for "the
-transaction is not visible on the chain yet, retry" — 425
-`transaction_not_visible` (Haven accepts a record only after 3 confirmations,
-so a record sent straight after settlement usually gets that answer first) —
-with exponential backoff (1 s, 4 s, 16 s), each wait raised to the answer's
-`Retry-After` (capped at 60 s). After the last retry the reporter returns the
-outcome to its caller. The proxy then moves the record to a bounded
-on-disk outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) that a background
-task replays every 60 s. Any other 4xx is not retried: the record was refused,
-and the reporter logs `sales_report_refused` with the answer's status and code.
-That includes 429 (the 120-a-minute limit): the reporter does not resend it, so
-a consumer without an outbox (the demo merchant) loses that record, and #4898
+Delivery is at-least-once. The proxy writes the record to a bounded on-disk
+outbox (`SALES_OUTBOX`, JSON Lines, 10,000 records) **before the first
+attempt**, so a proxy that stops mid-delivery — between resends, or inside one —
+loses nothing: the next proxy started on the same store and outbox sends it
+(#5032). The core reporter then retries a 5xx, a timeout (no answer in 10 s) or
+a network failure, and the answer #4897 defines for "the transaction is not
+visible on the chain yet, retry" — 425 `transaction_not_visible` (Haven accepts
+a record only after 3 confirmations, so a record sent straight after settlement
+usually gets that answer first) — with exponential backoff (1 s, 4 s, 16 s),
+each wait raised to the answer's `Retry-After` (capped at 60 s). After the last
+retry the reporter returns the outcome to its caller. A record still undelivered
+stays in the outbox, which a background task replays every 60 s; a record Haven
+accepts, or refuses for good, is removed from the outbox by key, so no restart
+sends it again. Any other 4xx is not retried: the record was refused, and the
+reporter logs `sales_report_refused` with the answer's status and code. That
+includes 429 (the 120-a-minute limit): the reporter does not resend it, so a
+consumer without an outbox (the demo merchant) loses that record, and #4898
 decides on purpose whether the proxy's outbox takes it. When the outbox is
 full the proxy keeps the records it has, logs `sales_outbox_full` for each
 record it cannot add, and the merchant must clear the cause (section 12).
@@ -1802,9 +1806,10 @@ What the merchant monitors:
   cannot sign the proof and are owed a refund by hand.
 - **Overage.** `overage_tokens` in the log: a product whose answers often run
   over its cap is priced too low or capped too high (section 7).
-- **Sales reporting.** The outbox depth and `sales_report_refused` lines. A
-  growing outbox means Haven is not receiving the sales; a refused record
-  means its shape or key is wrong.
+- **Sales reporting.** The outbox depth and `sales_report_refused` lines. The
+  depth counts the records waiting for a replay — a record in its first delivery
+  round is in the file but not counted — so a growing depth means Haven is not
+  receiving the sales; a refused record means its shape or key is wrong.
 - **Cost.** Coinbase facilitator usage against the 1,000 free transactions a
   month (section 10), and the upstream provider's spend.
 - **Money.** The receiving account's balance in Haven against the settled

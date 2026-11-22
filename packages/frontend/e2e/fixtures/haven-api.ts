@@ -1221,18 +1221,6 @@ export const merchantServicesOn = {
 }
 
 /**
- * #5028: the same Sales account on Base Sepolia. The Stripe deposit-address
- * registry is dev and Stripe sandbox only, enforced per Sales account: the
- * section renders only on a testnet Sales account, so the visual spec that
- * captures it serves this state (`serveSales(page, 'overview-stripe', {
- * salesChainId: 84532 })`).
- */
-export const merchantServicesOnSepolia = {
-  ...merchantServicesOn,
-  merchant_account: { ...merchantServicesOn.merchant_account, chain_id: 84532 },
-}
-
-/**
  * Sales (#4900, epic #4885): the reads the Sales page makes — the summary, the
  * payments list and one payment's detail (`routes/merchant-sales-reads.ts`,
  * #4897), the catalogue (`routes/merchant-catalogue.ts`, #4899) and the keys
@@ -1337,7 +1325,7 @@ export const salesPayments = [
  * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
  * retired. Lower-case on the wire, `verified: false` always. #5028: the
  * registry is open only on a testnet Sales account, so these are Base Sepolia
- * registrations and are served with `merchantServicesOnSepolia`.
+ * registrations and are served with `serveSales(..., { salesChainId: 84532 })`.
  */
 export const salesStripeAddress = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
 export const salesDepositAddresses = [

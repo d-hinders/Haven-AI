@@ -306,4 +306,12 @@ describe('the Stripe deposit addresses (#4983)', () => {
     const dialog = await screen.findByRole('dialog', { name: 'Register a Stripe deposit address' })
     expect(dialog.textContent).toContain('Base')
   })
+
+  it('does not render on a Sales account whose chain is not a testnet, and does not read the route (#5028)', async () => {
+    await renderTab(catalogue(), vi.fn(), { ...ACCOUNT, chain_id: 8453 })
+    expect(screen.queryByTestId('sales-deposit-addresses')).toBeNull()
+    expect(screen.queryByRole('heading', { name: 'Stripe deposit addresses', level: 2 })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Register address' })).toBeNull()
+    expect(mockGet).not.toHaveBeenCalledWith('/merchant-deposit-addresses')
+  })
 })

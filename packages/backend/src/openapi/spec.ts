@@ -10406,7 +10406,7 @@ export const openapiSpec = {
         operationId: 'listMerchantDepositAddresses',
         summary: "The Sales account's registered Stripe deposit addresses, active and retired.",
         description:
-          "The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as \"registered by you, not verified by Haven\", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.",
+          "The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY`). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as \"registered by you, not verified by Haven\", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.",
         security: [{ DashboardJwt: [] }],
         responses: {
           '200': {
@@ -10414,6 +10414,10 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantDepositAddressList' } } },
           },
           '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description: 'error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network.',
+          },
         },
       },
       post: {
@@ -10421,7 +10425,7 @@ export const openapiSpec = {
         operationId: 'registerMerchantDepositAddress',
         summary: 'Register a Stripe deposit address for the Sales account.',
         description:
-          "The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only). The chain is the Sales account's own. The registration is the owner's word: it is labelled \"registered by you, not verified by Haven\" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.",
+          "The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). The chain is the Sales account's own. The registration is the owner's word: it is labelled \"registered by you, not verified by Haven\" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.",
         security: [{ DashboardJwt: [] }],
         requestBody: {
           required: true,
@@ -10449,6 +10453,10 @@ export const openapiSpec = {
           },
           '400': { ...errorResponse, description: 'error_code INVALID_DEPOSIT_ADDRESS: not a valid EVM address.' },
           '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description: 'error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network.',
+          },
           '409': {
             ...errorResponse,
             description: 'error_code DEPOSIT_ADDRESS_IS_OWN, DEPOSIT_ADDRESS_ALREADY_REGISTERED, or MERCHANT_ACCOUNT_REQUIRED (merchant services off).',
@@ -10463,7 +10471,7 @@ export const openapiSpec = {
         operationId: 'retireMerchantDepositAddress',
         summary: 'Retire a registered Stripe deposit address.',
         description:
-          "The owner retires a registration (#4952, epic #4886). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.",
+          "The owner retires a registration (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.",
         security: [{ DashboardJwt: [] }],
         parameters: [
           { name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' }, description: 'The registration id.' },
@@ -10474,6 +10482,10 @@ export const openapiSpec = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/MerchantDepositAddress' } } },
           },
           '401': errorResponse,
+          '403': {
+            ...errorResponse,
+            description: 'error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network.',
+          },
           '404': { ...errorResponse, description: 'No such registration on the account: error_code DEPOSIT_ADDRESS_NOT_FOUND.' },
           '409': { ...errorResponse, description: 'error_code DEPOSIT_ADDRESS_RETIRED (already retired) or MERCHANT_ACCOUNT_REQUIRED (merchant services off).' },
           '429': errorResponse,

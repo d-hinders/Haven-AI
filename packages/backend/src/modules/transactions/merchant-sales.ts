@@ -17,6 +17,11 @@
  *
  * ## Stripe-held sales (#4952, dev and Stripe sandbox only)
  *
+ * The registry is open only on a testnet Sales account (#5028): on any other
+ * chain it is treated as empty, so a transfer into a registered address is
+ * answered exactly as a hash that paid nobody. The ownership-proof slice
+ * removes that gate.
+ *
  * When a confirmed transaction pays the key's Sales account nothing, the legs
  * to the account's REGISTERED deposit addresses are read instead (the registry
  * is the owner's own word, never the record's). A leg counts only when its
@@ -58,6 +63,7 @@ import {
   depositAddressActiveAt,
   listAccountDepositAddresses,
 } from '../../infra/repositories/merchant-deposit-addresses.js'
+import { depositAddressRegistryOpen } from './merchant-deposit-addresses.js'
 import {
   readInboundTransactionByTxHash,
   type ChainInboundLeg,
@@ -225,7 +231,17 @@ export async function ingestMerchantSale(input: {
   // #4952: the account's registered Stripe deposit addresses, every window
   // (active or retired). Only THIS account's rows: nothing here can reveal
   // another account's registrations.
-  const registered = await listAccountDepositAddresses(merchant.account_id, merchant.chain_id)
+  //
+  // #5028: the registry is dev and Stripe sandbox only until a proof of address
+  // ownership exists, and the gate is per Sales account: on a chain that is not
+  // a testnet the registry is EMPTY. No address is named to the chain read and
+  // no leg can be attributed to one, so a transfer into a registered address is
+  // answered exactly as a hash that paid nobody. The ownership-proof slice
+  // removes this gate.
+  const registryOpen = depositAddressRegistryOpen(merchant.chain_id)
+  const registered = registryOpen
+    ? await listAccountDepositAddresses(merchant.account_id, merchant.chain_id)
+    : []
   const read = await readInboundTransactionByTxHash(
     merchant.chain_id,
     merchant.account_address,
@@ -257,13 +273,16 @@ export async function ingestMerchantSale(input: {
     // while that registration was active at the leg's block time. Every other
     // case (another account's address, an unregistered one, registered after
     // the block or retired before it) is the same answer as a hash that paid
-    // nobody.
+    // nobody. #5028: on a non-testnet Sales account the registry is empty, so
+    // no leg is counted and the answer is the same one.
     const counted = []
-    for (const o of read.otherLegs ?? []) {
-      if (
-        await depositAddressActiveAt(merchant.account_id, merchant.chain_id, o.toAddress, o.leg.blockTime)
-      ) {
-        counted.push(o)
+    if (registryOpen) {
+      for (const o of read.otherLegs ?? []) {
+        if (
+          await depositAddressActiveAt(merchant.account_id, merchant.chain_id, o.toAddress, o.leg.blockTime)
+        ) {
+          counted.push(o)
+        }
       }
     }
     counted.sort((x, y) => x.leg.logIndex - y.leg.logIndex)

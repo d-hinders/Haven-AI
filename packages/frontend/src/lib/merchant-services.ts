@@ -199,7 +199,9 @@ export function salesCardState(
 // counts in the Sales revenue figures, split as "in Stripe" (#4981), and never
 // in the Sales account's balance. The address is the owner's
 // word: Haven cannot check a Stripe-controlled address is theirs, so every
-// registration is "registered by you, not verified by Haven".
+// registration is "registered by you, not verified by Haven". #5028: the
+// registry is open only on a testnet Sales account, and the routes answer 403
+// `DEPOSIT_ADDRESSES_TESTNET_ONLY` on any other chain.
 
 /** One registration, active or retired. */
 export type DepositAddress = ApiOperations['registerMerchantDepositAddress']['responses']['201']['content']['application/json']
@@ -220,6 +222,8 @@ export const DEPOSIT_ADDRESS_RETIRED = 'DEPOSIT_ADDRESS_RETIRED'
 export const DEPOSIT_ADDRESS_NOT_FOUND = 'DEPOSIT_ADDRESS_NOT_FOUND'
 /** Merchant services are off, or there is no merchant account (409). */
 export const MERCHANT_ACCOUNT_REQUIRED = 'MERCHANT_ACCOUNT_REQUIRED'
+/** The Sales account is not on a test network, so the registry is closed (403, #5028). */
+export const DEPOSIT_ADDRESSES_TESTNET_ONLY = 'DEPOSIT_ADDRESSES_TESTNET_ONLY'
 
 /** The shape the route checks, so an obvious typo is caught before a round trip. */
 export function isDepositAddressShape(value: string): boolean {
@@ -234,6 +238,8 @@ export type DepositAddressRefusal =
   | { kind: 'already_retired' }
   | { kind: 'not_found' }
   | { kind: 'sales_off' }
+  /** The Sales account is not on a test network: the registry is closed (#5028). */
+  | { kind: 'testnet_only' }
   | { kind: 'rate_limited' }
   /** A code-less 4xx: the route's sentence, bounded, or null. */
   | { kind: 'refused'; detail: string | null }
@@ -263,6 +269,8 @@ export function classifyDepositAddressError(err: unknown): DepositAddressRefusal
       return { kind: 'not_found' }
     case MERCHANT_ACCOUNT_REQUIRED:
       return { kind: 'sales_off' }
+    case DEPOSIT_ADDRESSES_TESTNET_ONLY:
+      return { kind: 'testnet_only' }
   }
 
   if (typeof status !== 'number' || status < 400 || status >= 500) return { kind: 'unknown_outcome' }

@@ -171,7 +171,10 @@ because a JSON Schema can validate it at startup. The proxy refuses to start
 when the file is missing, is not valid JSON, or fails validation.
 
 A sale may also be received at a **registered Stripe deposit address** (#4952;
-dev and Stripe sandbox only). The owner registers the address on the dashboard
+dev and Stripe sandbox only, enforced per Sales account by #5028: the registry
+is open only when the Sales account's chain is a testnet, and every registry
+route answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` otherwise). The owner
+registers the address on the dashboard
 (`/merchant-deposit-addresses`, owner session, never the key) and Haven labels
 it "registered by you, not verified by Haven". The record does not change: it
 gains no field and no version. When the transaction pays the key's account
@@ -179,7 +182,9 @@ nothing, Haven reads its USDC legs to the account's registered addresses, and
 accepts the sale only when a leg went to an address registered to the account
 and active at the leg's block time (when legs go to several registered
 addresses, only those to the first one by log index count, so the row's address
-and amount agree). The sale is stored with `held_by: stripe`
+and amount agree). On a Sales account whose chain is not a testnet the registry
+is treated as empty, so a transfer into a registered address is answered
+exactly as a hash that paid nobody. The sale is stored with `held_by: stripe`
 and the address from the registry, never from the record; it writes no
 `inbound_transfers` row, counts in no Haven balance, and the reads mark it
 ("Received in Stripe"). It counts in revenue (#4981): a sale is a sale wherever
@@ -583,7 +588,9 @@ coordinator, the proxy and the demo merchant's skip-settle QA hook call it, and 
   sandbox only) the joke's Stripe-settled sales: a payment its Stripe recorder
   sends, with the `settled_onchain` hash, to be shown as "Received in Stripe"
   against a deposit address the Sales account's owner registered (#4952). The
-  record is the same. Reporting needs `MERCHANT_SALES_KEY` and the existing
+  registry is open only on a testnet Sales account (#5028), which the demo's
+  Base Sepolia account is. The record is the same. Reporting needs
+  `MERCHANT_SALES_KEY` and the existing
   `MERCHANT_HAVEN_BASE_URL`; `MERCHANT_SALES_ADDRESS` concerns `field_notes`
   only. The demo merchant README says how it holds what is in flight.
 - **The paywall proxy** (#4898) will report every settled call with

@@ -164,6 +164,7 @@ describe('classifyDepositAddressError and isDepositAddressShape (#4954)', () => 
     ['DEPOSIT_ADDRESS_RETIRED', 409, 'already_retired'],
     ['DEPOSIT_ADDRESS_NOT_FOUND', 404, 'not_found'],
     ['MERCHANT_ACCOUNT_REQUIRED', 409, 'sales_off'],
+    ['DEPOSIT_ADDRESSES_TESTNET_ONLY', 403, 'testnet_only'],
   ])('maps %s by its code, whatever the sentence', (code, status, kind) => {
     expect(classifyDepositAddressError(err(status, { error_code: code, error: 'reworded' }))).toEqual({ kind })
   })

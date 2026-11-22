@@ -684,7 +684,9 @@ export const en = {
        * Stripe-controlled address is theirs, so every registration says
        * "registered by you, not verified by Haven" (owner approval on #4902,
        * 2026-11-18). Nothing here describes a Stripe balance: Haven reads no
-       * Stripe account, only payments on the chain.
+       * Stripe account, only payments on the chain. #5028: the section renders
+       * only on a testnet Sales account, and `refusal.testnet_only` is the
+       * route's 403 on any other chain.
        */
       depositAddresses: {
         title: 'Stripe deposit addresses',
@@ -734,6 +736,8 @@ export const en = {
           already_retired: 'This address is already retired.',
           not_found: 'This address is no longer registered to your Sales account.',
           sales_off: 'Turn Sales on before changing your Stripe deposit addresses.',
+          testnet_only:
+            'Stripe deposit addresses are available on a test network only. This Sales account is on a live network.',
           rate_limited: 'Too many changes in a short time. Wait a minute, then try again.',
           refused: 'Haven refused this change. Nothing changed.',
           unknown_outcome: 'Haven did not answer. Close this dialog to see what is registered now, then try again if it is not listed.',

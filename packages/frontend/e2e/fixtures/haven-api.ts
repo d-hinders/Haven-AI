@@ -1221,6 +1221,18 @@ export const merchantServicesOn = {
 }
 
 /**
+ * #5028: the same Sales account on Base Sepolia. The Stripe deposit-address
+ * registry is dev and Stripe sandbox only, enforced per Sales account: the
+ * section renders only on a testnet Sales account, so the visual spec that
+ * captures it serves this state (`serveSales(page, 'overview-stripe', {
+ * salesChainId: 84532 })`).
+ */
+export const merchantServicesOnSepolia = {
+  ...merchantServicesOn,
+  merchant_account: { ...merchantServicesOn.merchant_account, chain_id: 84532 },
+}
+
+/**
  * Sales (#4900, epic #4885): the reads the Sales page makes — the summary, the
  * payments list and one payment's detail (`routes/merchant-sales-reads.ts`,
  * #4897), the catalogue (`routes/merchant-catalogue.ts`, #4899) and the keys
@@ -1323,12 +1335,14 @@ export const salesPayments = [
 /**
  * #4954: the Stripe deposit addresses the owner registered (#4952,
  * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
- * retired. Lower-case on the wire, `verified: false` always.
+ * retired. Lower-case on the wire, `verified: false` always. #5028: the
+ * registry is open only on a testnet Sales account, so these are Base Sepolia
+ * registrations and are served with `merchantServicesOnSepolia`.
  */
 export const salesStripeAddress = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
 export const salesDepositAddresses = [
-  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, chain: `eip155:${testSafe.chain_id}`, registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
-  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', chain: `eip155:${testSafe.chain_id}`, registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, chain: 'eip155:84532', registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', chain: 'eip155:84532', registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
 ]
 
 /**
@@ -1473,8 +1487,17 @@ export type SalesScenario =
  * account has still never been paid, but a Sales key exists and the product
  * list address reads `ok`, so all three steps are done and the card says the
  * seller is connected. `first-run` serves neither.
+ *
+ * `salesChainId` (#5028) serves the Sales account on another chain. The Stripe
+ * deposit-address registry is open only on a testnet Sales account, so the
+ * spec that captures that section passes `84532`; every other spec keeps the
+ * fixture's Base account.
  */
-export async function serveSales(page: Page, scenario: SalesScenario) {
+export async function serveSales(
+  page: Page,
+  scenario: SalesScenario,
+  opts: { salesChainId?: number } = {},
+) {
   const catalogue =
     scenario === 'products-ok' ||
     scenario === 'overview' ||
@@ -1498,7 +1521,14 @@ export async function serveSales(page: Page, scenario: SalesScenario) {
     }
     const url = new URL(request.url())
     const path = url.pathname.replace(/^\/api/, '')
-    if (path === '/merchant-services') return fulfillJson(route, merchantServicesOn)
+    if (path === '/merchant-services') {
+      return fulfillJson(
+        route,
+        opts.salesChainId === undefined
+          ? merchantServicesOn
+          : { ...merchantServicesOn, merchant_account: { ...merchantServicesOn.merchant_account, chain_id: opts.salesChainId } },
+      )
+    }
     if (path === '/merchant-catalogue') return fulfillJson(route, catalogue)
     if (path === '/merchant-keys') return fulfillJson(route, { keys: scenario === 'first-run' ? [] : salesKeys })
     if (path === '/merchant-deposit-addresses') {

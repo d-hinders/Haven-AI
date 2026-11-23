@@ -17,7 +17,7 @@ covers:
   - packages/backend/src/modules/fee/**
   - packages/backend/src/infra/**
   - docs/contributing/ship-playbooks/backend.md
-last-verified: "2026-11-17"
+last-verified: "2026-11-23"
 ---
 
 # Module Boundaries
@@ -128,7 +128,7 @@ severity and unconditional** (#999). Enforcement status:
 |---|---|---|
 | 1. `domain/` is pure | ✅ `core-stays-pure` covers the shared kernel (#983); `domain-stays-pure` covers the backend's own `domain/` (#998), zero violations on both | landed |
 | 2. `modules/` may not import `http/` | ✗ | the `http/` directory (routes/ → http/ is not part of #998's scope — a separate future rename) |
-| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (8 at #4379, of the 15 waived edges the lint prints; live count printed by every lint run) |
+| 3. Only `infra/` touches the DB | ✅ `pg-only-in-infra`, absolute | #985 / #988 / #995 extracted the money path; #999 drove the residue to zero, #1167 retired three more waivers and #1180 the signup/login one — deliberate exceptions carry inline `dep-lint-exempt` waivers with their reasons (8 at #4379, of the 17 waived edges the lint prints today; live count printed by every lint run) |
 | 4. Only `rails/` + `infra/` touch a chain SDK | ✅ `chain-sdk-not-in-routes`, zeroed for `routes/**` (#994) | `rails/` itself landed with #998; the rule's positive form (asserting infra/rails ARE the only importers, everywhere) is still follow-up work |
 | 5. `http/` imports module entry points only | ✗ | the `http/` directory (see rule 2 — not part of #998) |
 | 6. Cross-module imports go through `index.ts` | ✅ two arms, absolute: `no-deep-cross-module-import` (an import into `modules/<name>/` from outside `modules/`) and `no-deep-module-to-module-import` (one module importing another module's private file, #4379 — before it, the first arm's `from` excluded every `modules/` file, so 14 such imports were unchecked). Every `modules/**` directory — zero violations, 5 + 4 inline waivers (see below). `modules/dashboard/` (#3847) is the one directory without an `index.ts`, deliberately: #3804's owner decision makes `routes/dashboard-budget-remaining.ts` the only importer of its display-only budget-remaining cache, through one of the 5 `no-deep-cross-module-import` waivers, and `modules/dashboard/__tests__/budget-remaining-import-guard.test.ts` pins that no other file imports it | landed (#998 widened from the five `lib/{reporting,fee}` + `modules/{transactions,x402,mpp}` directories to all of `modules/**`; the 2026-09-11 #2881 rename dissolved `modules/reporting/` into `modules/accounting/` and split its asserting code out; `modules/task-budgets/` joined with #3329; `modules/owner-profile/` joined with #3332; `modules/sub-budgets/` joined with #3444; `modules/ops/` joined with #3509; `modules/feedback/` joined with #3597 — `domain-stays-pure` forbids its `viem/accounts` import inside `domain/`, and it lives here carrying no waiver today; `modules/budget-scope/` joined with #3616 (PR #3622) and `modules/dashboard/` with #3847) |
@@ -149,11 +149,14 @@ backend's own `domain/` was verified pure before landing there; one candidate,
 `execution-rail.ts`, was kept OUT of `domain/` specifically because it reached
 the database directly, and lives in `rails/` instead — its query itself moved
 behind `infra/repositories/` in #999). Rule 6's two rules are not among them:
-at #4379 `no-deep-cross-module-import` carries 3 inline waivers (`index.ts`,
+at #4379 `no-deep-cross-module-import` carried 3 inline waivers (`index.ts`,
 `routes/accounting.ts`, `routes/dashboard-budget-remaining.ts`) and
 `no-deep-module-to-module-import` carries 4 (`modules/accounting/entry.ts` →
 `transactions/normalize.ts`, and three `modules/mpp/evidence.ts` → `x402/`
-leaves), each naming the cycle an `index.ts` import would close — `no-circular`
+leaves); #4895 added two more to the first arm (`routes/hybrid-accounts.ts` and
+`routes/merchant-services.ts`, both for the create-additional provisioning path
+that would close an accounts ↔ repositories cycle), so it carries 5 today. Each
+names the cycle an `index.ts` import would close — `no-circular`
 is the one rule no waiver can silence, so a deep import into a zero-cycle leaf
 is the reviewed alternative. Unlike `no-circular`, both are waivable.
 
@@ -334,7 +337,7 @@ Achieved state as of 2026-08-07 (#999, the epic's closing issue):
 | Inline SQL call sites | 35 `.query(` call sites across 9 production files outside `db/`, `db.ts` and `infra/repositories/` — gauged on every lint run (`npm run lint:deps`; re-measured 2026-10-25 by the weekly docs audit, #4418) and capped by the shrink-only ceiling, now also 35 (#1166; `packages/backend/dep-lint-callsite-ceiling.json`, 9 per-file entries). Was 108 across 18 files; #1167 emptied `routes/user.ts`, `routes/dashboard.ts` and `routes/agent-activity.ts`, #1180 `routes/auth.ts`; the epic-#1440 deletions (incl. #2055 removing `routes/approvals.ts`) and later moves account for the rest; the ceiling was locked down from 58 to 35 by #4044 |
 | Chain SDK imported in `routes/` | **0** (#994 — `ChainClient` port + `@haven_ai/core` amount helpers) |
 | Rail branching outside the seam | The retirement gate is decided ONCE, in `rails/execution-rail.ts` (#993); outside migrations, no non-test file but the seam itself mentions `session_key` as a live value — the remaining mentions are the passport rail-domain enum and its OpenAPI mirror, which list `session_key` only as a retired member (#2110) |
-| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 15 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 3 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured at #4379: "No dependency-boundary violations across 501 source files (15 import edge(s) waived)") |
+| Boundary enforcement | `npm run lint:deps`, blocking, **0 baseline entries — the baseline file and its ratchet machinery are deleted**; 17 deliberate exceptions carry inline `dep-lint-exempt` waivers, each printed with its reason — 8 `pg-only-in-infra`, 5 `no-deep-cross-module-import` and 4 `no-deep-module-to-module-import` (re-measured 2026-11-23 at `b9657c08c`: "No dependency-boundary violations across 575 source files (17 import edge(s) waived)") |
 | Dependency cycles | **0** on both passes — `no-circular` is absolute and unwaivable. `npm run lint:deps` (backend + core, strict) and `npm run lint:dep-cycles` (every other package, runtime-only) both report zero; the nine type-only cycles outside backend/core are known and unenforced by the owner's decision (#4763) |
 
 The gauge exists because the retired baseline was a file-edge count, and that

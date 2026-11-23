@@ -69,7 +69,7 @@ covers:
   - docs/architecture/08-local-vs-hosted-mcp.md
   - docs/architecture/11-agent-passport-schema.md
   - docs/regulatory/casp-risk-guardrails.md
-last-verified: "2026-11-17"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Architecture Overview
@@ -123,7 +123,7 @@ agent's delegate first. There is no approval queue. Deep dive:
 | `@haven_ai/qa-agent` | Private Base-Sepolia dev harness for deterministic seeded money-flow and merchant round-trip checks, plus the agent evals — a real model agent run over task files and graded on its tool calls, the dev backend and Base Sepolia (`src/evals/`, epic #3957, [runbook](../operations/agent-evals.md)); also hosts the experimental ERC-4337 pilot scripts (ADR #719, `src/pilot/` — see the research doc); not published. |
 | `@haven_ai/demo-merchant-mcp` | Internal x402 demo merchant — test counterparty, not product. |
 | `@haven_ai/merchant-payments` | Shared merchant payment core (#4890; [design](12-merchant-kit.md)): the receipt builder, the buyer tax-declaration check, the Coinbase facilitator path with its pre-verification checks and chain recovery, the settle-once coordinator and the consumed-payment store interface. Used by the demo merchant and the paywall proxy. **Private**, never published. |
-| `@haven_ai/paywall-proxy` | The merchant kit's paywall proxy (#4893; [design](12-merchant-kit.md)): x402 in front of any HTTP API, settled through `@haven_ai/merchant-payments`, with a SQLite consumed-payment store so a paid call is served once. **Private**, not published for the pilot. |
+| `@haven_ai/paywall-proxy` | The merchant kit's paywall proxy (#4893; [design](12-merchant-kit.md)): x402 in front of any HTTP API, settled through `@haven_ai/merchant-payments`, with a SQLite consumed-payment store so a paid call is served once. **Private**, not published to npm for the pilot; the container image `ghcr.io/d-hinders/haven-paywall-proxy` is how a merchant runs it (#5007). |
 | `@haven/ops` | Private operations console (epic #3507; [runbook](../operations/ops-console.md)): a separate Next.js app that signs founders in through GitHub and reads through the backend's `/ops/*` surface. Read-only — nothing under `/ops` moves funds, signs, changes signers or delegations, or acts as a user; the backend writes an audit row for every data read and every reveal. **Private**, never published. |
 | `@haven_ai/ui` | Shared design system — tokens, Tailwind preset and UI primitives (#3508), consumed by the ops console and the dashboard (the primitives that moved keep their old `components/ui` paths as re-export shims). **Private**, never published. |
 

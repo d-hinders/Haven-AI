@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
   - packages/backend/src/middleware/safe-inflow-retired.ts
-last-verified: "2026-11-17"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Architecture

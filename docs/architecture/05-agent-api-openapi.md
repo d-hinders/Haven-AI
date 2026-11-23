@@ -43,7 +43,7 @@ covers:
   - packages/backend/src/middleware/auth.ts
   - packages/backend/src/middleware/agentAuth.ts
   - packages/frontend/next.config.ts
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven Agent API OpenAPI Contract
@@ -180,6 +180,11 @@ servers, connector, and selected dashboard setup flows:
   routes under `/agents/{id}/task-budgets` and `/agents/{id}/sub-budgets/*`
 - wallet transaction listing
 - catalog discovery
+- the merchant surfaces (epic #4884): `POST /merchant/sales` and the owner's
+  `/merchant-sales/*` reads (summary, facets, payments, record), `/merchant-keys/*`,
+  `/merchant-services`, `/merchant-catalogue/*` and `/merchant-deposit-addresses/*`,
+  plus the per-agent checkout-details sharing switch (`/agents/{id}/checkout-details`,
+  `/agents/{id}/checkout-details-sharing`, #4871)
 - agent labels (#3167): `GET /labels` and `POST /labels` (the user's tag
   vocabulary — a `name` unique per user on its lowercased form, a `color` from
   the four-value palette the spec enumerates), `PUT /labels/{id}` (rename
@@ -719,8 +724,8 @@ justified by future work outlives the work unless something re-checks it. That
 allowlist is now empty. Deep model:
 [`docs/security/delegation-rail-security-model.md`](../security/delegation-rail-security-model.md).
 
-**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-10-23 at `2d0713dad`, with `route-inventory.ts`'s `registeredRouteModules` + `extractRoutes`, the same survey `route-coverage.test.ts` runs):**
-211 registered routes across 49 modules, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes, taking the count from 137/2 to 131/1. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
+**How much of the API the spec actually describes (#1443, measured 2026-08-15; total re-counted 2026-11-23 at `b9657c08c`, with `route-inventory.ts`'s `registeredRouteModules` + `extractRoutes`, the same survey `route-coverage.test.ts` runs):**
+236 registered routes across 56 modules, **1 of them undocumented** — only safe-deploy.ts, deliberately, under the #1440 Safe-rail retirement: the 410 tombstone stays fail-closed, and #2847 deleted safe-exec.ts (the other deliberately-undocumented module) and safe-details.ts together with the last live Safe-rail routes, taking the count from 137/2 to 131/1. (#1698's six re-key routes were documented in the same PR that added them, which is the gate working as intended: the undocumented count is shrink-only, so a new route module has nowhere to hide. Note that only the undocumented count is enforced — the TOTAL here is prose and goes stale silently with every route added, so re-count it rather than trusting it.)
 (#1446 is working the backfill one domain at a time: `contacts.ts` came off the
 list first, then the whole `agent-delegations.ts` lifecycle — grant, activate,
 per-hash and batch revocation, signer management — then the x402 demo-resource

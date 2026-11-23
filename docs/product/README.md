@@ -31,7 +31,7 @@ covers:
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
   - packages/frontend/src/components/AuthenticatedShell.tsx
   - packages/frontend/src/components/sidebar/Sidebar.tsx
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven Product & UX Guide
@@ -137,7 +137,9 @@ High-level voice rules:
 
 ## 3. Information Architecture
 
-- Collection routes are plural: `/accounts`, `/agents`, `/contacts`, `/transactions`.
+- Collection routes are plural: `/accounts`, `/agents`, `/contacts`, `/transactions`,
+  and `/sales` (the merchant's Sales page, #4900 — a destination only a merchant
+  who turned Sales on has).
 - `/analytics` is the reporting surface of the authenticated app (epic
   [#2944](https://github.com/d-hinders/Haven-AI/issues/2944)): what the
   account's agents did with their money in a chosen window, read-only, with

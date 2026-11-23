@@ -46,7 +46,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Edge Signer

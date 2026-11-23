@@ -33,7 +33,7 @@ covers:
   - packages/frontend/src/lib/i18n/messages/en.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven UX Copy Guidelines

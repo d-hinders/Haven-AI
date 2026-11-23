@@ -714,7 +714,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     // and the optional, receipt and sales-reporting tables moved under
     // Reference → All settings. Every earlier sentence survives or is listed
     // as corrected in the PR.
-    'last-verified': '2026-11-21',
+    // Re-verified 2026-11-23 (#5058): the Quickstart's `docker run` examples
+    // and § "Run it as a container" pin `dev-<short-sha>` (no `pilot*` tag
+    // exists until the first `dev → main` promotion), name the package page
+    // where the tags are listed, and state the pilot-if-listed-else-dev rule;
+    // the Apple Silicon sentence adds `--platform linux/amd64`; prerequisite 1
+    // drops the "On Base, both use production" clause and names the dev
+    // backend origin for `HAVEN_SALES_URL`, as does `.env.example`. The tag
+    // rule itself (scripts/ci/paywall-proxy-image-tags.mjs) is unchanged.
+    'last-verified': '2026-11-23',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

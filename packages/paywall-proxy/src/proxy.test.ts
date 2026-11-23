@@ -407,6 +407,17 @@ describe('forwarding', () => {
     expect(JSON.stringify(seen.headers)).not.toContain('buyer-value')
   })
 
+  // #5060: an upstream with no key is an explicit opt-out. The proxy sends no
+  // auth header at all, and the buyer's own Authorization is still stripped.
+  it('UPSTREAM_AUTH=none sends no upstream auth header, and still strips the buyer\'s Authorization', async () => {
+    h = await startHarness({ env: { UPSTREAM_AUTH: 'none', UPSTREAM_API_KEY: undefined } })
+    await paidChat(newBuyer(), { authorization: 'Bearer buyer-secret-token' })
+    const seen = h.upstream.seen[0]!
+    expect(seen.headers.authorization).toBeUndefined()
+    expect(JSON.stringify(seen.headers)).not.toContain('buyer-secret-token')
+    expect(h.logs.find((line) => line.event === 'started')).toMatchObject({ upstream_auth: 'none' })
+  })
+
   it('the query string and the path under the upstream base are forwarded, and other buyer headers pass through', async () => {
     h = await startHarness()
     const buyer = newBuyer()

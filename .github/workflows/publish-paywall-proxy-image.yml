@@ -112,6 +112,10 @@ jobs:
           file: packages/paywall-proxy/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # #5060: the commit the image was built from, readable with
+          # `docker inspect`. It merges with the Dockerfile's LABELs.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}
 
   pilot:
     name: Publish the pilot image
@@ -157,3 +161,7 @@ jobs:
           file: packages/paywall-proxy/Dockerfile
           push: true
           tags: ${{ steps.tags.outputs.tags }}
+          # #5060: the commit the image was built from, readable with
+          # `docker inspect`. It merges with the Dockerfile's LABELs.
+          labels: |
+            org.opencontainers.image.revision=${{ github.sha }}

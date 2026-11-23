@@ -5,6 +5,7 @@
  * access: nothing here reaches Coinbase or a chain.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { generateKeyPairSync } from 'node:crypto'
 import { createServer, request as httpRequest, type IncomingMessage, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
@@ -21,7 +22,20 @@ import type { SiwxChallenge } from './siwx.js'
 
 export const PAY_TO = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed' as Address
 export const UPSTREAM_KEY = 'sk-upstream-SECRET-0123456789'
-export const CDP_SECRET = 'cdp-secret-SECRET-abcdefghij'
+/**
+ * #5060: a valid Ed25519 CDP secret, generated per test run — the 32-byte seed
+ * followed by its derived 32-byte public key, base64, which is the shape
+ * `@coinbase/cdp-sdk` signs with. Never a real key. The startup preflight
+ * refuses anything that cannot sign, so every fixture that starts the proxy
+ * uses this.
+ */
+export function generateCdpSecret(): string {
+  const { privateKey } = generateKeyPairSync('ed25519')
+  const jwk = privateKey.export({ format: 'jwk' }) as { d: string; x: string }
+  return Buffer.concat([Buffer.from(jwk.d, 'base64url'), Buffer.from(jwk.x, 'base64url')]).toString('base64')
+}
+
+export const CDP_SECRET = generateCdpSecret()
 export const SEPOLIA_USDC = '0x036CbD53842c5426634e7929541eC2318f3dCF7e' as Address
 /** #4898: a Sales key (#4896's prefix), long enough for the log redactor to hold it. */
 export const SALES_KEY = 'sk_merchant_test_0123456789abcdef'
@@ -294,7 +308,8 @@ export interface Harness {
 
 export async function startHarness(options: {
   products?: ProductFixture[]
-  env?: Record<string, string>
+  /** A value of `undefined` removes the variable, so a test can unset one the harness sets. */
+  env?: Record<string, string | undefined>
   upstream?: Partial<UpstreamBehaviour>
   overrides?: StartOverrides
   dir?: string
@@ -320,7 +335,10 @@ export async function startHarness(options: {
     RPC_URL: 'http://127.0.0.1:1',
     PORT: '0',
     HOST: '127.0.0.1',
-    ...options.env,
+  }
+  for (const [key, value] of Object.entries(options.env ?? {})) {
+    if (value === undefined) delete env[key]
+    else env[key] = value
   }
   const logs: Record<string, unknown>[] = []
   const harness = {

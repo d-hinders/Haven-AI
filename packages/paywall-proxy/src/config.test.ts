@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -51,6 +52,39 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(config.upstreamTimeoutMs).toBe(180_000)
     expect(loadConfig(base).upstream.authScheme).toBe('Bearer')
     expect(loadConfig(base).upstream.authHeader).toBe('Authorization')
+    expect(loadConfig(base).upstream.auth).toBe('key')
+  })
+
+  // #5060: an upstream with no key is an explicit opt-out, not an optional key.
+  it('UPSTREAM_AUTH=none starts without a key, and the key is not a secret to redact', () => {
+    const env: Record<string, string | undefined> = { ...base, UPSTREAM_AUTH: 'none' }
+    delete env.UPSTREAM_API_KEY
+    const config = loadConfig(env)
+    expect(config.upstream).toMatchObject({ auth: 'none', apiKey: '' })
+    expect(secretValues(config)).toEqual([CDP_SECRET])
+  })
+
+  it('UPSTREAM_AUTH=none refuses the key settings it would ignore', () => {
+    expect(problems({ ...base, UPSTREAM_AUTH: 'none' })).toEqual([
+      'UPSTREAM_API_KEY must not be set with UPSTREAM_AUTH=none',
+    ])
+    const noKey: Record<string, string | undefined> = { ...base, UPSTREAM_AUTH: 'none' }
+    delete noKey.UPSTREAM_API_KEY
+    expect(problems({ ...noKey, UPSTREAM_AUTH_HEADER: 'x-api-key' })).toEqual([
+      'UPSTREAM_AUTH_HEADER must not be set with UPSTREAM_AUTH=none',
+    ])
+    expect(problems({ ...noKey, UPSTREAM_AUTH_SCHEME: 'Bearer' })).toEqual([
+      'UPSTREAM_AUTH_SCHEME must not be set with UPSTREAM_AUTH=none',
+    ])
+  })
+
+  it('refuses any UPSTREAM_AUTH value other than none, and keeps the key required when it is unset', () => {
+    expect(problems({ ...base, UPSTREAM_AUTH: 'basic' })).toEqual([
+      'UPSTREAM_AUTH must be "none" when set; unset sends UPSTREAM_API_KEY',
+    ])
+    const noKey: Record<string, string | undefined> = { ...base }
+    delete noKey.UPSTREAM_API_KEY
+    expect(problems(noKey)).toEqual(['UPSTREAM_API_KEY is required'])
   })
 
   it('refuses Base mainnet at startup until the regulatory review in #4888 allows it — removing the refusal is a go-live step (#5061)', () => {
@@ -180,6 +214,22 @@ describe('starting the proxy', () => {
     const e = env()
     delete (e as Record<string, string | undefined>).PAY_TO
     await expect(startProxy(e, { cdp })).rejects.toThrow(/PAY_TO is required/)
+  })
+
+  // #5060: the `.env.example` placeholder and well-formed junk both refuse
+  // startup, naming the variable and never printing its value.
+  it('refuses to start with a Coinbase secret that cannot sign, naming the variable and never the value', async () => {
+    for (const secret of ['your-cdp-api-key-secret', randomBytes(64).toString('base64')]) {
+      const e = { ...env(), CDP_API_KEY_SECRET: secret }
+      const failure = await startProxy(e, { cdp }).then(
+        () => undefined,
+        (err: unknown) => err,
+      )
+      expect(failure).toBeInstanceOf(ConfigError)
+      const message = (failure as Error).message
+      expect(message).toContain('CDP_API_KEY_SECRET cannot sign a request')
+      expect(message).not.toContain(secret)
+    }
   })
 
   it('refuses to start on an invalid products file', async () => {

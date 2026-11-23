@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest'
 import { loadConfig } from './config.js'
 import { buildDiscoveryDocument } from './discovery.js'
 import { loadProductsFile } from './products.js'
+import { CDP_SECRET } from './test-harness.js'
 
 const PRODUCTS_FILE = fileURLToPath(new URL('../demo/opper-products.json', import.meta.url))
 const FIXTURE = fileURLToPath(
@@ -38,7 +39,8 @@ const ENV = {
   UPSTREAM_BASE_URL: 'https://api.opper.ai',
   UPSTREAM_API_KEY: 'sk-fixture-key',
   CDP_API_KEY_ID: 'cdp-key-id',
-  CDP_API_KEY_SECRET: 'cdp-secret-abcdefghij',
+  // #5060: a generated valid Ed25519 pair, so the startup preflight accepts it.
+  CDP_API_KEY_SECRET: CDP_SECRET,
   RPC_URL: 'https://sepolia.base.org',
 }
 

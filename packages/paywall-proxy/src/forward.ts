@@ -87,7 +87,11 @@ export function buildUpstreamHeaders(
     headers.set(name, Array.isArray(value) ? value.join(', ') : value)
   }
   // `set` replaces whatever the buyer sent under this name, case-insensitively.
-  headers.set(upstream.authHeader, upstream.authScheme ? `${upstream.authScheme} ${upstream.apiKey}` : upstream.apiKey)
+  // #5060: with `UPSTREAM_AUTH=none` the upstream gets no auth header at all;
+  // the buyer's own `Authorization` was already stripped above.
+  if (upstream.auth !== 'none') {
+    headers.set(upstream.authHeader, upstream.authScheme ? `${upstream.authScheme} ${upstream.apiKey}` : upstream.apiKey)
+  }
   return headers
 }
 

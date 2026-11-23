@@ -1264,6 +1264,15 @@ The key is read from `UPSTREAM_API_KEY`. It is sent in the header named by
 no response, no error body and no log line. The proxy refuses to start without
 it.
 
+An upstream that needs no key is an explicit opt-out, not an optional key
+(#5060). `UPSTREAM_AUTH` accepts only `none`; any other value is refused. With
+`UPSTREAM_AUTH=none` the proxy sends no upstream auth header, `UPSTREAM_API_KEY`
+is not required, and setting it — or `UPSTREAM_AUTH_HEADER` or
+`UPSTREAM_AUTH_SCHEME` — is refused rather than ignored. The `started` line
+carries `upstream_auth: "none"`. Unset, the rule above stands, so a forgotten
+key still refuses startup instead of becoming an upstream 401 after the buyer
+has paid. A buyer's own `Authorization` is stripped either way.
+
 ### Body size limits
 
 - Request body: 1 MiB. A larger body is refused with 413 before settlement.
@@ -1752,10 +1761,12 @@ What the merchant runs:
   `UPSTREAM_BASE_URL` (where calls are forwarded),
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
-  `UPSTREAM_AUTH_SCHEME` when the upstream wants them), Coinbase facilitator
+  `UPSTREAM_AUTH_SCHEME` when the upstream wants them; or `UPSTREAM_AUTH=none`
+  for an upstream that needs no key, which refuses the other three), Coinbase facilitator
   credentials `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (the pilot settles
   through Coinbase's facilitator only, because the #4890 core is Coinbase's
-  client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
+  client; startup builds one auth header locally before it listens, so a secret
+  that cannot sign refuses startup, #5060), `RPC_URL` (the chain reads that resolve a lost settle answer and a
   used authorization; it defaults to the public `https://sepolia.base.org` on
   Base Sepolia and stays required on Base mainnet, where real money would rest
   on a rate-limited public node, #5006; Base mainnet is refused at startup in

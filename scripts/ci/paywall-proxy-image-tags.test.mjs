@@ -222,6 +222,23 @@ describe('the workflow structure', () => {
     }
   })
 
+  // #5060: the registry traces a tag to a commit, but the image itself did not
+  // say which commit it was built from. Both build-push steps now pass the
+  // revision label, which merges with the Dockerfile's LABELs.
+  test('both build-push steps label the image with the commit (#5060)', () => {
+    for (const [name, lines] of jobs) {
+      const block = lines.join('\n')
+      const at = block.indexOf('uses: docker/build-push-action@v6')
+      assert.notEqual(at, -1, `the '${name}' job must use docker/build-push-action`)
+      const step = block.slice(at)
+      assert.match(
+        step,
+        /labels: \|\n\s+org\.opencontainers\.image\.revision=\$\{\{ github\.sha \}\}/,
+        `the '${name}' job's build-push step must carry the revision label`,
+      )
+    }
+  })
+
   test('the workflow holds packages: write and nothing wider', () => {
     assert.match(workflow, /permissions:\n {2}contents: read\n {2}packages: write/)
   })

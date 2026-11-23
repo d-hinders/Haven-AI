@@ -19,13 +19,15 @@
  * 3. **RPC** — `eth_chainId` on the configured (or #5006-defaulted) node,
  *    compared with `config.chain.chainId`. A wrong chain fails; an unreachable
  *    node fails naming the host only, because a provider URL can embed a key.
- * 4. **Coinbase key** — `createCdpFacilitator` (`merchant-payments/src/cdp.ts`)
- *    and one `getSupported()`, which `@coinbase/x402` signs a CDP JWT for. A
- *    malformed secret fails locally during JWT signing, with no network call.
- *    Builder check (#5008): CDP answers a well-formed but wrong key with 401 on
- *    `GET …/supported`, so a success here is an authenticated success. The
- *    check also confirms the facilitator lists `exact` on the configured
- *    network.
+ * 4. **Coinbase key** — a local signing dry run (`preflightCdpSecret`,
+ *    `merchant-payments/src/cdp.ts`, #5060), then `createCdpFacilitator` and one
+ *    `getSupported()`, which `@coinbase/x402` signs a CDP JWT for. The dry run
+ *    builds the same auth header with no network call, so a secret that cannot
+ *    sign — the `.env.example` placeholder, or well-formed junk — fails locally
+ *    and is named for what it is. Builder check (#5008): CDP answers a
+ *    well-formed but wrong key with 401 on `GET …/supported`, so a success here
+ *    is an authenticated success. The check also confirms the facilitator lists
+ *    `exact` on the configured network.
  * 5. **Sales key** — `POST {HAVEN_SALES_URL}/merchant/sales` with the key and
  *    the body `{}`. The route's auth runs as an `onRequest` hook, before
  *    Fastify's schema validation, so an invalid key answers 401 and a valid one
@@ -52,7 +54,10 @@ import { createRequire } from 'node:module'
 import { dirname } from 'node:path'
 import { createPublicClient, http } from 'viem'
 import {
+  CDP_SECRET_CANNOT_SIGN,
+  CdpSecretError,
   createCdpFacilitator,
+  preflightCdpSecret,
   type CdpFacilitator,
   type SaleReportOutcome,
 } from '@haven_ai/merchant-payments'
@@ -104,6 +109,11 @@ const ACCEPTED_KEY_CODES: ReadonlySet<string> = new Set(['invalid_request', 'inv
 export interface CheckDeps {
   /** Builds the facilitator. Tests inject a fake; the real one is built from the credentials. */
   createFacilitator?: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<CdpFacilitator>
+  /**
+   * #5060: the local signing dry run, before `getSupported`. Tests inject a
+   * fake; the real one signs a CDP JWT with no network call.
+   */
+  preflight?: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<void>
   /** Reads `eth_chainId`. Tests inject a fake; the real one is a viem client. */
   readChainId?: (rpcUrl: string) => Promise<number>
   /** The Sales probe's `fetch`. Tests inject a fake. */
@@ -274,11 +284,23 @@ async function checkRpc(config: ProxyConfig, read: (rpcUrl: string) => Promise<n
   }
 }
 
-/** Check 4: one authenticated `getSupported()`, and `exact` on the configured network. */
+/** Check 4: the local signing dry run, then one authenticated `getSupported()`, and `exact` on the configured network. */
 async function checkCoinbaseKey(
   config: ProxyConfig,
   build: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<CdpFacilitator>,
+  preflight: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<void>,
 ): Promise<CheckLine> {
+  // #5060: the dry run first. It makes no network call, and it catches both the
+  // `.env.example` placeholder and well-formed junk, which a format check misses.
+  try {
+    await preflight(config.cdp)
+  } catch (err) {
+    return {
+      name: 'coinbase key',
+      status: 'fail',
+      reason: err instanceof CdpSecretError ? err.message : `CDP_API_KEY_SECRET cannot sign a request (${errorName(err)})`,
+    }
+  }
   let facilitator: CdpFacilitator
   try {
     facilitator = await build(config.cdp)
@@ -319,11 +341,8 @@ async function checkCoinbaseKey(
       return { name: 'coinbase key', status: 'fail', reason: `the facilitator answered ${status}` }
     }
     if (err instanceof Error && err.name === 'UserInputValidationError') {
-      return {
-        name: 'coinbase key',
-        status: 'fail',
-        reason: 'CDP_API_KEY_SECRET is not a key the Coinbase client can sign with',
-      }
+      // #5060: the same case as the dry run's, for a client that signs lazily.
+      return { name: 'coinbase key', status: 'fail', reason: CDP_SECRET_CANNOT_SIGN }
     }
     return {
       name: 'coinbase key',
@@ -462,10 +481,11 @@ export async function runChecks(
       deps.createFacilitator ??
       ((credentials: { apiKeyId: string; apiKeySecret: string }) =>
         createCdpFacilitator(credentials, { timeoutMs: FACILITATOR_CHECK_TIMEOUT_MS }))
+    const preflight = deps.preflight ?? preflightCdpSecret
     const doFetch = deps.fetch ?? fetch
 
     lines.push(await checkRpc(config, read))
-    lines.push(await checkCoinbaseKey(config, build))
+    lines.push(await checkCoinbaseKey(config, build, preflight))
     lines.push(
       config.sales === undefined
         ? { name: 'sales key', status: 'skipped', reason: 'HAVEN_MERCHANT_KEY is not set' }

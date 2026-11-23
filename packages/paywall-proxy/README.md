@@ -35,8 +35,8 @@ Then:
    USDC.
 2. **Create your Coinbase developer keys.** In the Coinbase Developer Platform,
    create a secret API key ([Coinbase developer keys](#coinbase-developer-keys)).
-   What you should see: the key listed in the CDP portal, and, once the proxy
-   starts, no `CDP_API_KEY_ID is required` refusal.
+   What you should see: the key listed in the CDP portal, and
+   `coinbase key: ok (exact on eip155:84532)` when you run the check in step 6.
 3. **Create a Sales key.** On **Sales → Setup → Sales keys**, create a key. It is
    `HAVEN_MERCHANT_KEY`, and it lets the proxy report each sale to Haven
    ([Sales reporting](#sales-reporting)).
@@ -55,7 +55,7 @@ Then:
    | `NETWORK` | `eip155:84532` (Base Sepolia). |
    | `PAY_TO` | The address from step 1. |
    | `OPERATOR_NAME` | Who operates the endpoint. |
-   | `UPSTREAM_BASE_URL`, `UPSTREAM_API_KEY` | Your upstream API and its key. |
+   | `UPSTREAM_BASE_URL`, `UPSTREAM_API_KEY` | Your upstream API and its key. An upstream that needs no key: set `UPSTREAM_AUTH=none` and leave `UPSTREAM_API_KEY` out. |
    | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | The keys from step 2. |
 
    For the pilot, also set:
@@ -241,9 +241,11 @@ the variable arrives in the container with its line breaks intact (checked
 2026-11-23 on a Railway service). Either key type works there; Ed25519 is still
 the simpler one.
 
-The proxy reads the pair once, at startup. A malformed secret fails the
-`coinbase key` check locally, with no network call ([Check the deployment
-before real traffic](#check-the-deployment-before-real-traffic)).
+The proxy reads the pair once, at startup, and builds one auth header locally
+before it listens. A secret that cannot sign — the `.env.example` placeholder,
+or well-formed junk — refuses startup, naming `CDP_API_KEY_SECRET` and never
+printing its value. The same dry run is the first half of the `coinbase key`
+check ([Check the deployment before real traffic](#check-the-deployment-before-real-traffic)).
 
 ## The products file
 
@@ -321,7 +323,7 @@ first is `started`, with `port`, `network`, `network_label`, `pay_to`,
 `operator`, `products`, `base_path`, `rpc` (`"default (public Base Sepolia)"`
 when `RPC_URL` is unset on Base Sepolia, otherwise `"configured"` — the line
 never prints the URL itself, because a provider URL can embed a key),
-`sales_reporting` (`"on"` or
+`upstream_auth` (`"key"` or `"none"`), `sales_reporting` (`"on"` or
 `"off (no HAVEN_MERCHANT_KEY)"`), `sales_outbox_depth` when reporting is on (the
 records waiting for a replay), and
 `receipt` (`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A
@@ -360,7 +362,7 @@ What each line means:
 | `settings` | The same validation startup runs. A missing or invalid setting prints its problem, one line each, and the checks that need it print `skipped (settings invalid)`. |
 | `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
 | `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
-| `coinbase key` | One authenticated `GET …/supported` with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`, and that the facilitator lists `exact` on your network. A malformed secret fails locally, with no network call ([Coinbase developer keys](#coinbase-developer-keys)). `not verified` means the client could not exercise the key, and says why. |
+| `coinbase key` | A local signing dry run with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (no network call), then one authenticated `GET …/supported`, and that the facilitator lists `exact` on your network. A secret that cannot sign prints `CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)`; a key the facilitator refuses prints `refused the key (401)`; a facilitator that cannot be reached prints `did not answer`. `not verified` means the client could not exercise the key, and says why. |
 | `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` is a key that is missing, wrong or revoked; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
 | `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
 | `outbox` | The same directory check for `SALES_OUTBOX`, and its depth when the file exists. It never replays or changes it. |
@@ -401,6 +403,15 @@ Haven's dev environment. `pilot-<short-sha>` arrives with that first release:
 once the package page lists one, pin the newest `pilot-<short-sha>` in place of
 `dev-<short-sha>` in the commands here. `dev` moves on every push to `dev` and is
 not for a deployment.
+
+**Read the commit inside the image.** Each published image carries
+`org.opencontainers.image.revision`, the commit it was built from, beside the
+Dockerfile's own labels:
+
+```
+docker inspect ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> \
+  --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}'
+```
 
 **Apple Silicon.** The image is published for `linux/amd64` only. On an Apple
 Silicon Mac, add `--platform linux/amd64` to `docker run`; the image then runs
@@ -642,6 +653,7 @@ Optional:
 | `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
 | `UPSTREAM_AUTH_SCHEME` | The scheme before the key. Default `Bearer`; set it empty to send the key bare, for an `x-api-key` style header. |
+| `UPSTREAM_AUTH` | Set to `none` for an upstream that needs no key. Then `UPSTREAM_API_KEY`, `UPSTREAM_AUTH_HEADER` and `UPSTREAM_AUTH_SCHEME` must be unset, and the proxy sends no upstream auth header. Unset: `UPSTREAM_API_KEY` is required. |
 | `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. The discovery document lists each route with it in front. |
 | `PUBLIC_BASE_URL` | The public origin the challenge names. Must be `https` in production. |
 | `CLIENT_IP_HEADER` | The header your own front proxy sets to the client's address, for the per-IP limits. |

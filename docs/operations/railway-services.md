@@ -178,6 +178,10 @@ created, if Railway gains a way to mount a repository file, moving it to the
 image is a one-row change: the same `/data` volume, and `PRODUCTS_FILE` pointing
 at the mounted file.
 
+The merchant's own Railway recipe, which deploys the published image with the
+merchant's products file copied in by a two-line Dockerfile, is in the kit's
+README § *Host it on Railway*.
+
 | Setting | Value |
 |---|---|
 | Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first); watch `/packages/paywall-proxy/**`, `/packages/merchant-payments/**`, `/packages/sdk/**`, so an unrelated push to `dev` does not restart it |

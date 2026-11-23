@@ -82,6 +82,11 @@ export const MERCHANT_KIT_TAGS_URL =
  * create on Sales → Setup → Sales keys, and to paste it into
  * `HAVEN_MERCHANT_KEY`.
  *
+ * Step 4 asks where the merchant hosts the kit (#5059), before the environment
+ * step, so the agent knows the host before it writes variables. It stays silent
+ * on the buyer: buying belongs to a different Haven user, and the README's
+ * buyer section is where that lives.
+ *
  * `salesUrl` must be an origin with no path — the merchant kit refuses a URL
  * with a path (`packages/paywall-proxy/src/config.ts`). `lib/sales.ts`
  * `havenApiOrigin()` is the one reading of it.
@@ -93,11 +98,12 @@ export function merchantKitSetupPrompt(params: { accountAddress: string; salesUr
     `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release; the tags are listed at ${MERCHANT_KIT_TAGS_URL}, and the setup guide’s quickstart shows the run command.`,
     `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
     `3. ${MERCHANT_KIT_PILOT_LINE}`,
-    '4. Set these in the merchant kit’s environment:',
+    '4. Ask me where I host the merchant kit. Any host with HTTPS and a persistent disk works; the setup guide has Railway as a worked example.',
+    '5. Set these in the merchant kit’s environment:',
     `   PAY_TO=${params.accountAddress}`,
     '   NETWORK=eip155:84532',
     `   HAVEN_SALES_URL=${params.salesUrl}`,
-    '5. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into HAVEN_MERCHANT_KEY. Never invent one.',
+    '6. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into HAVEN_MERCHANT_KEY. Never invent one.',
   ].join('\n')
 }
 

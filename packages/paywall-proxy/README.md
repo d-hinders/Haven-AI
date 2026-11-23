@@ -91,7 +91,9 @@ Then:
    ```
 
    Put your HTTPS front (your host's edge, or a reverse proxy) in front of port
-   8080 at `PUBLIC_BASE_URL`.
+   8080 at `PUBLIC_BASE_URL`. On Railway, do not publish a port: Railway injects
+   `PORT` and routes its `https` domain to it ([Host it on
+   Railway](#host-it-on-railway)).
    What you should see: `status: ok` on `/healthz`, your products in the
    discovery document, and a 402 whose challenge carries the product's `price`
    as `amount` and your `PAY_TO` as `payTo`. Nothing is forwarded upstream for
@@ -99,7 +101,7 @@ Then:
    `curl` checks).
 8. **Pay once with a Haven agent.** Give a Haven agent of another Haven user the
    URL of one of your product routes and let it pay
-   ([Paying with a Haven agent](#paying-with-a-haven-agent)).
+   ([A buyer for the first paid call](#a-buyer-for-the-first-paid-call)).
    What you should see:
    - The agent gets the upstream API's answer, with a `PAYMENT-RESPONSE` header
      carrying the settlement transaction hash.
@@ -198,9 +200,50 @@ Copy that address. It is `PAY_TO`.
 
 ## Coinbase developer keys
 
-In the Coinbase Developer Platform, create a secret API key and note the key id
-and the secret. The proxy uses them to call Coinbase's facilitator on Base
-Sepolia.
+The proxy settles through Coinbase's facilitator, so it needs a **secret API
+key** from your own Coinbase Developer Platform (CDP) account. Haven does not
+supply its key.
+
+Open the CDP portal's API keys page,
+<https://portal.cdp.coinbase.com/projects/api-keys> (checked 2026-11-23: an
+unauthenticated visit redirects to the portal's sign-in with that path), and
+create a **Secret API key** — the server-side key type, not a Client API key.
+Set it up the way Haven's own key was created in #4852:
+
+| Setting | Value | Why |
+|---|---|---|
+| Signature algorithm | **Ed25519**, the portal's default | The client accepts either an Ed25519 key or an ECDSA PEM, and an Ed25519 secret is one base64 line, which fits a Docker `--env-file`. |
+| Mode | **Live** | A Live key settled on Base Sepolia in #4852's dev run; a Sandbox key has not been tried. |
+| IP allowlist | **Allow requests from any IP address** | A Railway service has no fixed outbound IP unless you enable static outbound IPs. |
+| Permissions | Leave **Trade**, **Transfer**, **Receive**, **Export** and **Manage** unticked | A leaked key with them could move the Coinbase account's funds, or export or re-permission its CDP wallets. *View* is ticked by default; if verify or settle is refused without it, tick it. |
+
+Check each setting on the page when you create the key. The portal's layout
+changes, and this table records the settings Haven's key was created with, not
+a promise about today's form.
+
+The modal shows the key's **ID** and its **secret**. The ID is
+`CDP_API_KEY_ID`; the secret is `CDP_API_KEY_SECRET`. Copy both from the modal:
+the portal does not download a key file by default.
+
+**In a Docker `--env-file`.** The file holds one line per variable, so the
+secret must be one line. An Ed25519 secret is one base64 line and fits:
+
+```
+CDP_API_KEY_ID=organizations/…/apiKeys/…
+CDP_API_KEY_SECRET=…
+```
+
+An ECDSA secret is a PEM block of several lines, and `--env-file` cannot carry
+it: use an Ed25519 key for the container path.
+
+**In a Railway variable.** Railway keeps a multi-line value: a PEM pasted into
+the variable arrives in the container with its line breaks intact (checked
+2026-11-23 on a Railway service). Either key type works there; Ed25519 is still
+the simpler one.
+
+The proxy reads the pair once, at startup. A malformed secret fails the
+`coinbase key` check locally, with no network call ([Check the deployment
+before real traffic](#check-the-deployment-before-real-traffic)).
 
 ## The products file
 
@@ -267,8 +310,8 @@ Required:
 | `PAYMENTS_DB` | The consumed-payment store. One proxy process per file. The container image sets it. |
 | `UPSTREAM_BASE_URL` | Where paid calls are forwarded. |
 | `UPSTREAM_API_KEY` | The key paid calls are forwarded with. |
-| `CDP_API_KEY_ID` | Your Coinbase developer key id. |
-| `CDP_API_KEY_SECRET` | Your Coinbase developer key secret. |
+| `CDP_API_KEY_ID` | Your Coinbase developer key id ([Coinbase developer keys](#coinbase-developer-keys)). |
+| `CDP_API_KEY_SECRET` | Your Coinbase developer key secret ([Coinbase developer keys](#coinbase-developer-keys)). |
 
 The optional, receipt and sales-reporting settings are in
 [All settings](#all-settings), under *Reference*.
@@ -317,7 +360,7 @@ What each line means:
 | `settings` | The same validation startup runs. A missing or invalid setting prints its problem, one line each, and the checks that need it print `skipped (settings invalid)`. |
 | `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
 | `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
-| `coinbase key` | One authenticated `GET …/supported` with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`, and that the facilitator lists `exact` on your network. A malformed secret fails locally, with no network call. `not verified` means the client could not exercise the key, and says why. |
+| `coinbase key` | One authenticated `GET …/supported` with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET`, and that the facilitator lists `exact` on your network. A malformed secret fails locally, with no network call ([Coinbase developer keys](#coinbase-developer-keys)). `not verified` means the client could not exercise the key, and says why. |
 | `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` is a key that is missing, wrong or revoked; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
 | `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
 | `outbox` | The same directory check for `SALES_OUTBOX`, and its depth when the file exists. It never replays or changes it. |
@@ -343,7 +386,7 @@ The image sets two paths for you, and you do not put them in the env file:
 
 | Path | What it is |
 |---|---|
-| `PRODUCTS_FILE=/config/products.json` | Your products file, mounted read-only. |
+| `PRODUCTS_FILE=/config/products.json` | Your products file, mounted read-only. On Railway, your own Dockerfile copies it into the image instead ([Host it on Railway](#host-it-on-railway)). |
 | `PAYMENTS_DB=/data/payments.sqlite` | The consumed-payment store, on the `/data` volume. `SALES_OUTBOX` defaults to `sales-outbox.jsonl` beside it, so the outbox lands at `/data/sales-outbox.jsonl`. |
 
 The `docker run` command is step 7 of the
@@ -421,6 +464,113 @@ curl -s -i -X POST http://127.0.0.1:8080/v1/chat/completions \
 
 The same three checks work against the container, at its published port.
 
+## Host it on Railway
+
+Railway is one worked example, not a requirement: any host that gives the
+container a public `https` origin and a persistent disk works. Haven's own demo
+is configured to run on Railway too, and its settings are in
+[`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
+§ *Paywall-proxy (the #4892 demo)*. That recipe builds from source, because the
+demo's products file lives in the repository; this one deploys the published
+image with your own products file, which is why the two are kept apart.
+
+**The products file.** Railway cannot mount a single file into a container: a
+volume mounts a directory. So the image's `PRODUCTS_FILE=/config/products.json`
+has nothing to read unless the file is in the image. Put a two-line Dockerfile
+in your own repository, beside your `products.json`:
+
+```dockerfile
+FROM ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
+COPY products.json /config/products.json
+```
+
+Pin the same tag as the Quickstart: the newest `pilot-<short-sha>` if the
+[package page](https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy)
+lists one, otherwise the newest `dev-<short-sha>`. Railway builds this
+Dockerfile and deploys it, so the products file stays in version control and a
+change to it is a commit and a redeploy. The base image declares
+`VOLUME ["/data"]`, and Railway accepts a build that inherits it (checked
+2026-11-23). The copied file is readable by the image's non-root user without
+`--chown` (checked 2026-11-23: `COPY` leaves it `root:root` mode 644, which uid
+1000 can read).
+
+**The service.** One service, one replica, one volume mounted at `/data`, and
+the healthcheck path `/healthz`:
+
+| Setting | Value |
+|---|---|
+| Source | your repository, with the Dockerfile above at its root |
+| Volume | one, mounted at `/data` |
+| Replicas | one. The proxy locks `PAYMENTS_DB`, and a second process on the same store refuses to start |
+| Healthcheck | `/healthz` |
+| Sleep | your choice; see *Sleep* below |
+
+**Variables.** Set the variables from Quickstart step 5, and add:
+
+| Variable | Value |
+|---|---|
+| `PUBLIC_BASE_URL` | the service's `https://` Railway domain, with no port |
+| `CLIENT_IP_HEADER` | `X-Real-IP`, the client address Railway's edge sets (what Haven's own service uses) |
+| `RAILWAY_RUN_UID` | `0` — see *Volume ownership* below |
+
+Do not set `PORT`: Railway injects it, and the proxy listens on it (checked
+2026-11-23: the container saw `PORT=8080`, the proxy logged `port=8080`, and
+the public domain served `/healthz` with no port setting). Do not paste
+`PRODUCTS_FILE` or `PAYMENTS_DB` from `.env.example`: they would override the
+image's paths, and the image's paths are the ones this recipe mounts. Delete
+those two lines, as Quickstart step 5 says.
+
+**Volume ownership, and the non-root user.** Railway mounts a volume as `root`
+(Railway's volumes page, checked 2026-11-23), so a volume at `/data` is not
+writable by the image's `node` user (uid 1000). The proxy then exits at startup
+with:
+
+```
+PAYMENTS_DB cannot be opened: the directory "/data" is not writable by this process. …
+```
+
+Railway's documented answer is the service variable `RAILWAY_RUN_UID=0`, which
+runs the container as root (checked 2026-11-23: with it, the container's first
+process ran as uid 0; without it, as uid 1000). That gives up the image's
+non-root posture for this service: the proxy process can write anywhere in the
+container, and a compromise of the proxy is no longer contained by the user
+boundary. The alternative is a host where you can set the volume's ownership to
+uid 1000; Railway does not offer that.
+
+The volume mount itself was not exercised in this pass: Railway's volumes page
+states the root mount (checked 2026-11-23), and a root-owned `/data` produces
+the error above (checked locally 2026-11-23). Verify it on your first deploy:
+the `started` line means the store opened, and the error above means it did
+not.
+
+**Check before the first deploy.** `check` cannot run inside the running
+service: it takes the store's exclusive lock and fails with `in use by a
+running proxy; stop it first`. Run it locally against the same settings before
+you deploy:
+
+```bash
+docker run --rm --env-file .env \
+  -v "$PWD/products.json:/config/products.json:ro" \
+  -v haven-kit-data:/data \
+  ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> check
+```
+
+**Redeploys.** Railway does not run two deployments of a service with a volume
+at once: it stops the old container before starting the new one, so the store
+lock is never contended, and a redeploy has a short window with no container
+serving (Railway's healthcheck documentation, checked 2026-11-23; not exercised
+on a volume-backed service in this pass). A buyer's call in that window gets a
+connection error, not a charge.
+
+**Sleep.** Railway's Sleep setting stops an idle service after about ten
+minutes without traffic and cold-starts it on the next request
+([`railway-services.md`](../../docs/operations/railway-services.md) § *Sleep*).
+Haven's own demo is configured with Sleep on. With Sleep on, a buyer's first
+call after an idle period waits for the container to start — measured at
+3.8–5.0 s for Haven's demo — and then gets the normal 402 challenge; nothing is
+charged for the wait. With Sleep off the service answers immediately and bills
+for the time it is up.
+
 ## Paying with a Haven agent
 
 Give a Haven agent the URL of one of your product routes and let it pay. For now
@@ -445,6 +595,35 @@ These are the rules of the sale, and the discovery document states them in its
 `terms` object, so a buyer's agent can read them before it pays. `terms` is the
 one place they are written for the buyer; this section is the merchant's view of
 the same facts.
+
+## A buyer for the first paid call
+
+The paying agent must belong to a different Haven user: a payment from your own
+agent or account is a move between your accounts, not a sale
+([Paying with a Haven agent](#paying-with-a-haven-agent)). So the first paid
+call needs a second Haven user. For the partner run, that is the other partner.
+
+1. **A second Haven user on the dev frontend.** Sign up on the dev frontend,
+   `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
+   ([`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)).
+   This release runs on Base Sepolia, so both sides use Haven's dev
+   environment.
+2. **Connect an agent through that user's dashboard.** The connect flow gives
+   the command for the dev environment; run it and let the agent connect. The
+   command belongs to the connect flow, so it is not repeated here.
+3. **Give the agent a budget with no recipient pin.** A budget pinned to one
+   recipient cannot pay an arbitrary merchant, because the pin restricts the
+   transfer to that recipient. Leave the recipient unpinned.
+4. **Put Base Sepolia USDC on that account.** Open the account's **Add funds**
+   dialog and use **Get test USDC** (Circle's faucet) on a test network
+   ([`docs/product/screen-recipes.md`](../../docs/product/screen-recipes.md)).
+5. **Hand the agent the product URL.** Give it the route from your products
+   file at your `PUBLIC_BASE_URL`, for example
+   `https://your-service.up.railway.app/v1/chat/completions`, and let it pay.
+
+What you should see: the agent gets the upstream answer with a
+`PAYMENT-RESPONSE` header, the proxy logs `payment_settled` and
+`payment_delivered`, and the USDC arrives in your Sales account.
 
 ## Reference
 
@@ -751,10 +930,10 @@ To run this demo as your own merchant endpoint, change these:
 |---|---|---|
 | Your upstream key | `UPSTREAM_API_KEY` | Your own Opper key (or your own provider's, with its `UPSTREAM_BASE_URL`). |
 | Your receiving account | `PAY_TO` | Your own Sales account's receiving address ([Quickstart](#quickstart-a-first-paid-call-on-base-sepolia) step 1). |
-| Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account ([Quickstart](#quickstart-a-first-paid-call-on-base-sepolia) step 2). |
+| Your Coinbase keys | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | A secret API key from your own Coinbase Developer Platform account ([Coinbase developer keys](#coinbase-developer-keys)). |
 | Who you are | `OPERATOR_NAME`, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`, and optionally `OPERATOR_CONTACT` | Your own name and description, without the "internal technical demo" wording. |
 | Your chain access | `RPC_URL` | Your own Base Sepolia RPC URL, or unset it to use the public `https://sepolia.base.org`. Haven's deployment references its own backend's provider URL, which you cannot use. |
-| Where you run it | `PUBLIC_BASE_URL`, `CLIENT_IP_HEADER`, `PAYMENTS_DB` | Your own `https` origin, the client-address header your own host's edge sets (or unset), and a path on your own persistent disk. |
+| Where you run it | `PUBLIC_BASE_URL`, `CLIENT_IP_HEADER`, `PAYMENTS_DB` | Your own `https` origin, the client-address header your own host's edge sets (or unset), and a path on your own persistent disk ([Host it on Railway](#host-it-on-railway) is one worked example). |
 | Your receipt | `VAT_RULE`, `SELLER_*` | Your own legal details, or unset `VAT_RULE` for no receipt. |
 | Your products | `PRODUCTS_FILE` | Your own copy of the demo file, with your prices and descriptions. |
 

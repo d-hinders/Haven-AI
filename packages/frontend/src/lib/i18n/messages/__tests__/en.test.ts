@@ -18,7 +18,7 @@
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { MERCHANT_KIT_TAGS_URL, merchantKitSetupPrompt } from '../en'
+import { MERCHANT_KIT_TAGS_URL, merchantKitSetupPrompt, ownServerSetupPrompt } from '../en'
 
 const REPO_ROOT = path.resolve(process.cwd(), '../..')
 const README = path.join(REPO_ROOT, 'packages/paywall-proxy/README.md')
@@ -42,5 +42,44 @@ describe('the merchant kit setup prompt (#5058)', () => {
   it('names the same package page as the README, so the two texts cannot drift', () => {
     expect(MERCHANT_KIT_TAGS_URL).toBe(PACKAGE_PAGE)
     expect(readFileSync(README, 'utf8')).toContain(PACKAGE_PAGE)
+  })
+})
+
+/**
+ * The hosting step (#5059). It is step 4, after the pilot line, so the agent
+ * knows the host before it writes the environment variables in step 5.
+ *
+ * The line is pinned whole, against a literal, for the same reason step 1 is:
+ * a partial match would pass on a line that lost the "any host with HTTPS and a
+ * persistent disk" rule or the Railway example.
+ *
+ * The prompt stays silent on the buyer: buying belongs to a different Haven
+ * user, and the README's buyer section is where that lives. The own-server
+ * prompt gets no hosting step at all — that seller already runs a server.
+ */
+describe('the merchant kit setup prompt hosting step (#5059)', () => {
+  const prompt = merchantKitSetupPrompt({
+    accountAddress: '0x0000000000000000000000000000000000000001',
+    salesUrl: 'https://havenbackend-dev-8b95.up.railway.app',
+  })
+
+  it('asks where the merchant hosts, as one literal line at step 4', () => {
+    expect(prompt.split('\n')[5]).toBe(
+      '4. Ask me where I host the merchant kit. Any host with HTTPS and a persistent disk works; the setup guide has Railway as a worked example.',
+    )
+  })
+
+  it('does not mention the buyer', () => {
+    expect(prompt).not.toMatch(/buyer/i)
+  })
+
+  it('leaves the own-server prompt without a hosting step', () => {
+    // A neutral origin, because the dev origin's host is `…up.railway.app` and
+    // the assertion is about the prompt's copy, not the URL it interpolates.
+    const ownServer = ownServerSetupPrompt({
+      accountAddress: '0x0000000000000000000000000000000000000001',
+      salesUrl: 'https://haven-api.example',
+    })
+    expect(ownServer).not.toMatch(/where I host|Railway/i)
   })
 })

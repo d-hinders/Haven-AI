@@ -722,6 +722,18 @@ export const GOVERNED_PACKAGE_DOCS = [
     // drops the "On Base, both use production" clause and names the dev
     // backend origin for `HAVEN_SALES_URL`, as does `.env.example`. The tag
     // rule itself (scripts/ci/paywall-proxy-image-tags.mjs) is unchanged.
+    // Re-verified 2026-11-23 (#5059): § "Coinbase developer keys" gains the
+    // portal link, the key type, the settings Haven's key was created with in
+    // #4852, which value is the id and which the secret, and the env-file and
+    // Railway-variable notes; § "Host it on Railway" is new and was checked on
+    // a Railway service on 2026-11-23 (the two-line Dockerfile and the
+    // inherited `VOLUME`, the injected `PORT`, the volume's root ownership and
+    // `RAILWAY_RUN_UID=0`, the redeploy rule, the multi-line variable);
+    // § "A buyer for the first paid call" is new; Quickstart steps 2, 7 and 8,
+    // the `PRODUCTS_FILE` row, the `CDP_*` rows, the `coinbase key` check row
+    // and the demo table point at them. The Coinbase portal itself was not
+    // opened in this pass: the settings are #4852's record, and the section
+    // tells the merchant to check each on the page.
     'last-verified': '2026-11-23',
   },
   {

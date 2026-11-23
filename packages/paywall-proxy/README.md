@@ -12,10 +12,11 @@ You need:
 
 1. A Sales account to receive into. Sign in to Haven, turn Sales on
    (Settings → Business), and use the Sales account's receiving address as
-   `PAY_TO` (step 1). On Base Sepolia, you and the paying agent both use Haven's
-   dev environment (the `dev` deployment; its URLs are in
-   [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)).
-   On Base, both use production. This release runs on Base Sepolia only.
+   `PAY_TO` (step 1). This release runs on Base Sepolia only, so you and the
+   paying agent both use Haven's dev environment: its backend origin is
+   `https://havenbackend-dev-8b95.up.railway.app`, and the rest of its URLs are
+   in [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md).
+   The production setup on Base comes later.
 2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
    created in the Coinbase Developer Platform. Haven does not offer its key.
 3. An upstream HTTP API and its API key.
@@ -61,7 +62,7 @@ Then:
 
    | Variable | Value |
    |---|---|
-   | `HAVEN_MERCHANT_KEY`, `HAVEN_SALES_URL` | The Sales key from step 3, and Haven's API origin (on Base Sepolia, the `dev` deployment's backend in [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)). The sales reporter is required for the pilot. |
+   | `HAVEN_MERCHANT_KEY`, `HAVEN_SALES_URL` | The Sales key from step 3, and Haven's API origin: `https://havenbackend-dev-8b95.up.railway.app` on Base Sepolia ([`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)). The sales reporter is required for the pilot. |
    | `PUBLIC_BASE_URL` | The public `https` origin the proxy is reached at, so the challenge names it. |
 
    Delete the `PRODUCTS_FILE` and `PAYMENTS_DB` lines: the image sets both
@@ -73,7 +74,7 @@ Then:
    docker run --rm --env-file .env \
      -v "$PWD/products.json:/config/products.json:ro" \
      -v haven-kit-data:/data \
-     ghcr.io/d-hinders/haven-paywall-proxy:pilot-<short-sha> check
+     ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> check
    ```
 
    What you should see: one line per check, each `ok`, and exit code 0
@@ -86,7 +87,7 @@ Then:
      -v "$PWD/products.json:/config/products.json:ro" \
      -v haven-kit-data:/data \
      -p 8080:8080 \
-     ghcr.io/d-hinders/haven-paywall-proxy:pilot-<short-sha>
+     ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
    ```
 
    Put your HTTPS front (your host's edge, or a reverse proxy) in front of port
@@ -348,10 +349,19 @@ The image sets two paths for you, and you do not put them in the env file:
 The `docker run` command is step 7 of the
 [Quickstart](#quickstart-a-first-paid-call-on-base-sepolia).
 
-**Pin a `pilot-<short-sha>` tag, not `pilot`.** A moving tag pulls
-config-breaking changes into your container on restart. `pilot` moves only on a
-release; `dev-<short-sha>` and `dev` are the unpromoted builds and are not for a
-merchant.
+**Pin a `dev-<short-sha>` tag, not `dev`.** A moving tag pulls config-breaking
+changes into your container on restart. The tags are listed on the
+[package page](https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy),
+and `<short-sha>` is the short commit hash in the tag's name. Before the kit's
+first production release, the newest `dev-<short-sha>` is the tag to use, against
+Haven's dev environment. `pilot-<short-sha>` arrives with that first release:
+once the package page lists one, pin the newest `pilot-<short-sha>` in place of
+`dev-<short-sha>` in the commands here. `dev` moves on every push to `dev` and is
+not for a deployment.
+
+**Apple Silicon.** The image is published for `linux/amd64` only. On an Apple
+Silicon Mac, add `--platform linux/amd64` to `docker run`; the image then runs
+under emulation, and Docker warns about the platform.
 
 **Use a named volume for `/data` (recommended).** Docker creates it with the
 image directory's ownership, so the container's non-root user can write it. A
@@ -375,7 +385,7 @@ The image's entrypoint is the CLI, so the subcommands run through it:
 
 ```bash
 docker run --rm --env-file .env -v haven-kit-data:/data \
-  ghcr.io/d-hinders/haven-paywall-proxy:pilot-<short-sha> report-sale 0x<transaction-hash>
+  ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> report-sale 0x<transaction-hash>
 ```
 
 ### Running from source
@@ -486,7 +496,7 @@ missing or unusable Haven origin, refuses startup and names the variable.
 | Variable | Meaning |
 |---|---|
 | `HAVEN_MERCHANT_KEY` | Your Haven Sales key (`sk_merchant_…`), created on **Sales → Setup → Sales keys**. It is receive-only: it authenticates the sales routes and nothing else. The proxy never logs it and never returns it. |
-| `HAVEN_SALES_URL` | Haven's API origin, for example `https://api.haven.example`. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
+| `HAVEN_SALES_URL` | Haven's API origin: `https://havenbackend-dev-8b95.up.railway.app` on Base Sepolia. The proxy appends `/merchant/sales` itself, so give the origin and no path. |
 | `SALES_OUTBOX` | The file the proxy keeps every sale record in until Haven accepts it or refuses it for good. One proxy process per file, on persistent disk. Default `sales-outbox.jsonl` in the same directory as `PAYMENTS_DB`. |
 
 ### The discovery document

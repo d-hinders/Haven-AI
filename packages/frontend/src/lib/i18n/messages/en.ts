@@ -57,9 +57,19 @@ export const SELLING_WITHOUT_KIT_URL =
 /**
  * The merchant kit's container image (#5007). The setup prompt's first step
  * runs it, so a developer never clones or builds (#5009). Pin a
- * `pilot-<short-sha>` tag: the README's Quickstart says why.
+ * `dev-<short-sha>` tag until the kit's first production release, and the
+ * newest `pilot-<short-sha>` once that release lists one: the README's
+ * Quickstart says why (#5058).
  */
 export const MERCHANT_KIT_IMAGE = 'ghcr.io/d-hinders/haven-paywall-proxy'
+
+/**
+ * The package page that lists the merchant kit image's tags (#5058). The setup
+ * prompt's first step sends a developer here to pick the tag to pin, so the
+ * page is named once, beside the image, and the README names the same page.
+ */
+export const MERCHANT_KIT_TAGS_URL =
+  'https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy'
 
 /**
  * The "Set up with your coding agent" prompt (#4985), in the style of the agent
@@ -80,7 +90,7 @@ export function merchantKitSetupPrompt(params: { accountAddress: string; salesUr
   return [
     'Set up Haven’s merchant kit so my Sales account can take payments.',
     '',
-    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to a pilot-<short-sha> tag, as the setup guide’s quickstart shows.`,
+    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release; the tags are listed at ${MERCHANT_KIT_TAGS_URL}, and the setup guide’s quickstart shows the run command.`,
     `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
     `3. ${MERCHANT_KIT_PILOT_LINE}`,
     '4. Set these in the merchant kit’s environment:',

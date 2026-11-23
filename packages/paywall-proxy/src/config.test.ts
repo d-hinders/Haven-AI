@@ -23,6 +23,14 @@ const base = {
   RPC_URL: 'https://rpc.example.com',
 }
 
+/**
+ * The refusal #5061 adds, pinned word for word: a builder who changes the
+ * wording turns this red, and so does one who removes the refusal without
+ * meaning to. Removing it is the go-live step once #4888 allows mainnet.
+ */
+const MAINNET_REFUSAL =
+  'NETWORK eip155:8453 (Base mainnet) is not open: the merchant kit runs on Base Sepolia only until the regulatory review in #4888 allows mainnet'
+
 function problems(env: Record<string, string | undefined>): string[] {
   try {
     loadConfig(env)
@@ -41,9 +49,14 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(config.basePath).toBe('/api')
     expect(config.upstream).toMatchObject({ authHeader: 'x-api-key', authScheme: '' })
     expect(config.upstreamTimeoutMs).toBe(180_000)
-    expect(loadConfig({ ...base, NETWORK: 'eip155:8453' }).chain.chainId).toBe(8453)
     expect(loadConfig(base).upstream.authScheme).toBe('Bearer')
     expect(loadConfig(base).upstream.authHeader).toBe('Authorization')
+  })
+
+  it('refuses Base mainnet at startup until the regulatory review in #4888 allows it — removing the refusal is a go-live step (#5061)', () => {
+    // The refusal alone: the "must be one of" problem does not also fire for a
+    // network the chain table knows.
+    expect(problems({ ...base, NETWORK: 'eip155:8453' })).toEqual([MAINNET_REFUSAL])
   })
 
   it.each(['NETWORK', 'PAY_TO', 'OPERATOR_NAME', 'PRODUCTS_FILE', 'PAYMENTS_DB', 'UPSTREAM_BASE_URL', 'UPSTREAM_API_KEY', 'CDP_API_KEY_ID', 'CDP_API_KEY_SECRET'])(
@@ -67,11 +80,13 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(loadConfig(base).rpcUrl).toBe('https://rpc.example.com')
     expect(loadConfig(base).rpcUrlDefault).toBe(false)
 
-    // Base mainnet has no default: real money would rest on a rate-limited public node.
+    // Base mainnet has no default: real money would rest on a rate-limited
+    // public node. The network is refused at startup (#5061), and the rule
+    // stays for go-live, so both problems are reported together.
     const mainnet = { ...base, NETWORK: 'eip155:8453' }
     delete (mainnet as Record<string, string | undefined>).RPC_URL
-    expect(problems(mainnet)).toEqual(['RPC_URL is required'])
-    expect(loadConfig({ ...mainnet, RPC_URL: 'https://rpc.example.com' }).rpcUrlDefault).toBe(false)
+    expect(problems(mainnet)).toEqual([MAINNET_REFUSAL, 'RPC_URL is required'])
+    expect(problems({ ...mainnet, RPC_URL: 'https://rpc.example.com' })).toEqual([MAINNET_REFUSAL])
   })
 
   it('adds no RPC_URL problem when NETWORK is missing or invalid (#5006)', () => {
@@ -80,7 +95,7 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     delete (missing as Record<string, string | undefined>).RPC_URL
     expect(problems(missing)).toEqual(['NETWORK is required'])
     expect(problems({ ...missing, NETWORK: 'eip155:1' })).toEqual([
-      'NETWORK must be one of eip155:8453, eip155:84532 (there is no default network)',
+      'NETWORK must be one of eip155:84532 (there is no default network)',
     ])
   })
 
@@ -263,15 +278,17 @@ describe('the receipt settings (#4913, §11)', () => {
     expect(problems({ ...base, VAT_RULE: 'UK_20' }).join(' ')).toMatch(/VAT_RULE must be one of SE_25_WITH_EU_REVERSE_CHARGE/)
   })
 
-  it('on Base mainnet, refuses to start with a VAT rule and no seller name, organisation number or VAT number', () => {
+  it('on Base mainnet, refuses to start with a VAT rule and no seller name, organisation number or VAT number, alongside the mainnet refusal (#5061)', () => {
     const mainnet = { ...base, NETWORK: 'eip155:8453', VAT_RULE: 'SE_25_WITH_EU_REVERSE_CHARGE' }
-    expect(problems(mainnet).join(' ')).toMatch(
-      /with VAT_RULE set, SELLER_NAME, SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet/,
-    )
-    expect(problems({ ...mainnet, SELLER_NAME: 'Kit Merchant AB' }).join(' ')).toMatch(
-      /SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet/,
-    )
-    expect(problems({ ...mainnet, ...SELLER })).toEqual([])
+    expect(problems(mainnet)).toEqual([
+      MAINNET_REFUSAL,
+      'with VAT_RULE set, SELLER_NAME, SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet',
+    ])
+    expect(problems({ ...mainnet, SELLER_NAME: 'Kit Merchant AB' })).toEqual([
+      MAINNET_REFUSAL,
+      'with VAT_RULE set, SELLER_ORG_NR, SELLER_VAT_NR are required on Base mainnet',
+    ])
+    expect(problems({ ...mainnet, ...SELLER })).toEqual([MAINNET_REFUSAL])
   })
 
   it('on a test network, starts with a warning and sends no receipt when the seller details are missing', () => {

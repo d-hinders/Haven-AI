@@ -260,7 +260,7 @@ Required:
 
 | Variable | Meaning |
 |---|---|
-| `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. |
+| `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. `eip155:8453` (Base mainnet) is refused at startup in this release (#5061). |
 | `PAY_TO` | The address that receives every payment: your Sales account's receiving address ([The Sales account and its receiving address](#the-sales-account-and-its-receiving-address)). |
 | `OPERATOR_NAME` | Who operates the endpoint. The discovery document shows it. |
 | `PRODUCTS_FILE` | The products file ([The products file](#the-products-file)). The container image sets it. |
@@ -458,7 +458,7 @@ Optional:
 |---|---|
 | `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. Default `OPERATOR_NAME`. |
 | `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. Default: a sentence built from the products file and the network, for example "Pay-per-call API by Acme: 2 products, paid in USDC on Base Sepolia testnet." |
-| `RPC_URL` | An RPC URL for the network. Default on Base Sepolia: the public `https://sepolia.base.org`. Required on Base mainnet, where real money would rest on a rate-limited public node. |
+| `RPC_URL` | An RPC URL for the network. Default on Base Sepolia: the public `https://sepolia.base.org`. Required on Base mainnet, where real money would rest on a rate-limited public node; Base mainnet is refused at startup in this release (#5061), and the rule stays for go-live. |
 | `OPERATOR_CONTACT` | A URL or address a reader can use to reach you. |
 | `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
@@ -486,7 +486,8 @@ seller detail:
 
 On Base mainnet the proxy refuses to start with `VAT_RULE` set and any of
 `SELLER_NAME`, `SELLER_ORG_NR` or `SELLER_VAT_NR` missing. On a test network it
-starts with a warning and sends no receipt.
+starts with a warning and sends no receipt. Base mainnet itself is refused at
+startup in this release (#5061), and the rule stays for go-live.
 
 Sales reporting (optional). With no `HAVEN_MERCHANT_KEY` the proxy reports
 nothing and starts exactly as without it. With the key set, reporting is on and
@@ -764,8 +765,9 @@ key to other parties before you take a real payment.
 
 - Coinbase directory listing (#4887). `DIRECTORY_LISTING=on` is refused at
   startup.
-- Base mainnet. This release runs on Base Sepolia only. The step for switching
-  to Base is added after the review in #4888 allows it.
+- Base mainnet. This release runs on Base Sepolia only, and the kit refuses
+  `NETWORK=eip155:8453` at startup (#5061). Removing that refusal is a
+  deliberate go-live step once the review in #4888 allows mainnet.
 
 ## Where the design lives
 

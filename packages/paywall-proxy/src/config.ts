@@ -10,7 +10,7 @@
 import { dirname, join } from 'node:path'
 import { isAddress, getAddress, type Address } from 'viem'
 import { VAT_RULES, type VatRule } from '@haven_ai/merchant-payments'
-import { chainForNetwork, PROXY_CHAINS, type ProxyChain } from './chains.js'
+import { chainForNetwork, type ProxyChain } from './chains.js'
 import type { ReceiptSettings } from './receipt.js'
 import { SALES_KEY_PREFIX, type SalesSettings, type SalesStatus } from './sales.js'
 
@@ -97,12 +97,34 @@ export const DEFAULT_RESERVATION_DEADLINE_MS = 120_000
 export const HOLDER_WORST_CASE_MS = 110_000
 
 /**
+ * §3: the networks this release is open on (#5061). Base mainnet stays in
+ * `PROXY_CHAINS` — `chains.test.ts` pins its chain id and USDC address to
+ * core's registry — but the kit refuses to settle on it until the regulatory
+ * review in #4888 allows it (owner decision 2026-11-23). Removing
+ * `eip155:8453` from this list is the go-live step; nothing else changes.
+ */
+export const OPEN_NETWORKS: readonly string[] = ['eip155:84532']
+
+/**
+ * The refusal for a network the chain table knows but this release is not open
+ * on, or `undefined` when the network is open — or unknown, which the
+ * "must be one of" problem reports instead (#5061).
+ */
+export function closedNetworkProblem(network: string): string | undefined {
+  if (OPEN_NETWORKS.includes(network)) return undefined
+  const chain = chainForNetwork(network)
+  if (chain === undefined) return undefined
+  return `NETWORK ${network} (${chain.label}) is not open: the merchant kit runs on Base Sepolia only until the regulatory review in #4888 allows mainnet`
+}
+
+/**
  * §12: the public node the proxy uses when `RPC_URL` is unset, per network
  * (#5006). Only a test network has one: on Base mainnet real money would rest
- * on a rate-limited public node, so `RPC_URL` stays required there. The public
- * Base Sepolia node serves a 200-block `eth_getLogs` window, and the core
- * already narrows its search to fit (`merchant-payments/src/cdp.ts`,
- * `LOG_CHUNK_BLOCKS`, #4866).
+ * on a rate-limited public node, so `RPC_URL` stays required there. Base
+ * mainnet is refused at startup in this release (#5061), and the rule stays
+ * for go-live. The public Base Sepolia node serves a 200-block `eth_getLogs`
+ * window, and the core already narrows its search to fit
+ * (`merchant-payments/src/cdp.ts`, `LOG_CHUNK_BLOCKS`, #4866).
  */
 export const DEFAULT_RPC_URLS: Readonly<Record<string, string>> = {
   'eip155:84532': 'https://sepolia.base.org',
@@ -148,7 +170,12 @@ export function loadConfig(env: Env): ProxyConfig {
   if (networkRaw) {
     chain = chainForNetwork(networkRaw)
     if (!chain) {
-      problems.push(`NETWORK must be one of ${Object.keys(PROXY_CHAINS).join(', ')} (there is no default network)`)
+      problems.push(`NETWORK must be one of ${OPEN_NETWORKS.join(', ')} (there is no default network)`)
+    } else {
+      // §3: the chain facts stay resolved for a refused network, so the
+      // mainnet-only rules below still report alongside the refusal (#5061).
+      const refusal = closedNetworkProblem(networkRaw)
+      if (refusal !== undefined) problems.push(refusal)
     }
   }
 
@@ -205,8 +232,10 @@ export function loadConfig(env: Env): ProxyConfig {
   // §12: `RPC_URL` is used only for the chain reads that resolve a lost settle
   // answer and a used authorization. On Base Sepolia the public node is a safe
   // default; on Base mainnet it stays required, because real money would rest
-  // on a rate-limited public node. With no usable NETWORK there is no chain to
-  // default for, and the NETWORK problem is the one to report (#5006).
+  // on a rate-limited public node. Base mainnet is refused at startup in this
+  // release (#5061), and the rule stays for go-live. With no usable NETWORK
+  // there is no chain to default for, and the NETWORK problem is the one to
+  // report (#5006).
   const rpcUrlRaw = text('RPC_URL')
   const defaultRpcUrl = chain === undefined ? undefined : DEFAULT_RPC_URLS[chain.network]
   let rpcUrl = ''
@@ -275,7 +304,8 @@ export function loadConfig(env: Env): ProxyConfig {
   // seller detail is required. With a rule, the seller's name, organisation
   // number and VAT number are required: on Base mainnet the proxy refuses to
   // start without them, on a test network it starts with a warning and sends
-  // no receipt.
+  // no receipt. Base mainnet is refused at startup in this release (#5061),
+  // and the rule stays for go-live.
   const warnings: string[] = []
   const vatRuleRaw = text('VAT_RULE')
   let receipt: ReceiptSettings | undefined

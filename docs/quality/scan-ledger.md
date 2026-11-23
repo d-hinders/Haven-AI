@@ -3513,3 +3513,101 @@ record before it merged.
   blocker on epic #4886; owner decision 2026-11-22, the testnet gate alone.
 
 `pending-review` is lifted on all thirteen.
+
+## 2026-11-23 — the two flagged rows of the weekly re-measurement (scoped; #4922)
+
+Scoped to the two rows the weekly job flagged at `83d3faff5` (#4625's table in
+#4922): block 3's `any / as any in non-test backend and package source`
+(39 → 41, "flagged — moved (exact)") and block 6's `money perimeter: files
+calling a money verb, and how many match no money-path glob` (32 / 20 → 34 / 21,
+"flagged — moved past ±5%"), plus the one moved doc figure the issue names.
+Measured at `origin/dev` @ `b9657c08ce58efd806911864e8468ce03ee153dc` (the tip
+at pickup; the table's own SHA is `83d3faff5`), in a linked worktree, no `npm ci`
+needed for either instrument. A scoped scan: `docs/quality/scan-baselines.json`
+is not updated for the two rows (skill § Method), so the manifest keeps `44` and
+`34 / 21` @ `682c5fc3e`; the doc-figure row IS refreshed, because a doc figure
+moves in the PR that changes the sentence (#4631). GitHub read-only; no live
+Haven, MCP, dev or production call.
+
+**Excluded this run:** every prior finding and candidate, whatever its
+disposition. Neither row re-surfaces one.
+
+**Structural findings:** none. The scope is two instruments, not a sweep.
+
+**Improvement candidate (recorded, not filed):** both instruments count English
+prose. `rg -c ': any\b|as any'` matches a comment or a description string whose
+sentence happens to contain `: any` ("removed: any failure", "class: any 5xx",
+"`wallet`: any other address"), and `rg -l` for the money verbs matches a file
+that merely NAMES a verb in a comment. Every one of the five `any` additions and
+both money-verb additions since `9871885a9` is prose; no type annotation, cast or
+money call was added. The rows therefore move on copy edits, and the weekly
+issue flags them as code drift. A remedy would narrow both regexes to code
+(comments and string literals excluded) and re-pin the rows at the newest
+whole-repo SHA; that changes the recorded baseline, so it is an owner decision,
+not a re-measurement. Recorded here so the next scan does not re-derive it.
+
+**Probed clean** (coverage record; scoped, so only the two rows and the doc
+figures are examined):
+
+- block 3 → examined → the row's command (`block3-any` in
+  `docs/quality/scan-baselines.json`: `rg -c ': any\b|as any' packages/*/src
+  --type ts -g '!*test*'`) → **44** at `b9657c08c` (39 at `9871885a9`, 41 at
+  `83d3faff5`, 44 at `682c5fc3e`). The manifest's baseline is already `44` @
+  `682c5fc3e`, so the row has **no delta at the pickup tip**; the issue's
+  39 → 41 was measured at `83d3faff5`, before the 2026-11-21 whole-repo scan
+  re-pinned the row. The five additions since `9871885a9` (content-only diff of
+  the instrument's output: 5 added, 0 removed) are all prose:
+  `merchant-payments/src/consumed-payment-store.ts:97` (comment, "removed: any
+  failure before settlement"), `signer/src/sign-context.ts:437` (comment,
+  "non-answer class: any 5xx"),
+  `backend/src/db/migrations/126_merchant_services.ts:45` (comment, "rules as
+  any other"), `backend/src/openapi/spec.ts:12443` (OpenAPI description string,
+  "`wallet`: any other address") and its generated twin
+  `core/src/api-types.ts:5329`. No `any` type annotation and no `as any` cast
+  was added; the type-level occurrences are unchanged (the diff shows only
+  line-number shifts for them). Verdict: the delta is prose, not a type-safety
+  regression. No code change.
+- block 6 → partial → the money-perimeter half only → the row's command
+  (`block6-money-perimeter`: `rg -l -e
+  'sendTransaction|redeemDelegation|signTypedData|sendUserOperation|executeTransaction|broadcastTransaction'
+  packages --type ts -g '!*test*' -g '!**/dist/**'`, then the glob matcher) →
+  **34 / 21** at `b9657c08c` (32 / 20 at `9871885a9`, 34 / 21 at `83d3faff5`,
+  34 / 21 at `682c5fc3e`). The manifest's baseline is already `34 / 21` @
+  `682c5fc3e`, so the row has **no delta at the pickup tip**. The two new
+  money-verb files are `backend/src/infra/repositories/payment-intents.ts`
+  (matched by `infra/repositories/**`; the verb is a comment mention at `:586`
+  and `:633`) and `frontend/src/components/DelegationSendModal.tsx` (unmatched;
+  the verb is a comment mention at `:87`, `eth_sendUserOperation`). Neither adds
+  a money call. The one unmatched file is `DelegationSendModal.tsx`, and the
+  exclusion is justified rather than globbed: it is the owner's client-side
+  confirmation dialog, it constructs no transfer and grants no authority, and
+  the client send path it drives (`hooks/useDelegationSend.ts`,
+  `lib/hybridAccountOps.ts`) is on neither list by the #1903 decision — the
+  deployed money-flow harness does not exercise the client. Adding the dialog
+  alone would be the half-coverage `money-path-globs.json` warns about ("the
+  most misleading kind of half-coverage, because the list read as though it knew
+  about re-key"). Recorded as a candidate for the next scan, not filed:
+  `lib/hybridAccountOps.ts` calls `signTypedData` (a real money verb) and is on
+  neither list, so the frontend signing surface is a genuine perimeter question
+  the #1903 note left open.
+- blocks 1, 2, 4, 5, 8, 9, comment archaeology, incident clustering, workflow
+  archaeology, cross-package duplication, data-layer coverage, live exercise →
+  not examined → out of this scope (the two flagged rows).
+
+**Controls.** The `any` instrument reproduces every recorded reading exactly:
+39 at `9871885a9`, 41 at `83d3faff5`, 44 at `682c5fc3e` and 44 at `b9657c08c`,
+so the deltas above are the instrument's, not a reconstruction. The money
+instrument reproduces 32 / 20 at `9871885a9`, 34 / 21 at `83d3faff5` and
+34 / 21 at `682c5fc3e`. The glob matcher's positive control still prints
+`money-path` for the rails `sweep.ts`, and `off` for `DelegationSendModal.tsx`.
+
+**Doc figures.** `ds-button-variant-distribution` measured at `b9657c08c`:
+**239 / 37 / 8 / 4 = 288** (210 / 33 / 8 / 4 = 255 at `83d3faff5`; the issue's
+"now" figure was itself measured at `83d3faff5`). The doc sentence and the
+manifest row are refreshed together, figures and `sha`, never `last-verified`
+alone (#4631). `ds-icon-rung-12px` → 16 and
+`frontend-settings-tabs-dark-baseline` → 1, both unchanged at `b9657c08c`.
+
+**Disposition: no finding.** Both flagged rows are prose matches at the
+manifest's own baseline; the doc figure is refreshed. The instrument
+false-positive class is recorded as a candidate for the next scan.

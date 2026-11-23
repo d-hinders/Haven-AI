@@ -520,9 +520,10 @@ the public domain served `/healthz` with no port setting). Do not paste
 image's paths, and the image's paths are the ones this recipe mounts. Delete
 those two lines, as Quickstart step 5 says.
 
-**Volume ownership, and the non-root user.** Railway mounts a volume as `root`,
-so a volume at `/data` is not writable by the image's `node` user (uid 1000).
-The proxy then exits at startup with:
+**Volume ownership, and the non-root user.** Railway mounts a volume as `root`
+(Railway's volumes page, checked 2026-11-23), so a volume at `/data` is not
+writable by the image's `node` user (uid 1000). The proxy then exits at startup
+with:
 
 ```
 PAYMENTS_DB cannot be opened: the directory "/data" is not writable by this process. …
@@ -562,12 +563,13 @@ on a volume-backed service in this pass). A buyer's call in that window gets a
 connection error, not a charge.
 
 **Sleep.** Railway's Sleep setting stops an idle service after about ten
-minutes without traffic and cold-starts it on the next request. Haven's own
-demo is configured with Sleep on. With Sleep on, a buyer's first call after an
-idle period waits for the container to start — measured at 3.8–5.0 s for
-Haven's demo — and then gets the normal 402 challenge; nothing is charged for
-the wait. With Sleep off the service answers immediately and bills for the time
-it is up.
+minutes without traffic and cold-starts it on the next request
+([`railway-services.md`](../../docs/operations/railway-services.md) § *Sleep*).
+Haven's own demo is configured with Sleep on. With Sleep on, a buyer's first
+call after an idle period waits for the container to start — measured at
+3.8–5.0 s for Haven's demo — and then gets the normal 402 challenge; nothing is
+charged for the wait. With Sleep off the service answers immediately and bills
+for the time it is up.
 
 ## Paying with a Haven agent
 

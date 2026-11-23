@@ -100,8 +100,8 @@ export const HOLDER_WORST_CASE_MS = 110_000
  * §3: the networks this release is open on (#5061). Base mainnet stays in
  * `PROXY_CHAINS` — `chains.test.ts` pins its chain id and USDC address to
  * core's registry — but the kit refuses to settle on it until the regulatory
- * review in #4888 allows it (owner decision 2026-11-23). Removing
- * `eip155:8453` from this list is the go-live step; nothing else changes.
+ * review in #4888 allows it (owner decision 2026-11-23). Adding
+ * `eip155:8453` to this list is the go-live step; nothing else changes.
  */
 export const OPEN_NETWORKS: readonly string[] = ['eip155:84532']
 

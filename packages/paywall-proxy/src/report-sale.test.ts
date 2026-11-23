@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -125,6 +125,9 @@ describe('the re-report command (#4898)', () => {
     }
 
     expect(code).toBe(1)
+    // The store is opened lazily and `DatabaseSync` creates the file on open,
+    // so its absence proves the refusal came before any store read.
+    expect(existsSync(env.PAYMENTS_DB!)).toBe(false)
     const text = errors.join('\n')
     expect(text).toContain('The proxy cannot start:')
     expect(text).toContain(

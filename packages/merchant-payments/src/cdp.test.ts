@@ -4,16 +4,20 @@
  * means, the window arithmetic) is characterised in the demo merchant's
  * `cdp-chain-reader.test.ts`; these pin what the move added.
  */
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { createPublicClient, custom, getAddress, toHex, type Address, type Hex } from 'viem'
 import { base } from 'viem/chains'
 import {
   CDP_CALL_TIMEOUT_MS,
+  CDP_SECRET_CANNOT_SIGN,
   CHAIN_READ_TIMEOUT_MS,
+  CdpSecretError,
   CdpTimeoutError,
   SETTLE_RESOLVE_MS,
   createCdpChainReader,
   createViemChainReadClient,
+  preflightCdpSecret,
   resolveCdpCredentials,
   withCdpTimeout,
   type ChainReadClient,
@@ -158,5 +162,51 @@ describe('resolveCdpCredentials (#4890)', () => {
     const messages: string[] = []
     resolveCdpCredentials(undefined, 'secret', (m) => messages.push(m))
     expect(messages[0]!.endsWith('CDP_API_KEY_SECRET.')).toBe(true)
+  })
+})
+
+/** #5060: a valid Ed25519 CDP secret — the 32-byte seed then its derived public key, base64. */
+function validSecret(): string {
+  const { privateKey } = generateKeyPairSync('ed25519')
+  const jwk = privateKey.export({ format: 'jwk' }) as { d: string; x: string }
+  return Buffer.concat([Buffer.from(jwk.d, 'base64url'), Buffer.from(jwk.x, 'base64url')]).toString('base64')
+}
+
+describe('preflightCdpSecret (#5060)', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('accepts a generated Ed25519 key pair', async () => {
+    await expect(preflightCdpSecret({ apiKeyId: 'organizations/x/apiKeys/y', apiKeySecret: validSecret() })).resolves.toBeUndefined()
+  })
+
+  it('refuses the .env.example placeholder, naming the variable and never the value', async () => {
+    const secret = 'your-cdp-api-key-secret'
+    const failure = await preflightCdpSecret({ apiKeyId: 'id', apiKeySecret: secret }).then(
+      () => undefined,
+      (err: unknown) => err,
+    )
+    expect(failure).toBeInstanceOf(CdpSecretError)
+    expect((failure as Error).message).toBe(CDP_SECRET_CANNOT_SIGN)
+    expect((failure as Error).message).toContain('CDP_API_KEY_SECRET')
+    expect((failure as Error).message).not.toContain(secret)
+  })
+
+  it('refuses 64 random bytes: the SDK accepts the format, then cannot sign with it', async () => {
+    const secret = randomBytes(64).toString('base64')
+    await expect(preflightCdpSecret({ apiKeyId: 'id', apiKeySecret: secret })).rejects.toBeInstanceOf(CdpSecretError)
+  })
+
+  it('makes no network call', async () => {
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('the preflight must not reach the network')
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+    await preflightCdpSecret({ apiKeyId: 'id', apiKeySecret: validSecret() })
+    await expect(preflightCdpSecret({ apiKeyId: 'id', apiKeySecret: randomBytes(64).toString('base64') })).rejects.toBeInstanceOf(
+      CdpSecretError,
+    )
+    expect(fetchSpy).not.toHaveBeenCalled()
   })
 })

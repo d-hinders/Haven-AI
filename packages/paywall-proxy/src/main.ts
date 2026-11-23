@@ -8,15 +8,17 @@
 import { statSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import {
+  CdpSecretError,
   createCdpChainReader,
   createCdpFacilitator,
   createViemChainReadClient,
+  preflightCdpSecret,
   reportSale,
   type CdpSettlementConfig,
   type SaleRecord,
   type SaleReportOutcome,
 } from '@haven_ai/merchant-payments'
-import { loadConfig, secretValues, type ProxyConfig } from './config.js'
+import { ConfigError, loadConfig, secretValues, type ProxyConfig } from './config.js'
 import { createProxyHandler } from './handler.js'
 import type { LimitSettings } from './limits.js'
 import { createLogger, installConsoleRedaction, type LogFn } from './log.js'
@@ -58,6 +60,15 @@ export interface StartOverrides {
 
 export async function startProxy(env: Readonly<Record<string, string | undefined>>, overrides: StartOverrides = {}): Promise<RunningProxy> {
   const config = loadConfig(env)
+  // #5060: a Coinbase secret that cannot sign refuses startup, before the store
+  // is opened or the port is bound. The dry run builds one auth header locally,
+  // with no network call, and its problem joins the same refusal message.
+  try {
+    await preflightCdpSecret(config.cdp)
+  } catch (err) {
+    if (err instanceof CdpSecretError) throw new ConfigError([err.message])
+    throw err
+  }
   const products = loadProductsFile(config.productsFile)
   const updated = productsFileUpdatedAt(config.productsFile)
   const log = overrides.log ?? createLogger(secretValues(config))
@@ -158,6 +169,9 @@ export async function startProxy(env: Readonly<Record<string, string | undefined
       // §12: the public default is named; a configured URL is never printed,
       // because a provider URL can embed a key (#5006).
       rpc: config.rpcUrlDefault ? 'default (public Base Sepolia)' : 'configured',
+      // #5060: `none` when the upstream needs no key, so the line says what the
+      // proxy actually sends.
+      upstream_auth: config.upstream.auth,
       sales_reporting: config.salesStatus,
       ...(sales !== undefined ? { sales_outbox_depth: sales.outboxDepth() } : {}),
       receipt: config.receiptStatus,

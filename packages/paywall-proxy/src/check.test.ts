@@ -13,6 +13,7 @@
  * move money — no `verify`, no `settle`, no sale record.
  */
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -299,10 +300,54 @@ describe('the pre-flight check (#5008)', () => {
 
     expect(line(lines, 'coinbase key')).toMatchObject({
       status: 'fail',
-      reason: 'CDP_API_KEY_SECRET is not a key the Coinbase client can sign with',
+      reason: 'CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)',
     })
     expect(fetchSpy).not.toHaveBeenCalled()
     expect(line(lines, 'rpc').status).toBe('ok')
+    expect(exitCode).toBe(1)
+  })
+
+  // #5060: the cold run's input — 64 random bytes, base64, and an invented key
+  // id. It passes the SDK's format check and fails while the JWT is signed, so
+  // the line must say the key cannot sign, not that the facilitator did not
+  // answer. No request is ever sent.
+  it('a well-formed but unusable Coinbase secret fails locally as "cannot sign", with no network call', async () => {
+    const randomSecret = randomBytes(64).toString('base64')
+    const { env } = workspace({ CDP_API_KEY_ID: 'organizations/invented/apiKeys/invented', CDP_API_KEY_SECRET: randomSecret })
+    const fetchSpy = vi.fn(async () => {
+      throw new Error('check must not reach the network for a secret that cannot sign')
+    })
+    vi.stubGlobal('fetch', fetchSpy)
+
+    const { lines, printed, exitCode } = await run(env, {
+      createFacilitator: (credentials) => createCdpFacilitator(credentials, { timeoutMs: 5_000 }),
+    })
+
+    expect(line(lines, 'coinbase key')).toMatchObject({
+      status: 'fail',
+      reason: 'CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)',
+    })
+    expect(fetchSpy).not.toHaveBeenCalled()
+    expect(printed.join('\n')).not.toContain(randomSecret)
+    expect(exitCode).toBe(1)
+  })
+
+  it('a facilitator that cannot be reached prints "did not answer", never the message', async () => {
+    const { env } = workspace()
+    const { lines, printed, exitCode } = await run(env, {
+      createFacilitator: async () =>
+        facilitator({
+          getSupported: async () => {
+            throw new TypeError('fetch failed')
+          },
+        }),
+    })
+
+    expect(line(lines, 'coinbase key')).toMatchObject({
+      status: 'fail',
+      reason: 'the facilitator did not answer (TypeError)',
+    })
+    expect(printed.join('\n')).not.toContain('fetch failed')
     expect(exitCode).toBe(1)
   })
 

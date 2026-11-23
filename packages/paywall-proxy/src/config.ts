@@ -46,6 +46,11 @@ export interface ProxyConfig {
     authHeader: string
     /** Empty string: the key is sent bare, with no scheme. */
     authScheme: string
+    /**
+     * #5060: `key` sends `UPSTREAM_API_KEY` in `authHeader`; `none` sends no
+     * upstream auth header at all, for an upstream that needs no key.
+     */
+    auth: 'key' | 'none'
   }
   /** The path prefix the products' routes are matched under ('' or '/x', no trailing slash). */
   basePath: string
@@ -226,7 +231,16 @@ export function loadConfig(env: Env): ProxyConfig {
 
   const productsFile = required('PRODUCTS_FILE')
   const paymentsDb = required('PAYMENTS_DB')
-  const apiKey = required('UPSTREAM_API_KEY')
+  // #5060: an upstream with no key is an explicit opt-out, not an optional key.
+  // `UPSTREAM_AUTH` accepts only `none`; unset keeps today's rule, so a
+  // forgotten key still refuses startup instead of becoming an upstream 401
+  // after the buyer has paid.
+  const upstreamAuthRaw = text('UPSTREAM_AUTH')
+  const upstreamAuth: 'key' | 'none' = upstreamAuthRaw === 'none' ? 'none' : 'key'
+  if (upstreamAuthRaw !== undefined && upstreamAuthRaw !== 'none') {
+    problems.push('UPSTREAM_AUTH must be "none" when set; unset sends UPSTREAM_API_KEY')
+  }
+  const apiKey = upstreamAuth === 'none' ? '' : required('UPSTREAM_API_KEY')
   const apiKeySecret = required('CDP_API_KEY_SECRET')
   const apiKeyId = required('CDP_API_KEY_ID')
   // §12: `RPC_URL` is used only for the chain reads that resolve a lost settle
@@ -264,13 +278,27 @@ export function loadConfig(env: Env): ProxyConfig {
   }
 
   const authHeader = text('UPSTREAM_AUTH_HEADER') ?? 'Authorization'
-  if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(authHeader)) {
-    problems.push('UPSTREAM_AUTH_HEADER must be a valid HTTP header name')
-  }
   // Unset: Bearer. Set but empty: the key is sent bare (an upstream that wants `x-api-key: <key>`).
   const authScheme = env.UPSTREAM_AUTH_SCHEME === undefined ? 'Bearer' : env.UPSTREAM_AUTH_SCHEME.trim()
-  if (/[\r\n]/.test(authScheme)) problems.push('UPSTREAM_AUTH_SCHEME must be a single line')
-  if (apiKey && /[\r\n]/.test(apiKey)) problems.push('UPSTREAM_API_KEY must not contain a line break')
+  if (upstreamAuth === 'none') {
+    // #5060: with no upstream auth, the three key settings are refused rather
+    // than ignored, so a deployment cannot believe it sends a key it does not.
+    if (text('UPSTREAM_API_KEY') !== undefined) {
+      problems.push('UPSTREAM_API_KEY must not be set with UPSTREAM_AUTH=none')
+    }
+    if (text('UPSTREAM_AUTH_HEADER') !== undefined) {
+      problems.push('UPSTREAM_AUTH_HEADER must not be set with UPSTREAM_AUTH=none')
+    }
+    if (env.UPSTREAM_AUTH_SCHEME !== undefined) {
+      problems.push('UPSTREAM_AUTH_SCHEME must not be set with UPSTREAM_AUTH=none')
+    }
+  } else {
+    if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(authHeader)) {
+      problems.push('UPSTREAM_AUTH_HEADER must be a valid HTTP header name')
+    }
+    if (/[\r\n]/.test(authScheme)) problems.push('UPSTREAM_AUTH_SCHEME must be a single line')
+    if (apiKey && /[\r\n]/.test(apiKey)) problems.push('UPSTREAM_API_KEY must not contain a line break')
+  }
 
   const clientIpHeader = text('CLIENT_IP_HEADER')?.toLowerCase()
   if (clientIpHeader !== undefined && !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(clientIpHeader)) {
@@ -434,7 +462,7 @@ export function loadConfig(env: Env): ProxyConfig {
     ...(operatorContact !== undefined ? { operatorContact } : {}),
     ...(iconUrl !== undefined ? { iconUrl } : {}),
     productsFile,
-    upstream: { baseUrl, apiKey, authHeader, authScheme },
+    upstream: { baseUrl, apiKey, authHeader, authScheme, auth: upstreamAuth },
     basePath,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
     ...(clientIpHeader ? { clientIpHeader } : {}),

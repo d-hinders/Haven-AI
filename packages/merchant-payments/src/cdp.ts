@@ -143,6 +143,61 @@ export async function withCdpTimeout<T>(
 }
 
 /**
+ * #5060: the CDP facilitator's endpoint, as `@coinbase/x402`'s
+ * `createFacilitatorConfig` builds it. The preflight signs the same request the
+ * facilitator client signs for `GET …/supported`.
+ */
+const CDP_FACILITATOR_HOST = 'api.cdp.coinbase.com'
+const CDP_FACILITATOR_SUPPORTED_PATH = '/platform/v2/x402/supported'
+
+/**
+ * #5060: the one line a secret that cannot sign is reported with. It names the
+ * variable and never its value.
+ */
+export const CDP_SECRET_CANNOT_SIGN =
+  'CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)'
+
+/** #5060: `CDP_API_KEY_SECRET` cannot sign a request. */
+export class CdpSecretError extends Error {
+  constructor() {
+    super(CDP_SECRET_CANNOT_SIGN)
+    this.name = 'CdpSecretError'
+  }
+}
+
+/**
+ * #5060: build one CDP auth header locally, with no network call — the same
+ * JWT the facilitator client signs for `GET …/supported`.
+ *
+ * A format check is not enough. `@coinbase/cdp-sdk` accepts any base64 string
+ * that decodes to 64 bytes as an Ed25519 key, then fails while signing when its
+ * two halves are not a matching seed and public key. This catches the
+ * `.env.example` placeholder and well-formed junk alike, before the proxy
+ * listens or `check` reaches the network.
+ *
+ * The signer is reached through `@coinbase/x402`'s `createAuthHeader`, the
+ * builder `createCdpFacilitator` already uses, so `@coinbase/cdp-sdk` stays a
+ * transitive dependency and the lockfile does not change.
+ */
+export async function preflightCdpSecret(credentials: {
+  apiKeyId: string
+  apiKeySecret: string
+}): Promise<void> {
+  const { createAuthHeader } = await import('@coinbase/x402')
+  try {
+    await createAuthHeader(
+      credentials.apiKeyId,
+      credentials.apiKeySecret,
+      'GET',
+      CDP_FACILITATOR_HOST,
+      CDP_FACILITATOR_SUPPORTED_PATH,
+    )
+  } catch {
+    throw new CdpSecretError()
+  }
+}
+
+/**
  * Build the CDP facilitator client: `createFacilitatorConfig` from
  * `@coinbase/x402` (CDP's endpoint and per-request JWT auth) inside
  * `HTTPFacilitatorClient` from `@x402/core/server` — the pairing Stripe's

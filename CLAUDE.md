@@ -25,7 +25,7 @@ covers:
   - .claude/agents/**
   - .claude/commands/**
   - packages/core/src/client-releases.data.ts
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven — CLAUDE.md

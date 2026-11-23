@@ -5,7 +5,7 @@ covers:
   - docs/regulatory/casp-changelog/**
   - scripts/docs/coupling-gate.mjs
   - scripts/release-bump.mjs
-last-verified: "2026-11-17"
+last-verified: "2026-11-23"
 ---
 
 # CASP verification log — sharded entries (#1366)

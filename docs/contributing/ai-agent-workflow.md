@@ -13,7 +13,7 @@ covers:
   - docs/contributing/autonomous-pr-loop.md
   - docs/contributing/ai-review-patterns.md
   - scripts/ci/review-isolation.mjs
-last-verified: "2026-10-24"
+last-verified: "2026-11-23"
 ---
 
 # Haven AI Agent Workflow

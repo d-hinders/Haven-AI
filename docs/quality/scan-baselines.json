@@ -344,12 +344,12 @@
       "anchor": "literal occurrences, from `packages/frontend` (measured",
       "command": "git diff --quiet \"$SHA\" -- || { echo \"worktree is not at $SHA\" >&2; exit 1; }\ncd packages/frontend\nfor v in ghost tertiary primary danger; do\n  grep -rhoE \"variant=\\\"$v\\\"\" src --include='*.tsx' | wc -l | tr -d ' '\ndone",
       "figures": [
-        210,
-        33,
+        239,
+        37,
         8,
         4
       ],
-      "sha": "83d3faff5",
+      "sha": "b9657c08c",
       "requires": []
     },
     {

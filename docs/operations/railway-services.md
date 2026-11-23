@@ -187,7 +187,7 @@ README § *Host it on Railway*.
 | Build | root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first); watch `/packages/paywall-proxy/**`, `/packages/merchant-payments/**`, `/packages/sdk/**`, so an unrelated push to `dev` does not restart it |
 | Start command | `node packages/paywall-proxy/dist/index.js` |
 | Volume | one volume, mounted at `/data`, for `PAYMENTS_DB`. Not backed up: it holds test-money payments only, and losing it loses only the one-call rule for those (design §12 asks a real merchant to back it up) |
-| Replicas | one. The proxy locks `PAYMENTS_DB` and a second process refuses to start, so a deploy must stop the old container before starting the new one. Check this on the first redeploy |
+| Replicas | one. The proxy locks `PAYMENTS_DB` and a second process refuses to start, so a deploy must stop the old container before starting the new one. Check this on the first redeploy. Railway's rule for a volume-backed service is in the kit's README § *Host it on Railway* |
 | Sleep | on |
 | Healthcheck | `/healthz` |
 

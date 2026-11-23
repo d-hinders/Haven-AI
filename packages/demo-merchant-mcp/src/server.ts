@@ -110,6 +110,8 @@ interface MerchantStrings {
   jokeLabel: string
   /** #4950: what one `buy_field_notes` buys. */
   oneFieldNote: string
+  /** Philip's demo products: what one purchase buys. */
+  onePhilipProduct: string
   /** #4950: appended to the list footer only when the Sales product is offered. */
   fieldNotesFooter: string
   /** #4950: label for the delivered note in the confirmation. */
@@ -162,6 +164,7 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       'needs a budget that is not pinned to one recipient).',
     jokeLabel: 'Your joke',
     oneFieldNote: 'one field note',
+    onePhilipProduct: 'one-time purchase',
     fieldNotesFooter: ' Use buy_field_notes for one field note on running agent payments (paid into a Haven Sales account).',
     fieldNoteLabel: 'Your field note',
     availableProductsHeading: 'Available products:',
@@ -202,6 +205,7 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
       'det kräver en budget som inte är låst till en mottagare).',
     jokeLabel: 'Ditt skämt',
     oneFieldNote: 'en fältanteckning',
+    onePhilipProduct: 'engångsköp',
     fieldNotesFooter:
       ' Använd buy_field_notes för en fältanteckning om agentbetalningar (betalas till ett Haven-försäljningskonto).',
     fieldNoteLabel: 'Din fältanteckning',
@@ -529,6 +533,32 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
       return completePurchase(config, productId, {
         description: `${PRODUCTS[productId].name} — ${STRINGS[resolvedLocale].monthStorage}`,
+        settlementMethod: settlement_method,
+        locale: resolvedLocale,
+        detail: result_detail ?? 'full',
+      })
+    },
+  )
+
+  // ── buy_philip (personal demo branch) ──────────────────────────────────────
+  server.tool(
+    'buy_philip',
+    `Buy one of Philip's demo products. Payment via x402 (USDC on ${networkDisplayName(config.chainId, 'en')}). ` +
+      `settlement_method is optional and defaults to ${defaultSettlementMethod}. Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ` +
+      'On success, report the purchase to the user from the structured `summary` object (status, product_name, amount, ' +
+      'settlement_tx_hash) rather than parsing the confirmation text or invoice. ' +
+      "Text output is English by default (locale: 'sv' for Swedish); pass result_detail: 'summary' to omit the rendered invoice + bookkeeping JSON from the text.",
+    {
+      product: z.enum(['vpn', 'storage', 'spoof']).describe("Which of Philip's products to buy"),
+      settlement_method: z.enum(SUPPORTED_SETTLEMENT_METHODS).optional().describe('Optional x402 settlement method'),
+      locale: LOCALE_PARAM,
+      result_detail: RESULT_DETAIL_PARAM,
+    },
+    async ({ product, settlement_method, locale, result_detail }) => {
+      const productId = `philip_${product}` as ProductId
+      const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
+      return completePurchase(config, productId, {
+        description: `${PRODUCTS[productId].name} — ${STRINGS[resolvedLocale].onePhilipProduct}`,
         settlementMethod: settlement_method,
         locale: resolvedLocale,
         detail: result_detail ?? 'full',

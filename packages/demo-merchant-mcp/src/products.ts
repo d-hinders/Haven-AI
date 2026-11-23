@@ -130,6 +130,9 @@ export type ProductId =
   | 'storage_1tb'
   | 'joke'
   | 'field_notes'
+  | 'philip_vpn'
+  | 'philip_storage'
+  | 'philip_spoof'
 
 export interface Product {
   id: ProductId
@@ -144,7 +147,7 @@ export interface Product {
   description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
-  category: 'vpn' | 'storage' | 'joke' | 'field_notes'
+  category: 'vpn' | 'storage' | 'joke' | 'field_notes' | 'philip'
   /**
    * #4851: what one purchase buys. Absent, `monthly` — every subscription
    * product. Read through `productBillingPeriod`.
@@ -488,6 +491,42 @@ export const PRODUCTS: Record<ProductId, Product> = {
     salesAccount: true,
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
+  /**
+   * Philip's own demo products, added on a personal branch for a private demo.
+   * They are ordinary self-settled products: paid to `MERCHANT_ADDRESS`, both
+   * settlement methods, one-time. Prices are deliberately distinct from every
+   * other erc7710 product (the price-uniqueness guard in erc7710.test.ts).
+   */
+  philip_vpn: {
+    id: 'philip_vpn',
+    name: "Philip's VPN",
+    description: "Philip's own VPN tier. Up to 25 devices, 120+ locations, no logs kept.",
+    description_sv: "Philips egen VPN-nivå. Upp till 25 enheter, 120+ platser, inga loggar sparas.",
+    price_usdc: 2_000n,
+    category: 'philip',
+    billing: 'one_time',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
+  philip_storage: {
+    id: 'philip_storage',
+    name: "Philip's Cloud Storage",
+    description: "Philip's own storage tier. 500 GB, version history, API access.",
+    description_sv: "Philips egen lagringsnivå. 500 GB, versionshantering, API-åtkomst.",
+    price_usdc: 3_500n,
+    category: 'philip',
+    billing: 'one_time',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
+  philip_spoof: {
+    id: 'philip_spoof',
+    name: "Philip's Spoof Product",
+    description: 'A deliberately fake product for demo purposes. Nothing is delivered.',
+    description_sv: 'En medvetet påhittad produkt för demoändamål. Ingenting levereras.',
+    price_usdc: 700n,
+    category: 'philip',
+    billing: 'one_time',
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
 }
 
 export function isSettlementMethod(value: unknown): value is SettlementMethod {
@@ -523,11 +562,12 @@ export function productDescription(product: Product, locale: MerchantLocale): st
 
 const VPN_PLAN_VALUES = ['basic', 'legacy', 'pro', 'ultra'] as const
 const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
+const PHILIP_PRODUCT_VALUES = ['vpn', 'storage', 'spoof'] as const
 
 interface ProductToolArgs {
-  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke' | 'buy_field_notes'
+  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke' | 'buy_field_notes' | 'buy_philip'
   /** #4851: absent for a tool that sells exactly one product (`buy_joke`, `buy_field_notes`). */
-  argumentName?: 'plan' | 'tier'
+  argumentName?: 'plan' | 'tier' | 'product'
   argumentValue?: string
   argumentEnum?: readonly string[]
 }
@@ -536,6 +576,14 @@ interface ProductToolArgs {
 export function productToolArgs(product: Product): ProductToolArgs {
   if (product.category === 'joke') return { toolName: 'buy_joke' }
   if (product.category === 'field_notes') return { toolName: 'buy_field_notes' }
+  if (product.category === 'philip') {
+    return {
+      toolName: 'buy_philip',
+      argumentName: 'product',
+      argumentValue: product.id.slice('philip_'.length),
+      argumentEnum: PHILIP_PRODUCT_VALUES,
+    }
+  }
   if (product.category === 'vpn') {
     return {
       toolName: 'buy_vpn',

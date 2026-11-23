@@ -256,7 +256,10 @@ describe('the Sales product (#4950)', () => {
     const without = offeredProducts({ cdpConfigured: true }).map((p) => p.id)
     const withSales = offeredProducts({ cdpConfigured: true, salesConfigured: true }).map((p) => p.id)
     expect(without).not.toContain('field_notes')
-    expect(withSales).toEqual([...without, 'field_notes'])
+    // The Sales product is inserted at its catalogue position, so compare the
+    // lists with it removed rather than assuming it is appended last.
+    expect(withSales.filter((id) => id !== 'field_notes')).toEqual(without)
+    expect(withSales).toContain('field_notes')
     expect(isProductOffered(PRODUCTS.field_notes, { cdpConfigured: false, salesConfigured: true })).toBe(true)
   })
 
@@ -373,8 +376,8 @@ describe('one report per sale (#4950)', () => {
     .map((p) => p.id)
     .filter((id) => id !== 'field_notes' && id !== 'joke')
 
-  it('names the seven products that never report', () => {
-    expect(NON_REPORTING).toHaveLength(7)
+  it('names the ten products that never report', () => {
+    expect(NON_REPORTING).toHaveLength(10)
   })
 
   it.each(NON_REPORTING)('sends no report for a sale of %s', async (id) => {

@@ -907,6 +907,12 @@ function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): Payme
   } else if (toolName === 'buy_field_notes') {
     productId = 'field_notes'
     descriptionSuffix = 'one field note'
+  } else if (toolName === 'buy_philip') {
+    const product = args.product as string | undefined
+    if (product === 'vpn' || product === 'storage' || product === 'spoof') {
+      productId = `philip_${product}` as ProductId
+      descriptionSuffix = 'one-time purchase'
+    }
   }
 
   if (!productId) return null

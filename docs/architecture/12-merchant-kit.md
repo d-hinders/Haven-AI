@@ -257,9 +257,12 @@ product is picked by `model`, and before the output-token cap is set on it.
   the upstream then refuses.
 
 The network is one setting of the deployment, not a field per product. The
-proxy reads `NETWORK` as a CAIP-2 identifier (`eip155:84532` for Base Sepolia,
-`eip155:8453` for Base) and derives the USDC address and the EIP-712 domain
-from its chain table. A products file that names a network is refused at
+proxy reads `NETWORK` as a CAIP-2 identifier (`eip155:84532` for Base Sepolia)
+and derives the USDC address and the EIP-712 domain from its chain table.
+`eip155:8453` (Base mainnet) stays in that table — its chain id and USDC
+address are pinned to core's registry — but the kit refuses it at startup until
+the regulatory review in #4888 allows it (#5061); removing it from the refusal
+is the go-live step. A products file that names a network is refused at
 startup, so a product cannot be priced on one chain and settled on another.
 The proxy also refuses to start when `NETWORK`, `PAY_TO` or `OPERATOR_NAME` is
 missing, so a deployment cannot come up without a network, a receiving address
@@ -1675,7 +1678,7 @@ contact.
 
 | Receipt field | Source |
 |---|---|
-| `saljare.name`, `address`, `org_nr`, `moms_nr` | Deployment configuration: `SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_ORG_NR`, `SELLER_VAT_NR`. With a VAT rule configured, name, organisation number and VAT number are required: on Base mainnet the proxy refuses to start without them; on a test network it starts with a warning and sends no receipt. Haven's accounting reads `name`, `org_nr` and `moms_nr` from this block. |
+| `saljare.name`, `address`, `org_nr`, `moms_nr` | Deployment configuration: `SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_ORG_NR`, `SELLER_VAT_NR`. With a VAT rule configured, name, organisation number and VAT number are required: on Base mainnet the proxy refuses to start without them; on a test network it starts with a warning and sends no receipt. Base mainnet itself is refused at startup in this release (#5061), and the rule stays for go-live. Haven's accounting reads `name`, `org_nr` and `moms_nr` from this block. |
 | The support line in the rendered text | Deployment configuration: `SELLER_SUPPORT_CONTACT`, the merchant's own contact, never Haven's. |
 | `saljare.iban`, `bic` | Deployment configuration, optional (`SELLER_IBAN`, `SELLER_BIC`); empty when unset. |
 | `saljare.crypto_address` | Deployment configuration: `PAY_TO`. |
@@ -1755,7 +1758,8 @@ What the merchant runs:
   client), `RPC_URL` (the chain reads that resolve a lost settle answer and a
   used authorization; it defaults to the public `https://sepolia.base.org` on
   Base Sepolia and stays required on Base mainnet, where real money would rest
-  on a rate-limited public node, #5006), `PAYMENTS_DB`, optionally
+  on a rate-limited public node, #5006; Base mainnet is refused at startup in
+  this release, #5061, and the rule stays for go-live), `PAYMENTS_DB`, optionally
   `PUBLIC_BASE_URL` (the public origin the challenge's `resource.url` names; it
   must be `https` in
   production, and without it the proxy derives `http://<Host>`; Haven's

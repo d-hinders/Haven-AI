@@ -3,6 +3,11 @@
  * (docs/architecture/12-merchant-kit.md §3, §2): the CAIP-2 id, the USDC
  * contract and its EIP-712 signing domain. There is no default network.
  *
+ * Base mainnet stays in this table even though the kit refuses it at startup
+ * (#5061): `chains.test.ts` pins its chain id and USDC address to core's
+ * registry, and the entry is what go-live turns back on. The refusal lives in
+ * `config.ts`'s open-networks gate, not here.
+ *
  * Not imported from `@haven_ai/core`: core carries the token address but not
  * the USDC signing-domain name and version. `chains.test.ts` pins the chain id
  * and USDC address here to core's registry, so a drift is a red test.

@@ -1,10 +1,10 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { loadConfig } from './config.js'
 import { loadProductsFile } from './products.js'
-import { parseReportSaleArgs, reportSaleAgain, ReportSaleError } from './report-sale.js'
+import { parseReportSaleArgs, reportSaleAgain, ReportSaleError, runReportSaleCommand } from './report-sale.js'
 import { openSqliteConsumedPaymentStore } from './sqlite-store.js'
 import { PAY_TO, SALES_KEY, UPSTREAM_KEY, CDP_SECRET } from './test-harness.js'
 
@@ -108,5 +108,30 @@ describe('the re-report command (#4898)', () => {
     const config = loadConfig(env)
     const products = loadProductsFile(config.productsFile)
     await expect(reportSaleAgain(config, products, { txHash: TX_HASH })).rejects.toThrow(/HAVEN_MERCHANT_KEY is not set/)
+  })
+
+  it('refuses Base mainnet before it reads the store, with the #5061 refusal inside the ConfigError message', async () => {
+    const { env } = workspace()
+    env.NETWORK = 'eip155:8453'
+    const errors: string[] = []
+    const spy = vi.spyOn(console, 'error').mockImplementation((line: unknown) => {
+      errors.push(String(line))
+    })
+    let code: number
+    try {
+      code = await runReportSaleCommand([TX_HASH], env)
+    } finally {
+      spy.mockRestore()
+    }
+
+    expect(code).toBe(1)
+    // The store is opened lazily and `DatabaseSync` creates the file on open,
+    // so its absence proves the refusal came before any store read.
+    expect(existsSync(env.PAYMENTS_DB!)).toBe(false)
+    const text = errors.join('\n')
+    expect(text).toContain('The proxy cannot start:')
+    expect(text).toContain(
+      'NETWORK eip155:8453 (Base mainnet) is not open: the merchant kit runs on Base Sepolia only until the regulatory review in #4888 allows mainnet',
+    )
   })
 })

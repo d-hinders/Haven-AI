@@ -58,7 +58,9 @@ and a server of your own sends the same shape:
 
 - `scheme: "exact"` is the EIP-3009 exact-amount scheme.
 - `network` is CAIP-2. Base Sepolia is `eip155:84532`; Base mainnet is
-  `eip155:8453`.
+  `eip155:8453`. The merchant kit refuses Base mainnet at startup in this
+  release (#5061), so a started proxy's challenge names Base Sepolia only; the
+  mainnet facts below stay for go-live.
 - `asset` is USDC on that network. On Base Sepolia it is
   `0x036CbD53842c5426634e7929541eC2318f3dCF7e`; on Base mainnet,
   `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913`

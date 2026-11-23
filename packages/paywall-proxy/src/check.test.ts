@@ -227,6 +227,22 @@ describe('the pre-flight check (#5008)', () => {
     expect(exitCode).toBe(1)
   })
 
+  it('Base mainnet fails the settings line with the #5061 refusal and skips checks 3-6', async () => {
+    const { env } = workspace({ NETWORK: 'eip155:8453' })
+    const { lines, exitCode } = await run(env)
+
+    const settings = line(lines, 'settings')
+    expect(settings.status).toBe('fail')
+    expect(settings.details).toEqual([
+      'NETWORK eip155:8453 (Base mainnet) is not open: the merchant kit runs on Base Sepolia only until the regulatory review in #4888 allows mainnet',
+    ])
+    expect(line(lines, 'products').status).toBe('ok')
+    for (const name of ['rpc', 'coinbase key', 'sales key', 'store', 'outbox']) {
+      expect(line(lines, name), name).toMatchObject({ status: 'skipped', reason: 'settings invalid' })
+    }
+    expect(exitCode).toBe(1)
+  })
+
   it('a malformed products file fails its own line and the other checks still run', async () => {
     const { dir, env } = workspace()
     writeFileSync(join(dir, 'products.json'), '{ not json')

@@ -19,6 +19,7 @@ import {
   CHAIN_ID,
   DEFAULT_MERCHANT_LOCALE,
   DEFAULT_SETTLEMENT_METHOD,
+  FREE_TOOL_NAMES,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
   SKIP_SETTLE_QA_FIXTURE,
@@ -30,12 +31,15 @@ import {
   isProductOffered,
   merchantEnvironmentForChain,
   offeredProducts,
+  paidToolNames,
+  productForToolCall,
   productReceivingAddress,
   productSettlementKind,
   productToolArgs,
   requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
   type MerchantLocale,
+  type Product,
   type ProductId,
   type ProductOfferOptions,
   type SettlementMethod,
@@ -428,6 +432,18 @@ async function handle(
       jsonrpc: '2.0' as const,
       error: { code: -32001, message: SESSION_NOT_FOUND_MESSAGE, data: SESSION_NOT_FOUND_RECOVERY },
       id: null,
+    })
+    return
+  }
+
+  const ungated = ungatedToolCall(body)
+  if (ungated !== null) {
+    // #5069: fail closed. -32602 with the SDK's own "Tool <name> not found"
+    // shape, so a client reads it exactly as it reads an unknown tool today.
+    writeJson(res, 404, {
+      jsonrpc: '2.0' as const,
+      error: { code: -32602, message: `Tool ${ungated} not found` },
+      id: (body as { id?: unknown }).id ?? null,
     })
     return
   }
@@ -872,6 +888,31 @@ function buildDiscovery(
   }
 }
 
+/** #1550: the 402 description's suffix per product category (English). */
+const DESCRIPTION_SUFFIX: Record<Product['category'], string> = {
+  vpn: '1 month subscription',
+  storage: '1 month of storage',
+  joke: 'one joke',
+  field_notes: 'one field note',
+}
+
+/**
+ * #5069: the name of a `tools/call` the payment gate does not know — neither a
+ * free tool nor a buy tool of the product registry. The gate refuses it before
+ * the MCP server sees it, so a paid tool registered without a product (or a
+ * renamed one) fails closed instead of reaching its handler unpaid. `null` for
+ * every other request.
+ */
+function ungatedToolCall(body: unknown): string | null {
+  if (!body || typeof body !== 'object') return null
+  const rpc = body as Record<string, unknown>
+  if (rpc.method !== 'tools/call') return null
+  const params = rpc.params as Record<string, unknown> | undefined
+  if (!params || typeof params.name !== 'string') return null
+  if (FREE_TOOL_NAMES.has(params.name) || paidToolNames().has(params.name)) return null
+  return params.name
+}
+
 function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
@@ -884,33 +925,15 @@ function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): Payme
   const args = (params.arguments as Record<string, unknown> | undefined) ?? {}
   const settlementMethod = isSettlementMethod(args.settlement_method) ? args.settlement_method : undefined
 
-  let productId: ProductId | null = null
+  // #5069: the product comes from the registry (`productForToolCall`), not a
+  // second hand-kept switch over tool names — a buy tool whose product the
+  // registry does not know is refused by `ungatedToolCall` before this runs.
+  const product = productForToolCall(toolName, args)
+  if (!product) return null
+  const productId = product.id
   // #1550: the 402 challenge's description is merchant metadata shown in Haven
   // quotes — English default, matching the MCP tool surface.
-  let descriptionSuffix = '1 month subscription'
-
-  if (toolName === 'buy_vpn') {
-    const plan = args.plan as string | undefined
-    // `legacy` is the EIP-3009-only plan (#1441) — see PRODUCTS.vpn_legacy.
-    if (plan === 'basic' || plan === 'pro' || plan === 'ultra' || plan === 'legacy') {
-      productId = `vpn_${plan}` as ProductId
-    }
-  } else if (toolName === 'buy_cloud_storage') {
-    const tier = args.tier as string | undefined
-    if (tier === '50gb' || tier === '200gb' || tier === '1tb') {
-      productId = `storage_${tier}` as ProductId
-      descriptionSuffix = '1 month of storage'
-    }
-  } else if (toolName === 'buy_joke') {
-    productId = 'joke'
-    descriptionSuffix = 'one joke'
-  } else if (toolName === 'buy_field_notes') {
-    productId = 'field_notes'
-    descriptionSuffix = 'one field note'
-  }
-
-  if (!productId) return null
-  const product = PRODUCTS[productId]
+  const descriptionSuffix = DESCRIPTION_SUFFIX[product.category]
   // #4851: a product this merchant does not offer is not gated here — its
   // tool is not registered either, so the MCP layer answers "unknown tool".
   if (!isProductOffered(product, opts)) return null

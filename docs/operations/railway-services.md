@@ -34,13 +34,13 @@ One Railway project, **Haven AI**, with two environments of the same shape:
 |---|---|---|---|---|
 | `@haven/backend` | `packages/backend/Dockerfile`; watch `/packages/backend/**`, `/packages/sdk/**` | `node packages/backend/dist/index.js` | off / off | none set (probe `GET /health`) |
 | `Haven-AI-Hosted-MCP` | `packages/mcp-server/Dockerfile` | none: the Dockerfile `CMD` | **on** / off | `/healthz` |
-| `Demo-merchant` | builder **Railpack**, root `/`, build `npm ci && npm run build -w packages/demo-merchant-mcp` | `node packages/demo-merchant-mcp/dist/index.js` | **on** / **on** | none set (probe `GET /healthz`) |
+| `Demo-merchant` | builder **Railpack** (reported in #5071; environment not recorded), root `/`, build `npm ci && npm run build -w packages/demo-merchant-mcp` | `node packages/demo-merchant-mcp/dist/index.js` | **on** / **on** | none set (probe `GET /healthz`) |
 | `Postgres` | image `ghcr.io/railwayapp-templates/postgres-ssl:18` | none | off / off | none |
 
 Sleep settings and start commands verified against both environments on
 2026-11-04; builds and healthchecks on 2026-10-06. Demo-merchant's builder
-(Railpack) was recorded on 2026-11-24 from a second demo-merchant service set up
-from these steps (#5071, below).
+(Railpack) is as reported in #5071 (2026-11-24), which did not say which
+environment it read; it has not been read from Railway for this page.
 
 ### Start commands run `node`, never `npm run start`
 
@@ -75,7 +75,11 @@ service to Railpack (in the service's build settings, or with the
 `serviceInstanceUpdate` mutation and `builder: "RAILPACK"`) and redeploy. The
 same commit (`b9657c08`) with the same build command failed on Nixpacks and
 built green on Railpack, and the service then served `/healthz` (#5071). The
-existing `Demo-merchant` service already uses Railpack.
+existing `Demo-merchant` service uses Railpack, as #5071 reports.
+
+The [paywall-proxy demo](#paywall-proxy-the-4892-demo) is not deployed yet but
+uses the same pattern (root `/`, `npm ci && npm run build -w …`), so set its
+builder to Railpack too when it is created.
 
 ### Demo-merchant builds the SDK first (#4723)
 

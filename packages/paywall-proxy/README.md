@@ -101,6 +101,8 @@ Then:
      ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
    ```
 
+   On an Apple Silicon Mac, add `--platform linux/amd64` here too.
+
    Then give it a public `https` address. Pick the one that fits:
 
    - **A first test call: a quick tunnel (test only).** Keep the container on
@@ -112,6 +114,7 @@ Then:
      docker network connect haven-kit haven-paywall-proxy
      docker run -d --name haven-kit-tunnel --network haven-kit \
        cloudflare/cloudflared:2025.10.0 tunnel --url http://haven-paywall-proxy:8080
+     sleep 10   # the tunnel takes a few seconds to get its address
      docker logs haven-kit-tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
      ```
 
@@ -286,7 +289,7 @@ CDP_API_KEY_SECRET=…
 ```
 
 The ID is shown either as a UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, what
-the portal issued in Haven's cold run of this README on 2026-11-24) or in the
+the portal issued in Haven's own test on 2026-11-24) or in the
 older `organizations/…/apiKeys/…` form; the kit accepts both.
 
 An ECDSA secret is a PEM block of several lines, and `--env-file` cannot carry
@@ -423,7 +426,7 @@ can reach from where it runs:
   container name, for example `http://my-api:9000`.
 - **On Railway,** a second service in the same project is reached over Railway's
   private network, at `http://<service-name>.railway.internal:<port>`. Your API
-  must listen on all addresses, `::` rather than `0.0.0.0`. Haven's cold run had
+  must listen on IPv6 as well (`::`), not only IPv4 (`0.0.0.0`). Haven's own test had
   to make that change. Railway's private networking documentation has the
   details.
 
@@ -436,16 +439,17 @@ in the same output, and are not JSON:
 - **The payment library's own line.** On a paid call, `@x402/core` prints
   `[x402] extension responses: {…}` on stdout.
 - **The payment core's warnings.** When verify, settle or a chain read fails,
-  lines starting `[x402] CDP …` or `[x402] consumed-payment store: …` go to
-  stderr, followed by an object that can span several lines. The same failures
-  are also logged as JSON events (`settle_error`, `payment_refused`), so you do
-  not need to parse these lines.
+  lines starting `[x402] CDP …` go to stderr, followed by an object that can
+  span several lines. The same outcomes are also logged as JSON events
+  (`settle_error`, `payment_refused`, `settlement_unknown`), so you do not need
+  to parse these lines.
 - **A refused start.** A missing or invalid setting prints its problems as plain
   text on stderr and exits non-zero.
 
-A JSON log pipeline should skip the lines that do not start with `{`. Every
-line, JSON or not, passes through the same redaction: a configured secret is
-never printed.
+A JSON log pipeline should skip the lines that do not start with `{`. Once the
+proxy is running, every line, JSON or not, passes through the same redaction,
+so a configured secret is never printed. A refused start happens before that,
+and its messages name variables, never their values.
 
 ## Check the deployment before real traffic
 
@@ -480,7 +484,7 @@ What each line means:
 | `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
 | `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
 | `coinbase key` | A local signing dry run with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (no network call), then one authenticated `GET …/supported`, and that the facilitator lists `exact` on your network. A secret that cannot sign prints `CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)`; a key the facilitator refuses prints `refused the key (401)`; a facilitator that cannot be reached prints `did not answer`. `not verified` means the client could not exercise the key, and says why. |
-| `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` prints `the key is missing, wrong or revoked, or its account is no longer a merchant account`; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key; a `400` without it prints `HAVEN_SALES_URL is not Haven's API origin (400 without Haven's error_code)`; a `429` prints `not verified (rate limited)`. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
+| `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` prints `the key is missing, wrong or revoked, or its account is no longer a merchant account`; `403` is Sales off for the account; `400` with Haven's `error_code` `invalid_request` or `invalid_record` is an accepted key; a `400` without one of those prints `HAVEN_SALES_URL is not Haven's API origin (400 without Haven's error_code)`; a `429` prints `not verified (rate limited)`. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
 | `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
 | `outbox` | The same directory check for `SALES_OUTBOX`, and its depth when the file exists. It never replays or changes it. |
 
@@ -539,7 +543,7 @@ done | sort | tail -1
 ```
 
 It prints the build time and the tag, for example
-`2026-11-23 13:03:09 +0000 UTC dev-b9657c0`. When a `pilot-` tag is listed,
+`2026-11-23 13:03:09.085608048 +0000 UTC dev-b9657c0`. When a `pilot-` tag is listed,
 prefer the newest `pilot-` tag over a newer `dev-` one.
 
 **Read the commit inside the image.** Images from `dev-b9657c0` on carry
@@ -579,6 +583,8 @@ The image's entrypoint is the CLI, so the subcommands run through it:
 docker run --rm --env-file .env -v haven-kit-data:/data \
   ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> report-sale 0x<transaction-hash>
 ```
+
+`dev-<short-sha>` is the tag you pin ([Which tag to pin](#which-tag-to-pin)).
 
 ### Running from source
 
@@ -620,7 +626,7 @@ Railway is one worked example, not a requirement: any host that gives the
 container a public `https` origin and a persistent disk works. **It needs a paid
 Railway plan or an active trial.** On an expired trial, creating the project
 fails with "Your trial has expired. Please select a plan to continue using
-Railway." (Haven's cold run, 2026-11-24). For a first test call without a
+Railway." (Haven's own test, 2026-11-24). For a first test call without a
 Railway plan, use the quick tunnel in Quickstart step 7. Haven's own demo
 is configured to run on Railway too, and its settings are in
 [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
@@ -638,9 +644,7 @@ FROM ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
 COPY products.json /config/products.json
 ```
 
-Pin the same tag as the Quickstart: the newest `pilot-<short-sha>` if the
-[package page](https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy)
-lists one, otherwise the newest `dev-<short-sha>`. Railway builds this
+Put the tag you pin in place of `dev-<short-sha>` ([Which tag to pin](#which-tag-to-pin)). Railway builds this
 Dockerfile and deploys it, so the products file stays in version control and a
 change to it is a commit and a redeploy. The base image declares
 `VOLUME ["/data"]`, and Railway accepts a build that inherits it (checked
@@ -708,6 +712,8 @@ docker run --rm --env-file .env \
   -v haven-kit-data:/data \
   ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> check
 ```
+
+Use the same tag as your Dockerfile ([Which tag to pin](#which-tag-to-pin)).
 
 **Redeploys.** Railway does not run two deployments of a service with a volume
 at once: it stops the old container before starting the new one, so the store
@@ -803,7 +809,7 @@ Optional:
 | `UPSTREAM_AUTH_SCHEME` | The scheme before the key. Default `Bearer`; set it empty to send the key bare, for an `x-api-key` style header. |
 | `UPSTREAM_AUTH` | Set to `none` for an upstream that needs no key. Then `UPSTREAM_API_KEY`, `UPSTREAM_AUTH_HEADER` and `UPSTREAM_AUTH_SCHEME` must be unset, and the proxy sends no upstream auth header. Unset: `UPSTREAM_API_KEY` is required. |
 | `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. The discovery document lists each route with it in front. |
-| `PUBLIC_BASE_URL` | The public origin the challenge names. Must be `https` in production. |
+| `PUBLIC_BASE_URL` | The public origin the challenge names. Set it whenever the proxy is reached through an `https` front: without it the challenge names `http://<Host>`, and a Haven agent does not pay a plain `http` origin. |
 | `CLIENT_IP_HEADER` | The header your own front proxy sets to the client's address, for the per-IP limits. |
 | `PORT`, `HOST` | Listen address. Defaults `8080` and `0.0.0.0`. |
 | `UPSTREAM_TIMEOUT_MS` | The whole upstream call's deadline, at most `180000`. |

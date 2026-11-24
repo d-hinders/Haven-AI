@@ -10,20 +10,27 @@ money lands in the merchant's own Sales account.
 
 You need:
 
-1. A Sales account to receive into. Sign in to Haven, turn Sales on
-   (Settings → Business), and use the Sales account's receiving address as
-   `PAY_TO` (step 1). This release runs on Base Sepolia only, so you and the
-   paying agent both use Haven's dev environment: its backend origin is
-   `https://havenbackend-dev-8b95.up.railway.app`, and the rest of its URLs are
-   in [`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md).
-   The production setup on Base comes later.
+1. A Haven account with Sales turned on, to receive into. This release runs on
+   Base Sepolia only, so you and the paying agent both use Haven's dev
+   environment:
+   - Sign up and sign in on the dev dashboard,
+     `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`.
+     Your passkey is bound to that exact domain and does not work on any other.
+   - Do not use `haven-ai-frontend.vercel.app`: that is Haven's production
+     dashboard, on Base mainnet.
+   - Haven's dev API origin is `https://havenbackend-dev-8b95.up.railway.app`
+     (you set it as `HAVEN_SALES_URL` in step 5).
+
+   Step 1 under *Then* turns Sales on and gives you `PAY_TO`. The production
+   setup on Base comes later.
 2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
    created in the Coinbase Developer Platform. Haven does not offer its key.
 3. An upstream HTTP API and its API key.
 4. An RPC URL for Base Sepolia, unless you use the public default
    ([Settings](#settings)).
-5. Docker, and a public host name with HTTPS for the proxy: a Haven agent pays
-   only a public `https` URL, never `localhost` or a private address.
+5. Docker, and a public `https` address for the proxy: a Haven agent pays only
+   a public `https` URL, never `localhost` or a private address. For a first
+   test call, a quick tunnel from your own machine is enough (step 7).
 
 Then:
 
@@ -47,8 +54,9 @@ Then:
    your routes, prices and descriptions ([The products file](#the-products-file)).
    What you should see: the proxy starts, and its `started` log line lists your
    product ids under `products`.
-5. **Write the settings.** Copy [`.env.example`](.env.example) to `.env`. Inside
-   the image, the proxy refuses to start without these:
+5. **Write the settings.** Copy [`.env.example`](.env.example) to `.env`. Docker
+   reads it with `--env-file`. Inside the image, the proxy refuses to start
+   without these:
 
    | Variable | Value |
    |---|---|
@@ -58,12 +66,13 @@ Then:
    | `UPSTREAM_BASE_URL`, `UPSTREAM_API_KEY` | Your upstream API and its key. An upstream that needs no key: set `UPSTREAM_AUTH=none` and leave `UPSTREAM_API_KEY` out. |
    | `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | The keys from step 2. |
 
-   For the pilot, also set:
+   Also set these. The proxy starts without them, but the pilot needs the first
+   two and every Haven buyer needs the third:
 
    | Variable | Value |
    |---|---|
-   | `HAVEN_MERCHANT_KEY`, `HAVEN_SALES_URL` | The Sales key from step 3, and Haven's API origin: `https://havenbackend-dev-8b95.up.railway.app` on Base Sepolia ([`docs/operations/dev-environment.md`](../../docs/operations/dev-environment.md)). The sales reporter is required for the pilot. |
-   | `PUBLIC_BASE_URL` | The public `https` origin the proxy is reached at, so the challenge names it. |
+   | `HAVEN_MERCHANT_KEY`, `HAVEN_SALES_URL` | The Sales key from step 3, and Haven's dev API origin, `https://havenbackend-dev-8b95.up.railway.app`. Sales reporting is required for the pilot; it is optional only for a merchant that just wants to accept payments ([Sales reporting](#sales-reporting)). |
+   | `PUBLIC_BASE_URL` | The public `https` origin the proxy is reached at. Without it the challenge names `http://` and the `Host` header, and a Haven agent will not pay a plain `http` origin. |
 
    Delete the `PRODUCTS_FILE` and `PAYMENTS_DB` lines: the image sets both
    ([Run it as a container](#run-it-as-a-container)). Every other setting has a
@@ -77,6 +86,8 @@ Then:
      ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> check
    ```
 
+   `<short-sha>` is the tag you pin: see [Which tag to pin](#which-tag-to-pin).
+   On an Apple Silicon Mac, add `--platform linux/amd64`.
    What you should see: one line per check, each `ok`, and exit code 0
    ([Check the deployment before real traffic](#check-the-deployment-before-real-traffic)).
 7. **Run the proxy.**
@@ -90,18 +101,57 @@ Then:
      ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
    ```
 
-   Put your HTTPS front (your host's edge, or a reverse proxy) in front of port
-   8080 at `PUBLIC_BASE_URL`. On Railway, do not publish a port: Railway injects
-   `PORT` and routes its `https` domain to it ([Host it on
-   Railway](#host-it-on-railway)).
+   Then give it a public `https` address. Pick the one that fits:
+
+   - **A first test call: a quick tunnel (test only).** Keep the container on
+     your machine and put a Cloudflare quick tunnel in front. It needs no
+     account:
+
+     ```bash
+     docker network create haven-kit
+     docker network connect haven-kit haven-paywall-proxy
+     docker run -d --name haven-kit-tunnel --network haven-kit \
+       cloudflare/cloudflared:2025.10.0 tunnel --url http://haven-paywall-proxy:8080
+     docker logs haven-kit-tunnel 2>&1 | grep -o 'https://[a-z0-9-]*\.trycloudflare\.com'
+     ```
+
+     Set `PUBLIC_BASE_URL` to the `https://….trycloudflare.com` address the
+     last command prints, and `CLIENT_IP_HEADER=CF-Connecting-IP`, then recreate
+     the proxy container (`docker rm -f haven-paywall-proxy`, the `docker run`
+     above, then `docker network connect` again). The address changes every time
+     the tunnel starts, so update `PUBLIC_BASE_URL` and recreate the proxy each
+     time. The tunnel works only while your machine runs: use it to test, never
+     for real traffic.
+   - **Your own host.** Put your HTTPS front (your host's edge, or a reverse
+     proxy) in front of port 8080 at `PUBLIC_BASE_URL`.
+   - **Railway.** Railway runs the image itself, with its own recipe: a
+     two-line Dockerfile, a volume, no published port and three more variables.
+     It needs a paid Railway plan or an active trial. See
+     [Host it on Railway](#host-it-on-railway).
+
    What you should see: `status: ok` on `/healthz`, your products in the
    discovery document, and a 402 whose challenge carries the product's `price`
    as `amount` and your `PAY_TO` as `payTo`. Nothing is forwarded upstream for
-   an unpaid call ([Running from source](#running-from-source) shows the three
-   `curl` checks).
-8. **Pay once with a Haven agent.** Give a Haven agent of another Haven user the
-   URL of one of your product routes and let it pay
-   ([A buyer for the first paid call](#a-buyer-for-the-first-paid-call)).
+   an unpaid call. To check by hand, against your public address and one of
+   your own product routes:
+
+   ```bash
+   curl -s https://<your-public-address>/healthz
+   curl -s https://<your-public-address>/.well-known/x402
+   curl -s -i https://<your-public-address>/<one-of-your-routes>
+   ```
+
+   For a `POST` route, send a body shaped like the product's `input_example`.
+8. **Pay once with a Haven agent.** The buyer must be a different Haven user
+   from you. Before this step you need four things on that second user, set
+   up as [A buyer for the first paid call](#a-buyer-for-the-first-paid-call)
+   describes:
+   - a second Haven account on the same dev dashboard;
+   - an agent connected to it;
+   - a budget with no recipient pin;
+   - Base Sepolia test USDC on that account.
+
+   Then give that agent the URL of one of your product routes and let it pay.
    What you should see:
    - The agent gets the upstream API's answer, with a `PAYMENT-RESPONSE` header
      carrying the settlement transaction hash.
@@ -192,8 +242,10 @@ You monitor:
 
 ## The Sales account and its receiving address
 
-Sign in to Haven and turn Sales on: **Settings → Business → Sales**. Haven
-creates the Sales account the money arrives in.
+Sign in to Haven's dev dashboard (the URL is in the
+[Quickstart](#quickstart-a-first-paid-call-on-base-sepolia)) and turn Sales on:
+**Settings → Business → Sales**. Haven creates the Sales account the money
+arrives in.
 
 Then open **Sales → Setup → Receiving address** and choose **Show address**.
 Copy that address. It is `PAY_TO`.
@@ -208,12 +260,12 @@ Open the CDP portal's API keys page,
 <https://portal.cdp.coinbase.com/projects/api-keys> (checked 2026-11-23: an
 unauthenticated visit redirects to the portal's sign-in with that path), and
 create a **Secret API key** — the server-side key type, not a Client API key.
-Set it up the way Haven's own key was created in #4852:
+Set it up like this. These are the settings Haven used for a key that settled on Base Sepolia:
 
 | Setting | Value | Why |
 |---|---|---|
 | Signature algorithm | **Ed25519**, the portal's default | The client accepts either an Ed25519 key or an ECDSA PEM, and an Ed25519 secret is one base64 line, which fits a Docker `--env-file`. |
-| Mode | **Live** | A Live key settled on Base Sepolia in #4852's dev run; a Sandbox key has not been tried. |
+| Mode | **Live** | A Live key settled on Base Sepolia in Haven's own test; a Sandbox key has not been tried. |
 | IP allowlist | **Allow requests from any IP address** | A Railway service has no fixed outbound IP unless you enable static outbound IPs. |
 | Permissions | Leave **Trade**, **Transfer**, **Receive**, **Export** and **Manage** unticked | A leaked key with them could move the Coinbase account's funds, or export or re-permission its CDP wallets. *View* is ticked by default; if verify or settle is refused without it, tick it. |
 
@@ -229,9 +281,13 @@ the portal does not download a key file by default.
 secret must be one line. An Ed25519 secret is one base64 line and fits:
 
 ```
-CDP_API_KEY_ID=organizations/…/apiKeys/…
+CDP_API_KEY_ID=…
 CDP_API_KEY_SECRET=…
 ```
+
+The ID is shown either as a UUID (`xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`, what
+the portal issued in Haven's cold run of this README on 2026-11-24) or in the
+older `organizations/…/apiKeys/…` form; the kit accepts both.
 
 An ECDSA secret is a PEM block of several lines, and `--env-file` cannot carry
 it: use an Ed25519 key for the container path.
@@ -259,7 +315,7 @@ product and the field.
 | `version` | Yes | The products-file schema version. `1` is the only version. |
 | `products[].id` | Yes | Stable, unique, lower-case identifier. It is the key the discovery document lists. |
 | `products[].name` | No | Human name. When absent the document omits it; the receipt line and the sale record use the `id`. |
-| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after `BASE_PATH`. The discovery document lists it with `BASE_PATH` in front, so the listed route is how a buyer calls the product (#5034). |
+| `products[].route` | Yes | `METHOD /path`, matched exactly against the request's method and path after `BASE_PATH`. The discovery document lists it with `BASE_PATH` in front, so the listed route is how a buyer calls the product. |
 | `products[].model` | No | When present, the request body's `model` must equal it, or the request is refused before settlement. |
 | `products[].price` | Yes | The price in whole atomic USDC units, as a decimal string. USDC has 6 decimals, so `"10000"` is $0.01. A JSON number is refused. |
 | `products[].output_token_cap` | No | The maximum output tokens one purchase buys. Required for an inference product. |
@@ -298,19 +354,20 @@ Remove them.
 ## Settings
 
 Copy [`.env.example`](.env.example) and fill it in. The proxy reads the process
-environment; it does not load a `.env` file itself, so export the variables or
-let your process manager do it.
+environment; it does not load a `.env` file itself. In the container, Docker's
+`--env-file .env` loads it; running from source, export the variables or let
+your process manager do it.
 
 Required:
 
 | Variable | Meaning |
 |---|---|
-| `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. `eip155:8453` (Base mainnet) is refused at startup in this release (#5061). |
+| `NETWORK` | The one network this deployment settles on, as a CAIP-2 id. `eip155:84532` is Base Sepolia. There is no default. `eip155:8453` (Base mainnet) is refused at startup in this release. |
 | `PAY_TO` | The address that receives every payment: your Sales account's receiving address ([The Sales account and its receiving address](#the-sales-account-and-its-receiving-address)). |
 | `OPERATOR_NAME` | Who operates the endpoint. The discovery document shows it. |
 | `PRODUCTS_FILE` | The products file ([The products file](#the-products-file)). The container image sets it. |
 | `PAYMENTS_DB` | The consumed-payment store. One proxy process per file. The container image sets it. |
-| `UPSTREAM_BASE_URL` | Where paid calls are forwarded. |
+| `UPSTREAM_BASE_URL` | Where paid calls are forwarded ([How a paid call reaches your API](#how-a-paid-call-reaches-your-api)). |
 | `UPSTREAM_API_KEY` | The key paid calls are forwarded with. |
 | `CDP_API_KEY_ID` | Your Coinbase developer key id ([Coinbase developer keys](#coinbase-developer-keys)). |
 | `CDP_API_KEY_SECRET` | Your Coinbase developer key secret ([Coinbase developer keys](#coinbase-developer-keys)). |
@@ -318,7 +375,8 @@ Required:
 The optional, receipt and sales-reporting settings are in
 [All settings](#all-settings), under *Reference*.
 
-What you should see: the proxy starts and logs one JSON line per event. The
+What you should see: the proxy starts and logs its events as JSON lines on
+stdout ([Log output](#log-output) says which other lines can appear). The
 first is `started`, with `port`, `network`, `network_label`, `pay_to`,
 `operator`, `products`, `base_path`, `rpc` (`"default (public Base Sepolia)"`
 when `RPC_URL` is unset on Base Sepolia, otherwise `"configured"` — the line
@@ -329,6 +387,65 @@ records waiting for a replay), and
 `receipt` (`"on"`, `"off (no VAT_RULE)"` or `"off (seller details missing)"`). A
 missing or invalid setting refuses startup and names every problem at once,
 never a secret's value.
+
+## How a paid call reaches your API
+
+Once a call is paid, the proxy sends it to `UPSTREAM_BASE_URL` like this:
+
+- **Path.** The proxy removes `BASE_PATH` from the request path, then appends
+  what is left to the path of `UPSTREAM_BASE_URL`, without its trailing slash. A
+  path in `UPSTREAM_BASE_URL` is kept. With `UPSTREAM_BASE_URL=https://api.example.com/v2`
+  and `BASE_PATH=/api`, a call to `/api/v1/fortune` reaches
+  `https://api.example.com/v2/v1/fortune`. A request outside `BASE_PATH` is
+  answered `unknown_route` and goes nowhere.
+- **Query string.** The buyer's query string is forwarded as it was sent. It
+  replaces any query string you write into `UPSTREAM_BASE_URL`, even when the
+  buyer sent none, so do not put one there.
+- **Method and body.** The method is unchanged. A `GET` or `HEAD` is sent with no
+  body. A product with `output_token_cap` has its body's output limit set to the
+  cap ([The products file](#the-products-file)). A redirect from your API is not
+  followed.
+- **Headers.** The buyer's headers are forwarded, except the payment headers,
+  `Authorization`, `Cookie`, the hop-by-hop and forwarding headers, `Expect`,
+  and any header the buyer names in `Connection`. The full list is in the
+  design, [§ 7](../../docs/architecture/12-merchant-kit.md#7-the-proxys-request-handling).
+  The proxy then sends your key as `Authorization: Bearer <UPSTREAM_API_KEY>`
+  (the header and scheme are settings, see [All settings](#all-settings)), or no
+  key with `UPSTREAM_AUTH=none`. Your API sees the proxy's address, not the
+  buyer's.
+
+**An API next to the proxy.** `UPSTREAM_BASE_URL` must be an address the proxy
+can reach from where it runs:
+
+- **In a container on your machine,** `localhost` is the container itself, not
+  your machine. Run your API in a container on the same Docker network as the
+  proxy (`docker network create`, then `--network` on both) and use its
+  container name, for example `http://my-api:9000`.
+- **On Railway,** a second service in the same project is reached over Railway's
+  private network, at `http://<service-name>.railway.internal:<port>`. Your API
+  must listen on all addresses, `::` rather than `0.0.0.0`. Haven's cold run had
+  to make that change. Railway's private networking documentation has the
+  details.
+
+## Log output
+
+The proxy writes its events as JSON lines on stdout: one line per event, with
+`time` and `event`. These are the lines to build alerts on. Other lines appear
+in the same output, and are not JSON:
+
+- **The payment library's own line.** On a paid call, `@x402/core` prints
+  `[x402] extension responses: {…}` on stdout.
+- **The payment core's warnings.** When verify, settle or a chain read fails,
+  lines starting `[x402] CDP …` or `[x402] consumed-payment store: …` go to
+  stderr, followed by an object that can span several lines. The same failures
+  are also logged as JSON events (`settle_error`, `payment_refused`), so you do
+  not need to parse these lines.
+- **A refused start.** A missing or invalid setting prints its problems as plain
+  text on stderr and exits non-zero.
+
+A JSON log pipeline should skip the lines that do not start with `{`. Every
+line, JSON or not, passes through the same redaction: a configured secret is
+never printed.
 
 ## Check the deployment before real traffic
 
@@ -363,7 +480,7 @@ What each line means:
 | `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
 | `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
 | `coinbase key` | A local signing dry run with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (no network call), then one authenticated `GET …/supported`, and that the facilitator lists `exact` on your network. A secret that cannot sign prints `CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)`; a key the facilitator refuses prints `refused the key (401)`; a facilitator that cannot be reached prints `did not answer`. `not verified` means the client could not exercise the key, and says why. |
-| `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` is a key that is missing, wrong or revoked; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
+| `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` prints `the key is missing, wrong or revoked, or its account is no longer a merchant account`; `403` is Sales off for the account; `400` with Haven's `error_code` is an accepted key; a `400` without it prints `HAVEN_SALES_URL is not Haven's API origin (400 without Haven's error_code)`; a `429` prints `not verified (rate limited)`. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
 | `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
 | `outbox` | The same directory check for `SALES_OUTBOX`, and its depth when the file exists. It never replays or changes it. |
 
@@ -394,19 +511,40 @@ The image sets two paths for you, and you do not put them in the env file:
 The `docker run` command is step 7 of the
 [Quickstart](#quickstart-a-first-paid-call-on-base-sepolia).
 
-**Pin a `dev-<short-sha>` tag, not `dev`.** A moving tag pulls config-breaking
-changes into your container on restart. The tags are listed on the
-[package page](https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy),
-and `<short-sha>` is the short commit hash in the tag's name. Before the kit's
-first production release, the newest `dev-<short-sha>` is the tag to use, against
-Haven's dev environment. `pilot-<short-sha>` arrives with that first release:
-once the package page lists one, pin the newest `pilot-<short-sha>` in place of
-`dev-<short-sha>` in the commands here. `dev` moves on every push to `dev` and is
-not for a deployment.
+### Which tag to pin
 
-**Read the commit inside the image.** Each published image carries
-`org.opencontainers.image.revision`, the commit it was built from, beside the
-Dockerfile's own labels:
+Every command in this README writes the tag as `dev-<short-sha>`. This is the
+one rule for what to put there:
+
+- **Pin a tag, not `dev`.** A moving tag pulls config-breaking changes into your
+  container on restart. `dev` moves on every publish and is not for a
+  deployment.
+- **Before the kit's first production release, pin the newest
+  `dev-<short-sha>`,** against Haven's dev environment. `<short-sha>` is the
+  short commit hash in the tag's name.
+- **Once a `pilot-<short-sha>` tag exists, pin the newest one** in place of
+  `dev-<short-sha>`. It arrives with that first release.
+
+The tags are listed on the
+[package page](https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy),
+but that page does not order them by date. This prints the newest one, using
+the registry's public API and `docker buildx`:
+
+```bash
+IMG=ghcr.io/d-hinders/haven-paywall-proxy
+TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:d-hinders/haven-paywall-proxy:pull" | sed -E 's/.*"token":"([^"]+)".*/\1/')
+for t in $(curl -s -H "Authorization: Bearer $TOKEN" https://ghcr.io/v2/d-hinders/haven-paywall-proxy/tags/list | grep -oE '"(dev|pilot)-[0-9a-f]+"' | tr -d '"'); do
+  printf '%s %s\n' "$(docker buildx imagetools inspect "$IMG:$t" --format '{{ .Image.Created }}')" "$t"
+done | sort | tail -1
+```
+
+It prints the build time and the tag, for example
+`2026-11-23 13:03:09 +0000 UTC dev-b9657c0`. When a `pilot-` tag is listed,
+prefer the newest `pilot-` tag over a newer `dev-` one.
+
+**Read the commit inside the image.** Images from `dev-b9657c0` on carry
+`org.opencontainers.image.revision`, the commit they were built from, beside
+the Dockerfile's own labels; older tags do not:
 
 ```
 docker inspect ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha> \
@@ -459,6 +597,7 @@ Then check it:
 ```bash
 curl -s http://127.0.0.1:8080/healthz
 # {"status":"ok","network":"eip155:84532"}
+# with sales reporting on, it also carries "sales":{"reporting":"on","outbox_depth":0}
 
 curl -s http://127.0.0.1:8080/.well-known/x402
 # the discovery document: your products, prices, network, asset, pay_to, operator
@@ -473,12 +612,16 @@ curl -s -i -X POST http://127.0.0.1:8080/v1/chat/completions \
 #  "extra":{"name":"USDC","version":"2"}}],...}
 ```
 
-The same three checks work against the container, at its published port.
+The same three checks work against the container, at its published port. Use one of your own product routes in place of the chat route, and for a `GET` route leave out `-X POST` and the body.
 
 ## Host it on Railway
 
 Railway is one worked example, not a requirement: any host that gives the
-container a public `https` origin and a persistent disk works. Haven's own demo
+container a public `https` origin and a persistent disk works. **It needs a paid
+Railway plan or an active trial.** On an expired trial, creating the project
+fails with "Your trial has expired. Please select a plan to continue using
+Railway." (Haven's cold run, 2026-11-24). For a first test call without a
+Railway plan, use the quick tunnel in Quickstart step 7. Haven's own demo
 is configured to run on Railway too, and its settings are in
 [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
 § *Paywall-proxy (the #4892 demo)*. That recipe builds from source, because the
@@ -599,8 +742,12 @@ If the upstream call fails after settlement, the buyer gets HTTP 200 with
 payment settled, so the answer stays 2xx. Serving the call again needs a
 `SIGN-IN-WITH-X` proof signed by the payer, and a Haven agent cannot send that
 proof yet: a Haven buyer whose call failed after settlement has paid for
-nothing, and your log is where you see it. This is an open owner question on the
-epic.
+nothing, and your log is where you see it. How a buyer can recover in that case
+is not decided yet.
+
+A Haven buyer whose agent pays through the EIP-3009 bridge makes two transfers
+for one sale: one from its account to the agent's own address, then the payment
+to your `PAY_TO`. Only the second reaches you; the buyer's history shows both.
 
 These are the rules of the sale, and the discovery document states them in its
 `terms` object, so a buyer's agent can read them before it pays. `terms` is the
@@ -612,7 +759,8 @@ the same facts.
 The paying agent must belong to a different Haven user: a payment from your own
 agent or account is a move between your accounts, not a sale
 ([Paying with a Haven agent](#paying-with-a-haven-agent)). So the first paid
-call needs a second Haven user. For the partner run, that is the other partner.
+call needs a second Haven user: a colleague, or a second account of your own on
+another email address.
 
 1. **A second Haven user on the dev frontend.** Sign up on the dev frontend,
    `https://haven-ai-frontend-git-dev-daniels-projects-f3327ba2.vercel.app`
@@ -625,9 +773,9 @@ call needs a second Haven user. For the partner run, that is the other partner.
 3. **Give the agent a budget with no recipient pin.** A budget pinned to one
    recipient cannot pay an arbitrary merchant, because the pin restricts the
    transfer to that recipient. Leave the recipient unpinned.
-4. **Put Base Sepolia USDC on that account.** Open the account's **Add funds**
-   dialog and use **Get test USDC** (Circle's faucet) on a test network
-   ([`docs/product/screen-recipes.md`](../../docs/product/screen-recipes.md)).
+4. **Put Base Sepolia USDC on that account.** On that user's dashboard, open
+   **Add funds**. Under **Get test USDC**, choose **Open Circle's faucet**, pick
+   USDC and Base Sepolia there, and paste the account address the dialog shows.
 5. **Hand the agent the product URL.** Give it the route from your products
    file at your `PUBLIC_BASE_URL`, for example
    `https://your-service.up.railway.app/v1/chat/completions`, and let it pay.
@@ -648,7 +796,7 @@ Optional:
 |---|---|
 | `ENDPOINT_NAME` | The endpoint's human name, shown in the discovery document. Default `OPERATOR_NAME`. |
 | `ENDPOINT_DESCRIPTION` | The endpoint's description, shown in the discovery document. Default: a sentence built from the products file and the network, for example "Pay-per-call API by Acme: 2 products, paid in USDC on Base Sepolia testnet." |
-| `RPC_URL` | An RPC URL for the network. Default on Base Sepolia: the public `https://sepolia.base.org`. Required on Base mainnet, where real money would rest on a rate-limited public node; Base mainnet is refused at startup in this release (#5061), and the rule stays for go-live. |
+| `RPC_URL` | An RPC URL for the network. Default on Base Sepolia: the public `https://sepolia.base.org`. Required on Base mainnet, where real money would rest on a rate-limited public node; Base mainnet is refused at startup in this release, and the rule stays for go-live. |
 | `OPERATOR_CONTACT` | A URL or address a reader can use to reach you. |
 | `ICON_URL` | A public image URL (JPG, PNG, WebP or GIF), for a directory listing. |
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
@@ -678,9 +826,10 @@ seller detail:
 On Base mainnet the proxy refuses to start with `VAT_RULE` set and any of
 `SELLER_NAME`, `SELLER_ORG_NR` or `SELLER_VAT_NR` missing. On a test network it
 starts with a warning and sends no receipt. Base mainnet itself is refused at
-startup in this release (#5061), and the rule stays for go-live.
+startup in this release, and the rule stays for go-live.
 
-Sales reporting (optional). With no `HAVEN_MERCHANT_KEY` the proxy reports
+Sales reporting: required for Haven's pilot; optional for a merchant that only
+wants to accept payments. With no `HAVEN_MERCHANT_KEY` the proxy reports
 nothing and starts exactly as without it. With the key set, reporting is on and
 the key and Haven's origin are required: a key that is not a Sales key, or a
 missing or unusable Haven origin, refuses startup and names the variable.
@@ -699,7 +848,7 @@ which describe what the handler does for every product and are not products-file
 content). Answering it verifies nothing, settles nothing and makes no
 facilitator call. Changing the products file changes the document when the proxy
 restarts. Each product's `route` is the products-file path with `BASE_PATH` in
-front, so it is the path a buyer calls (#5034).
+front, so it is the path a buyer calls.
 
 | Field | Meaning |
 |---|---|
@@ -717,14 +866,14 @@ front, so it is the path a buyer calls (#5034).
 | `settlement` | `{"scheme":"exact","facilitator":"coinbase-cdp","methods":["eip3009"]}`. |
 | `terms` | The rules of the sale, true for every product: `one_payment_one_call`, `replay`, `payment_response`, `upstream_answered`, `on_failure_after_settlement`. Each entry is a code the handler answers with plus one sentence. |
 | `payment` | How to pay: `headers` (`PAYMENT-SIGNATURE`, preferred, and `X-PAYMENT`), `preferred_header`, `x402_version: 2`, and `spec`, the x402 v2 specification. |
-| `products[]` | Every product in the products file, with one change: `route` carries `BASE_PATH` in front of the path, so it is the absolute path a buyer calls (#5034). The other fields are as the file spells them: `id`, `name`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
+| `products[]` | Every product in the products file, with one change: `route` carries `BASE_PATH` in front of the path, so it is the absolute path a buyer calls. The other fields are as the file spells them: `id`, `name`, `model`, `price`, `price_usdc`, `output_token_cap`, `description`, and the optional `input_example`, `input_schema`, `output_example` and `output_schema`. |
 | `products[].price_usdc` | The same price as a decimal USDC string with no trailing zeros: `"0.01"` for `"10000"`, `"0.018"` for `"18000"`, `"0.0001"` for `"100"`. `price` stays the atomic string. |
 | `products[].output_schema` | The shape of the answer, when the products file carries one beside `output_example`. Served only, never enforced. |
 | `updated` | The products file's last change, an RFC 3339 timestamp. |
 | `icon_url` | Your `ICON_URL`, when set. |
 
 `terms` says nothing about retries or the payer-signed `SIGN-IN-WITH-X` proof:
-that recourse policy is an open owner question on the epic. `on_failure_after_settlement`
+that recourse policy is not decided yet. `on_failure_after_settlement`
 names your `OPERATOR_CONTACT` when you set one, and says you published none when
 you did not.
 
@@ -776,7 +925,8 @@ discovery document, so an agent given only your base URL can find the products.
 `OPTIONS` on a sold path answers 204 with the same `Allow` header and makes no
 facilitator call.
 
-The full table, with the buyer's recourse for each, is section 8 of the design.
+The full table, with the buyer's recourse for each, is in the design,
+[§ 8](../../docs/architecture/12-merchant-kit.md#8-refusals-before-settlement-and-every-answer-after-it).
 
 ### The receipt
 
@@ -832,7 +982,8 @@ The shape is the one Haven's accounting reads, documented field by field in
 
 With `HAVEN_MERCHANT_KEY` set, the proxy sends Haven one sale record for each
 settled call, so the sale appears on your Sales account's Sales page. The record
-is the one in section 5 of the design: the settlement's transaction hash, the
+is the one in the design,
+[§ 5](../../docs/architecture/12-merchant-kit.md#5-the-sale-record): the settlement's transaction hash, the
 chain, the product's `id` and name from the products file, the amount, the payer
 address, the `merchantReference` the proxy reserved for the payment, and — when
 the deployment issues a receipt — the receipt number and the VAT treatment the
@@ -908,7 +1059,7 @@ answer logs `sales_outbox_queued` and then, on a later replay,
 `sales_outbox_removed` with the reason. No line, and no response, ever carries
 the key.
 
-## Haven's own demo on Base Sepolia (#4892)
+## Haven's own demo on Base Sepolia
 
 Haven runs one deployment of this proxy itself: an internal technical demo in
 front of Opper's inference API, on Base Sepolia, with test money only. It is not
@@ -954,11 +1105,12 @@ key to other parties before you take a real payment.
 
 ## Not in this release
 
-- Coinbase directory listing (#4887). `DIRECTORY_LISTING=on` is refused at
+- Coinbase directory listing. `DIRECTORY_LISTING=on` is refused at
   startup.
 - Base mainnet. This release runs on Base Sepolia only, and the kit refuses
-  `NETWORK=eip155:8453` at startup (#5061). Removing that refusal is a
-  deliberate go-live step once the review in #4888 allows mainnet.
+  `NETWORK=eip155:8453` at startup. Removing that refusal is a
+  deliberate go-live step once the
+  [regulatory review](https://github.com/d-hinders/Haven-AI/issues/4888) allows mainnet.
 
 ## Where the design lives
 

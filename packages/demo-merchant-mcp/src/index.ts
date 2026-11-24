@@ -1,3 +1,4 @@
+import { resolveMerchantAddress } from './merchant-address.js'
 import { createDemoMerchantServer } from './http.js'
 import { createViemSettlementClient, createX402PaymentProcessor } from './x402.js'
 import type { PassportVerifierConfig } from './x402.js'
@@ -156,14 +157,13 @@ if (REQUESTED_SETTLEMENT_METHODS?.includes('erc7710') && !ERC7710_CONFIG) {
   )
 }
 
-const MERCHANT_ADDRESS = process.env.MERCHANT_ADDRESS as Address | undefined
-if (!MERCHANT_ADDRESS) {
-  console.error(
-    'MERCHANT_ADDRESS env var is required.\n' +
-      'Set it to the Base wallet address that will receive USDC payments.',
-  )
+// #5070: validated, not only present — see resolveMerchantAddress.
+const merchantAddressResult = resolveMerchantAddress(process.env.MERCHANT_ADDRESS)
+if (!merchantAddressResult.ok) {
+  console.error(merchantAddressResult.message)
   process.exit(1)
 }
+const MERCHANT_ADDRESS: Address = merchantAddressResult.address
 
 const BASE_RPC_URL = process.env.BASE_RPC_URL
 if (!BASE_RPC_URL) {

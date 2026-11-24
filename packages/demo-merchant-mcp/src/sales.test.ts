@@ -256,7 +256,11 @@ describe('the Sales product (#4950)', () => {
     const without = offeredProducts({ cdpConfigured: true }).map((p) => p.id)
     const withSales = offeredProducts({ cdpConfigured: true, salesConfigured: true }).map((p) => p.id)
     expect(without).not.toContain('field_notes')
-    expect(withSales).toEqual([...without, 'field_notes'])
+    // #5072: compared without `field_notes`, so a product added after it in
+    // catalogue order does not fail this test for an unrelated reason; and
+    // `field_notes` is asserted present once, so nothing else is added either.
+    expect(withSales.filter((id) => id !== 'field_notes')).toEqual(without)
+    expect(withSales.filter((id) => id === 'field_notes')).toEqual(['field_notes'])
     expect(isProductOffered(PRODUCTS.field_notes, { cdpConfigured: false, salesConfigured: true })).toBe(true)
   })
 

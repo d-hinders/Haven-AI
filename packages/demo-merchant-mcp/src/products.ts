@@ -534,22 +534,62 @@ interface ProductToolArgs {
 
 /** Derives the exact buy-tool call (tool name + fixed argument) for a product. */
 export function productToolArgs(product: Product): ProductToolArgs {
-  if (product.category === 'joke') return { toolName: 'buy_joke' }
-  if (product.category === 'field_notes') return { toolName: 'buy_field_notes' }
-  if (product.category === 'vpn') {
-    return {
-      toolName: 'buy_vpn',
-      argumentName: 'plan',
-      argumentValue: product.id.slice('vpn_'.length),
-      argumentEnum: VPN_PLAN_VALUES,
+  // #5069: exhaustive over the category, so a new category is a compile error
+  // here instead of silently resolving to another product's tool.
+  switch (product.category) {
+    case 'joke':
+      return { toolName: 'buy_joke' }
+    case 'field_notes':
+      return { toolName: 'buy_field_notes' }
+    case 'vpn':
+      return {
+        toolName: 'buy_vpn',
+        argumentName: 'plan',
+        argumentValue: product.id.slice('vpn_'.length),
+        argumentEnum: VPN_PLAN_VALUES,
+      }
+    case 'storage':
+      return {
+        toolName: 'buy_cloud_storage',
+        argumentName: 'tier',
+        argumentValue: product.id.slice('storage_'.length),
+        argumentEnum: STORAGE_TIER_VALUES,
+      }
+    default: {
+      const unknown: never = product.category
+      throw new Error(`productToolArgs: no buy tool for category ${String(unknown)}`)
     }
   }
-  return {
-    toolName: 'buy_cloud_storage',
-    argumentName: 'tier',
-    argumentValue: product.id.slice('storage_'.length),
-    argumentEnum: STORAGE_TIER_VALUES,
-  }
+}
+
+/**
+ * #5069: the MCP tools this merchant serves without payment. Every other tool
+ * the server registers is a buy tool, and the HTTP payment gate resolves it to
+ * a product through `productForToolCall`. A `tools/call` naming a tool in
+ * neither set is refused by the gate before it reaches the MCP server, and a
+ * batched `tools/call` is refused outright, so a buy tool registered without a
+ * product never reaches its handler past the gate. To add a tool, add it here
+ * (free) or give its product a branch in `productToolArgs` (paid).
+ */
+export const FREE_TOOL_NAMES: ReadonlySet<string> = new Set(['list_products'])
+
+/** #5069: every buy tool name the product registry knows, offered or not. */
+export function paidToolNames(): ReadonlySet<string> {
+  return new Set(Object.values(PRODUCTS).map((product) => productToolArgs(product).toolName))
+}
+
+/**
+ * #5069: the product a buy-tool call selects, read from the registry — the
+ * same `productToolArgs` the tool schemas and the test helpers use — instead of
+ * a second hand-kept list. `undefined` when the arguments select no product
+ * (the tool's own schema then refuses them).
+ */
+export function productForToolCall(toolName: string, args: Record<string, unknown>): Product | undefined {
+  return Object.values(PRODUCTS).find((product) => {
+    const call = productToolArgs(product)
+    if (call.toolName !== toolName) return false
+    return call.argumentName === undefined || args[call.argumentName] === call.argumentValue
+  })
 }
 
 /** JSON-schema-ish description of the buy tool's arguments for this exact product

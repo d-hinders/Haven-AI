@@ -40,7 +40,7 @@ export const MERCHANT_KIT_SENTENCE = 'The merchant kit is a small program you ru
  * merchant in Haven's pilot may run and modify the kit to evaluate Haven, must
  * not redistribute it, and gets a licence before general availability; and
  * that this release runs on Base Sepolia only (`packages/paywall-proxy/README.md`
- * § Licence, § Before you start). The permission is the pilot merchant's, with
+ * § Licence, § Quickstart). The permission is the pilot merchant's, with
  * no written step (#5009, owner decision (b) on #5005).
  */
 export const MERCHANT_KIT_PILOT_LINE =
@@ -95,7 +95,7 @@ export function merchantKitSetupPrompt(params: { accountAddress: string; salesUr
   return [
     'Set up Haven’s merchant kit so my Sales account can take payments.',
     '',
-    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release; the tags are listed at ${MERCHANT_KIT_TAGS_URL}, and the setup guide’s quickstart shows the run command.`,
+    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release. The tags are listed at ${MERCHANT_KIT_TAGS_URL}, but that page does not order them by date: the setup guide’s “Which tag to pin” section has a command that prints the newest tag, and its quickstart shows the run command.`,
     `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
     `3. ${MERCHANT_KIT_PILOT_LINE}`,
     '4. Ask me where I host the merchant kit. Any host with HTTPS and a persistent disk works; the setup guide has Railway as a worked example.',

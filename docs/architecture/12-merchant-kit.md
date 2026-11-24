@@ -1237,8 +1237,12 @@ The proxy removes these request headers and never forwards them:
 `PAYMENT-SIGNATURE`, `X-PAYMENT`, `X-Tax-Declaration`, `SIGN-IN-WITH-X`,
 `Authorization`, `Cookie`, `Proxy-Authorization`, `Host`, `Content-Length`,
 `Transfer-Encoding`, `Connection`, `Keep-Alive`, `TE`, `Trailer`, `Upgrade`,
-`X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`, `Forwarded`,
-`X-Real-IP`, `x402-wallet`, `mcp-session-id`.
+`Expect`, `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto`,
+`Forwarded`, `X-Real-IP`, `x402-wallet`, `mcp-session-id`, and any header the
+buyer names in `Connection` (`STRIPPED_REQUEST_HEADERS` and `buildUpstreamHeaders` in
+`packages/paywall-proxy/src/forward.ts`). `Expect` is removed because Node's
+`fetch` refuses it, so a buyer's `Expect: 100-continue` would fail the call
+after settlement.
 
 `PAYMENT-SIGNATURE` and `X-PAYMENT` are the buyer's payment; the upstream has no
 use for them and must not see them. `X-Tax-Declaration` and `SIGN-IN-WITH-X` are

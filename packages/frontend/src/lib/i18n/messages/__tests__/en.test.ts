@@ -27,7 +27,7 @@ const PACKAGE_PAGE =
   'https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy'
 
 const STEP_1 =
-  '1. Run the merchant kit from its container image, ghcr.io/d-hinders/haven-paywall-proxy, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release; the tags are listed at https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy, and the setup guide’s quickstart shows the run command.'
+  '1. Run the merchant kit from its container image, ghcr.io/d-hinders/haven-paywall-proxy, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release. The tags are listed at https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy, but that page does not order them by date: the setup guide’s “Which tag to pin” section has a command that prints the newest tag, and its quickstart shows the run command.'
 
 describe('the merchant kit setup prompt (#5058)', () => {
   const prompt = merchantKitSetupPrompt({
@@ -42,6 +42,7 @@ describe('the merchant kit setup prompt (#5058)', () => {
   it('names the same package page as the README, so the two texts cannot drift', () => {
     expect(MERCHANT_KIT_TAGS_URL).toBe(PACKAGE_PAGE)
     expect(readFileSync(README, 'utf8')).toContain(PACKAGE_PAGE)
+    expect(readFileSync(README, 'utf8')).toContain('### Which tag to pin')
   })
 })
 

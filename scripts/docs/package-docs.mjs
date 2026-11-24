@@ -734,7 +734,19 @@ export const GOVERNED_PACKAGE_DOCS = [
     // and the demo table point at them. The Coinbase portal itself was not
     // opened in this pass: the settings are #4852's record, and the section
     // tells the merchant to check each on the page.
-    'last-verified': '2026-11-23',
+    // Re-verified 2026-11-24 (#5073, the cold run of this README): the
+    // Quickstart names the dev dashboard and warns off production, step 7 forks
+    // into a quick tunnel (test only), your own host and Railway, and step 8
+    // lists the buyer's four prerequisites; § "Which tag to pin" is new, and its
+    // newest-tag command was run against the registry on 2026-11-24;
+    // § "How a paid call reaches your API" is read from `forward.ts`
+    // (`upstreamUrl`, `STRIPPED_REQUEST_HEADERS`, `buildUpstreamHeaders`) and
+    // `handler.ts` (`subPath`); § "Log output" from `log.ts`, the core's
+    // `console.error` / `console.warn` calls and `@x402/core` 2.29.0's
+    // `logExtensionResponsesHeader`; the `sales key` row quotes `check.ts`'s
+    // 401, 400 and 429 texts. The Railway trial message and the UUID key id
+    // are the cold run's observations, not re-run here.
+    'last-verified': '2026-11-24',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

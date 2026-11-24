@@ -16,7 +16,7 @@
  *
  * #4851: it runs with a throwaway CDP credential pair and asserts that CDP is
  * reported as configured and that the secret appears in neither the startup
- * output nor `/healthz`.
+ * output nor `/healthz`. Since #5079 it checks the same for the settlement key.
  *
  * #5079: a second, sequential case spawns the same entrypoint with a
  * `MERCHANT_ADDRESS` that is not an address and requires a refusal: a non-zero
@@ -99,12 +99,27 @@ function runCase(env, { onStdout, onExit }) {
     const child = spawn(process.execPath, [ENTRYPOINT], { cwd: PACKAGE_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
     const out = { stdout: '', stderr: '' }
     let settled = false
+    let closed = false
+    let verdict
+    // Resolve only once the child has closed, so the next case never starts
+    // while this one still runs.
+    const finish = () => {
+      if (closed && verdict) resolve({ ...verdict, ...out })
+    }
     const settle = (ok, message) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
+      verdict = { ok, message }
       child.kill('SIGTERM')
-      resolve({ ok, message, ...out })
+      // A child that ignores SIGTERM, or one that never spawned, must not hang
+      // the smoke: give up waiting for `close` after a few seconds.
+      setTimeout(() => {
+        closed = true
+        child.kill('SIGKILL')
+        finish()
+      }, 5_000).unref()
+      finish()
     }
     const timer = setTimeout(() => settle(false, `no answer within ${TIMEOUT_MS} ms`), TIMEOUT_MS)
     child.stdout.on('data', (chunk) => {
@@ -118,6 +133,8 @@ function runCase(env, { onStdout, onExit }) {
     // Wait for the pipes to drain before judging the exit.
     child.on('close', (code, signal) => {
       if (!settled) onExit(out, code, signal, settle)
+      closed = true
+      finish()
     })
   })
 }

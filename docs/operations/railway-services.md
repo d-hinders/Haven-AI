@@ -98,8 +98,9 @@ packages/demo-merchant-mcp` after the build: it spawns the built
 is printed inside `server.listen`'s callback. A green `tsup` alone would not
 prove the emitted entrypoint can resolve its workspace dependency. Since #4851
 the throwaway config includes a fake CDP key pair: the smoke then asks the
-local `/healthz` and fails if CDP is not reported or if the key secret appears
-in the startup output or `/healthz`. Since #5079 a second case, run after the
+local `/healthz` and fails if CDP is not reported or if the key secret (or,
+since #5079, the settlement key) appears in the startup output or `/healthz`.
+Since #5079 a second case, run after the
 first, spawns the same entrypoint with a `MERCHANT_ADDRESS` that is not an
 address and fails unless it refuses startup: a non-zero exit, no banner, stderr
 beginning `MERCHANT_ADDRESS is not a valid EVM address`, and no secret printed.

@@ -20,11 +20,16 @@ describe('#5070: MERCHANT_ADDRESS is validated at startup', () => {
     }
   })
 
-  it('refuses a mixed-case value whose checksum is wrong', () => {
-    const wrongChecksum = CHECKSUMMED.replace('C2d5', 'c2D5')
-    expect(resolveMerchantAddress(wrongChecksum).ok).toBe(false)
-    // All uppercase is not a checksum either: viem's strict check refuses it.
-    expect(resolveMerchantAddress(`0x${CHECKSUMMED.slice(2).toUpperCase()}`).ok).toBe(false)
+  it('refuses a mixed-case value whose checksum is wrong, naming the variable', () => {
+    const result = resolveMerchantAddress(CHECKSUMMED.replace('C2d5', 'c2D5'))
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.message).toMatch(/^MERCHANT_ADDRESS is not a valid EVM address/)
+  })
+
+  it('refuses an all-uppercase value: it is not a checksum either', () => {
+    const result = resolveMerchantAddress(`0x${CHECKSUMMED.slice(2).toUpperCase()}`)
+    expect(result.ok).toBe(false)
+    if (!result.ok) expect(result.message).toMatch(/^MERCHANT_ADDRESS is not a valid EVM address/)
   })
 
   it('accepts a checksummed address unchanged', () => {

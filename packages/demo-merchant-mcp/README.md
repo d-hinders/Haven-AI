@@ -422,8 +422,9 @@ hosted server relays the first 500 characters of this body
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
 Startup refuses a value that is not an address (#5070): it must be `0x` and 40
 hex characters, either all lowercase (normalised to the checksummed form) or
-with a correct EIP-55 checksum. A wrong checksum is refused, because it means a
-mistyped address. It is the default receiving address: a product may name its own
+with a correct EIP-55 checksum. Surrounding whitespace is trimmed, and a
+whitespace-only value counts as missing. A wrong checksum is refused, because
+it means a mistyped address. It is the default receiving address: a product may name its own
 (`receivingAddress` in `src/products.ts`, read through
 `productReceivingAddress`), and the 402's `payTo`, the verification and the
 invoice's recipient address all follow the product being bought. Today no

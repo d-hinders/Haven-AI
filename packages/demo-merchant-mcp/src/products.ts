@@ -565,9 +565,11 @@ export function productToolArgs(product: Product): ProductToolArgs {
 /**
  * #5069: the MCP tools this merchant serves without payment. Every other tool
  * the server registers is a buy tool, and the HTTP payment gate resolves it to
- * a product through `productForToolCall`. A tool in neither set is refused by
- * the gate before it reaches the MCP server, so a buy tool registered without a
- * product can never be called past the 402.
+ * a product through `productForToolCall`. A `tools/call` naming a tool in
+ * neither set is refused by the gate before it reaches the MCP server, and a
+ * batched `tools/call` is refused outright, so a buy tool registered without a
+ * product never reaches its handler past the gate. To add a tool, add it here
+ * (free) or give its product a branch in `productToolArgs` (paid).
  */
 export const FREE_TOOL_NAMES: ReadonlySet<string> = new Set(['list_products'])
 

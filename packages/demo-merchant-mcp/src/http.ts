@@ -436,14 +436,25 @@ async function handle(
     return
   }
 
+  if (isBatchedToolCall(body)) {
+    writeJson(res, 400, {
+      jsonrpc: '2.0' as const,
+      error: { code: -32600, message: 'A tools/call cannot be sent in a batch here: send each tool call as its own request.' },
+      id: null,
+    })
+    return
+  }
+
   const ungated = ungatedToolCall(body)
   if (ungated !== null) {
-    // #5069: fail closed. -32602 with the SDK's own "Tool <name> not found"
-    // shape, so a client reads it exactly as it reads an unknown tool today.
-    writeJson(res, 404, {
+    // #5069: fail closed, in the shape the MCP SDK itself gives an unknown tool:
+    // HTTP 200 with an `isError` tool result carrying "MCP error -32602: Tool
+    // <name> not found". Not a 404, which Streamable HTTP reserves for "session
+    // not found" — a client would drop its session over a mistyped tool name.
+    writeJson(res, 200, {
       jsonrpc: '2.0' as const,
-      error: { code: -32602, message: `Tool ${ungated} not found` },
-      id: (body as { id?: unknown }).id ?? null,
+      id: (body as { id: unknown }).id,
+      result: { content: [{ type: 'text', text: `MCP error -32602: Tool ${ungated} not found` }], isError: true },
     })
     return
   }
@@ -897,20 +908,34 @@ const DESCRIPTION_SUFFIX: Record<Product['category'], string> = {
 }
 
 /**
- * #5069: the name of a `tools/call` the payment gate does not know — neither a
- * free tool nor a buy tool of the product registry. The gate refuses it before
- * the MCP server sees it, so a paid tool registered without a product (or a
- * renamed one) fails closed instead of reaching its handler unpaid. `null` for
- * every other request.
+ * #5069: the name of a `tools/call` request the payment gate does not know —
+ * neither a free tool nor a buy tool of the product registry. The gate refuses
+ * it before the MCP server sees it, so a paid tool registered without a product
+ * (or a renamed one) fails closed instead of reaching its handler unpaid.
+ * `null` for every other request, and for a notification (no `id`): nothing
+ * answers a notification, and the server never runs a tool for one.
  */
 function ungatedToolCall(body: unknown): string | null {
-  if (!body || typeof body !== 'object') return null
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
   const rpc = body as Record<string, unknown>
-  if (rpc.method !== 'tools/call') return null
+  if (rpc.method !== 'tools/call' || rpc.id === undefined) return null
   const params = rpc.params as Record<string, unknown> | undefined
   if (!params || typeof params.name !== 'string') return null
   if (FREE_TOOL_NAMES.has(params.name) || paidToolNames().has(params.name)) return null
   return params.name
+}
+
+/**
+ * #5069 review: a JSON-RPC batch carrying a `tools/call`. The payment gate reads
+ * one request per body, so a buy tool inside a batch would reach its handler
+ * with no HTTP 402. Refused whole; every client sends tool calls one per
+ * request (MCP's Streamable HTTP dropped batching in 2025-06-18).
+ */
+function isBatchedToolCall(body: unknown): boolean {
+  return (
+    Array.isArray(body) &&
+    body.some((item) => Boolean(item) && typeof item === 'object' && (item as Record<string, unknown>).method === 'tools/call')
+  )
 }
 
 function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): PaymentToolInfo | null {

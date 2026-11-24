@@ -332,6 +332,21 @@ and resends the SAME payment header on the new session, which then settles
 exactly once (`src/http-session-restart.test.ts`). `initialize` is exempt from
 the guard even with a stale id attached, so the recovery door is always open.
 
+### Tool calls the payment gate does not know (#5069)
+
+The HTTP payment gate resolves each buy-tool call to its product through the
+product registry (`productToolArgs` in `src/products.ts`), the same derivation
+the tool schemas use. A `tools/call` naming a tool that is neither free
+(`FREE_TOOL_NAMES`, today `list_products`) nor a buy tool the registry knows is
+answered by the gate, before any session or handler runs, in the MCP SDK's own
+unknown-tool shape: HTTP 200 with an `isError` result reading `MCP error
+-32602: Tool <name> not found`. A JSON-RPC batch carrying a `tools/call` is
+refused with HTTP 400 and `-32600`: the gate reads one request per body, so a
+batch could otherwise skip the 402. To add a tool, register it in `server.ts`
+AND add it to `FREE_TOOL_NAMES` (free) or give its product a branch in
+`productToolArgs` (paid); `src/payment-gate-registry.test.ts` fails when a
+registration is in neither.
+
 The session store is memory-only (`Map` in `http.ts`) — deliberately, this is
 a demo merchant with no shared state. Two consequences, both written here
 because they are observable: **a redeploy forgets every session at once**, so

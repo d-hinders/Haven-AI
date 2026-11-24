@@ -91,12 +91,34 @@ describe('#5069: the payment gate fails closed on a tool it does not know', () =
     expect(tools).toContain('buy_unpriced')
 
     const res = await postMcp(url, toolCall('buy_unpriced'))
-    expect(res.status).toBe(404)
+    // The SDK's own unknown-tool shape: 200 with an isError result, never a 404
+    // (Streamable HTTP's "session not found").
+    expect(res.status).toBe(200)
     expect(await res.json()).toEqual({
       jsonrpc: '2.0',
-      error: { code: -32602, message: 'Tool buy_unpriced not found' },
       id: 7,
+      result: { content: [{ type: 'text', text: 'MCP error -32602: Tool buy_unpriced not found' }], isError: true },
     })
+    expect(handlerCalls.count).toBe(0)
+  })
+
+  it('refuses a batch that carries a tools/call, before any handler runs', async () => {
+    const { url } = await startServer()
+    for (const name of ['buy_unpriced', 'buy_vpn']) {
+      const res = await postMcp(url, [toolCall(name, name === 'buy_vpn' ? { plan: 'basic' } : {})])
+      expect(res.status).toBe(400)
+      expect(((await res.json()) as { error: { code: number } }).error.code).toBe(-32600)
+    }
+    expect(handlerCalls.count).toBe(0)
+  })
+
+  it('answers a notification to an unknown tool as before: nothing runs', async () => {
+    const { url } = await startServer()
+    const res = await postMcp(url, { jsonrpc: '2.0', method: 'tools/call', params: { name: 'buy_unpriced', arguments: {} } })
+    // The transport's answer to a notification: 202, no body — not the
+    // gate's isError result, which is only for a request that has an id.
+    expect(res.status).toBe(202)
+    expect(await res.text()).toBe('')
     expect(handlerCalls.count).toBe(0)
   })
 
@@ -136,7 +158,7 @@ describe('#5069: one registry for the gate and the tool surface', () => {
     // Source-level, so a tool registered only under a configuration flag
     // (buy_joke, buy_field_notes) is covered as well as the default set.
     const source = readFileSync(new URL('./server.ts', import.meta.url), 'utf8')
-    const registered = [...source.matchAll(/server\.tool\(\s*'([a-z_]+)'/g)].map((match) => match[1])
+    const registered = [...source.matchAll(/\.(?:tool|registerTool)\(\s*['"`]([^'"`]+)['"`]/g)].map((match) => match[1])
     expect(registered.length).toBeGreaterThanOrEqual(5)
     const known = new Set([...FREE_TOOL_NAMES, ...paidToolNames()])
     expect(registered.filter((name) => !known.has(name))).toEqual([])

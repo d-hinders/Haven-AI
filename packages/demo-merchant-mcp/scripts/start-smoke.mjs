@@ -18,6 +18,13 @@
  * reported as configured and that the secret appears in neither the startup
  * output nor `/healthz`.
  *
+ * #5079: a second, sequential case spawns the same entrypoint with a
+ * `MERCHANT_ADDRESS` that is not an address and requires a refusal: a non-zero
+ * exit (not a signal or this script's timeout), no banner, stderr beginning
+ * with `MERCHANT_ADDRESS is not a valid EVM address`, the bad value not echoed,
+ * and neither the CDP secret nor the settlement key printed. It proves the
+ * startup check in `src/index.ts` is wired, not only `resolveMerchantAddress`.
+ *
  *   npm run smoke:start -w packages/demo-merchant-mcp
  */
 import { spawn } from 'node:child_process'
@@ -35,90 +42,151 @@ const BANNER = 'Haven Demo Merchant MCP server'
 // appear in neither the startup output nor /healthz.
 const CDP_KEY_ID = 'smoke-cdp-key-id'
 const CDP_KEY_SECRET = 'smoke-cdp-secret-must-never-be-printed'
+// Throwaway values: a valid address, a valid 32-byte key. Nothing reaches a chain.
+const MERCHANT_ADDRESS = '0x1111111111111111111111111111111111111111'
+const SETTLEMENT_PRIVATE_KEY = `0x${'11'.repeat(32)}`
+// #5079: a value that is plainly not an address.
+const BAD_MERCHANT_ADDRESS = 'not-an-address'
+const REFUSAL_PREFIX = 'MERCHANT_ADDRESS is not a valid EVM address'
+// #5079: variables that make index.ts warn BEFORE it reads MERCHANT_ADDRESS. The
+// refusal case blanks them so "stderr begins with the refusal" cannot fail on a
+// developer's shell for the wrong reason.
+const EARLY_WARNING_VARIABLES = [
+  'MERCHANT_X402_SETTLEMENT_METHODS',
+  'MERCHANT_ERC7710_DELEGATION_MANAGER',
+  'BASE_URL',
+  'NODE_ENV',
+  'MERCHANT_HAVEN_BASE_URL',
+  'MERCHANT_PASSPORT_ISSUER',
+]
 
 // A free port picked here, so /healthz can be asked after the banner (the
 // banner prints the configured URL, not the bound port).
-const PORT = await new Promise((resolve, reject) => {
-  const probe = createServer()
-  probe.once('error', reject)
-  probe.listen(0, '127.0.0.1', () => {
-    const { port } = probe.address()
-    probe.close(() => resolve(port))
+async function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createServer()
+    probe.once('error', reject)
+    probe.listen(0, '127.0.0.1', () => {
+      const { port } = probe.address()
+      probe.close(() => resolve(port))
+    })
   })
-})
+}
 
-const child = spawn(process.execPath, [ENTRYPOINT], {
-  cwd: PACKAGE_ROOT,
-  env: {
+function baseEnv(port) {
+  return {
     ...process.env,
-    // Throwaway values: a valid address, a valid 32-byte key, and a free port.
-    // Nothing here reaches a chain.
-    MERCHANT_ADDRESS: '0x1111111111111111111111111111111111111111',
-    SETTLEMENT_PRIVATE_KEY: `0x${'11'.repeat(32)}`,
+    MERCHANT_ADDRESS,
+    SETTLEMENT_PRIVATE_KEY,
     BASE_RPC_URL: 'http://127.0.0.1:1',
-    PORT: String(PORT),
+    PORT: String(port),
     // Explicitly unset so the smoke run exercises the no-passport path, which
     // is the default deployment shape.
     MERCHANT_HAVEN_BASE_URL: '',
     MERCHANT_PASSPORT_ISSUER: '',
     CDP_API_KEY_ID: CDP_KEY_ID,
     CDP_API_KEY_SECRET: CDP_KEY_SECRET,
-  },
-  stdio: ['ignore', 'pipe', 'pipe'],
-})
+  }
+}
 
-let stdout = ''
-let stderr = ''
-let settled = false
+/**
+ * Spawns the entrypoint once and resolves `{ ok, message, stdout, stderr }`.
+ * `onStdout` may settle the run early (the happy case); otherwise the run
+ * settles when the child exits or the timeout fires.
+ */
+function runCase(env, { onStdout, onExit }) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, [ENTRYPOINT], { cwd: PACKAGE_ROOT, env, stdio: ['ignore', 'pipe', 'pipe'] })
+    const out = { stdout: '', stderr: '' }
+    let settled = false
+    const settle = (ok, message) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      child.kill('SIGTERM')
+      resolve({ ok, message, ...out })
+    }
+    const timer = setTimeout(() => settle(false, `no answer within ${TIMEOUT_MS} ms`), TIMEOUT_MS)
+    child.stdout.on('data', (chunk) => {
+      out.stdout += chunk.toString()
+      onStdout?.(out, settle)
+    })
+    child.stderr.on('data', (chunk) => {
+      out.stderr += chunk.toString()
+    })
+    child.on('error', (error) => settle(false, `could not spawn ${ENTRYPOINT}: ${error.message}`))
+    // Wait for the pipes to drain before judging the exit.
+    child.on('close', (code, signal) => {
+      if (!settled) onExit(out, code, signal, settle)
+    })
+  })
+}
 
-function finish(code, message) {
-  if (settled) return
-  settled = true
-  clearTimeout(timer)
-  child.kill('SIGTERM')
-  if (code === 0) {
-    console.log(`start smoke: OK — ${message}`)
+async function happyCase() {
+  const port = await freePort()
+  let checking = false
+  return runCase(baseEnv(port), {
+    onStdout(out, settle) {
+      if (checking || !out.stdout.includes(BANNER) || !out.stdout.includes('CDP:')) return
+      checking = true
+      ;(async () => {
+        // The banner and the CDP line are printed together; wait for the CDP line.
+        const healthz = await (await fetch(`http://127.0.0.1:${port}/healthz`)).text()
+        if (!out.stdout.includes('CDP:       configured')) {
+          return settle(false, 'CDP credentials were set but the banner does not say CDP is configured')
+        }
+        if (!/"cdp":\{"configured":true/.test(healthz)) {
+          return settle(false, `/healthz does not report CDP as configured: ${healthz}`)
+        }
+        for (const [where, text] of [['stdout', out.stdout], ['stderr', out.stderr], ['/healthz', healthz]]) {
+          if (text.includes(CDP_KEY_SECRET)) return settle(false, `the CDP key secret appeared in ${where}`)
+          if (text.includes(SETTLEMENT_PRIVATE_KEY)) return settle(false, `the settlement key appeared in ${where}`)
+        }
+        settle(true, 'the built service started, bound its socket, reports CDP, and never printed a secret')
+      })().catch((error) => settle(false, `/healthz check failed: ${error.message}`))
+    },
+    onExit(_out, code, signal, settle) {
+      settle(false, `exited before the startup banner (code ${code}, signal ${signal})`)
+    },
+  })
+}
+
+async function refusalCase() {
+  const env = { ...baseEnv(await freePort()), MERCHANT_ADDRESS: BAD_MERCHANT_ADDRESS }
+  for (const name of EARLY_WARNING_VARIABLES) env[name] = ''
+  for (const name of Object.keys(env)) if (name.startsWith('RAILWAY_')) delete env[name]
+  return runCase(env, {
+    onStdout(out, settle) {
+      if (out.stdout.includes(BANNER)) settle(false, 'a bad MERCHANT_ADDRESS started the service (banner printed)')
+    },
+    onExit(out, code, signal, settle) {
+      if (code === 0 || code === null) {
+        return settle(false, `a bad MERCHANT_ADDRESS did not exit non-zero (code ${code}, signal ${signal})`)
+      }
+      if (out.stdout.includes(BANNER)) return settle(false, 'a bad MERCHANT_ADDRESS printed the banner')
+      if (!out.stderr.startsWith(REFUSAL_PREFIX)) {
+        return settle(false, `stderr does not begin with the refusal "${REFUSAL_PREFIX}"`)
+      }
+      for (const [where, text] of [['stdout', out.stdout], ['stderr', out.stderr]]) {
+        if (text.includes(BAD_MERCHANT_ADDRESS)) return settle(false, `the bad value was echoed in ${where}`)
+        if (text.includes(CDP_KEY_SECRET)) return settle(false, `the CDP key secret appeared in ${where}`)
+        if (text.includes(SETTLEMENT_PRIVATE_KEY)) return settle(false, `the settlement key appeared in ${where}`)
+      }
+      settle(true, `a bad MERCHANT_ADDRESS refused startup (exit ${code}) naming the variable, and printed no secret`)
+    },
+  })
+}
+
+let failed = false
+for (const [name, run] of [['start', happyCase], ['refusal', refusalCase]]) {
+  const result = await run()
+  if (result.ok) {
+    console.log(`start smoke (${name}): OK — ${result.message}`)
   } else {
-    console.error(`start smoke: FAILED — ${message}`)
-    if (stdout) console.error(`--- stdout ---\n${stdout}`)
-    if (stderr) console.error(`--- stderr ---\n${stderr}`)
+    failed = true
+    console.error(`start smoke (${name}): FAILED — ${result.message}`)
+    if (result.stdout) console.error(`--- stdout ---\n${result.stdout}`)
+    if (result.stderr) console.error(`--- stderr ---\n${result.stderr}`)
   }
-  process.exitCode = code
 }
-
-const timer = setTimeout(() => finish(1, `no startup banner within ${TIMEOUT_MS} ms`), TIMEOUT_MS)
-
-let checking = false
-
-async function checkRunningService() {
-  // The banner and the CDP line are printed together; wait for the CDP line.
-  const healthz = await (await fetch(`http://127.0.0.1:${PORT}/healthz`)).text()
-  if (!stdout.includes("CDP:       configured")) {
-    return finish(1, 'CDP credentials were set but the banner does not say CDP is configured')
-  }
-  if (!/"cdp":\{"configured":true/.test(healthz)) {
-    return finish(1, `/healthz does not report CDP as configured: ${healthz}`)
-  }
-  for (const [where, text] of [['stdout', stdout], ['stderr', stderr], ['/healthz', healthz]]) {
-    if (text.includes(CDP_KEY_SECRET)) return finish(1, `the CDP key secret appeared in ${where}`)
-  }
-  finish(0, 'the built service started, bound its socket, reports CDP, and never printed the CDP secret')
-}
-
-child.stdout.on('data', (chunk) => {
-  stdout += chunk.toString()
-  if (!checking && stdout.includes(BANNER) && stdout.includes('CDP:')) {
-    checking = true
-    checkRunningService().catch((error) => finish(1, `/healthz check failed: ${error.message}`))
-  }
-})
-
-child.stderr.on('data', (chunk) => {
-  stderr += chunk.toString()
-})
-
-child.on('error', (error) => finish(1, `could not spawn ${ENTRYPOINT}: ${error.message}`))
-
-child.on('exit', (code, signal) => {
-  if (!settled) finish(1, `exited before the startup banner (code ${code}, signal ${signal})`)
-})
+process.exitCode = failed ? 1 : 0

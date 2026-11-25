@@ -15,6 +15,7 @@
  * the response.
  */
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { HavenApiError } from '@haven_ai/sdk'
 import { createToolHandlers } from '../tools.js'
 import {
   clearCalls,
@@ -156,7 +157,7 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
     })
     const haven = keylessClient()
     vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(
-      new Error('No stored merchant call context for this intent'),
+      new HavenApiError('No stored merchant call context for this intent', 409),
     )
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
@@ -202,7 +203,7 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
       'POST /payments/pay_3768/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
     const haven = keylessClient()
-    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new Error('No stored context'))
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new HavenApiError('No stored context', 409))
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200,
@@ -242,7 +243,7 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
   it('withholds the credentials on the settled erc7710 arm too', async () => {
     stubFetch({})
     const haven = keylessClient()
-    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new Error('No stored context'))
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new HavenApiError('No stored context', 409))
     // No payment_header => erc7710: the signature IS the settlement child.
     vi.spyOn(haven, 'submitX402Erc7710').mockResolvedValue('HEADER_FROM_HAVEN')
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
@@ -279,7 +280,7 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
   it('withholds the credentials on the decomposed haven_complete_mcp_tool arm', async () => {
     stubFetch({})
     const haven = keylessClient()
-    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new Error('No stored context'))
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new HavenApiError('No stored context', 409))
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 200,
@@ -310,7 +311,7 @@ describe('merchant credential redaction over the settled result (#3768)', () => 
       'POST /payments/pay_3768_refused/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
     })
     const haven = keylessClient()
-    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new Error('No stored context'))
+    vi.spyOn(haven, 'getX402MerchantCallContext').mockRejectedValue(new HavenApiError('No stored context', 409))
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
     vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
       status: 402,

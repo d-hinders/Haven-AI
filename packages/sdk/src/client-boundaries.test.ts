@@ -84,7 +84,7 @@ const boundary: ClientBoundary = {
     "async authorizeX402(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Receipt>",
     "async closeSubBudget(id: string): Promise<CloseSubBudgetResult>",
     "async closeTaskBudget(id: string): Promise<CloseTaskBudgetResult>",
-    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; paidRequestHeaders?: Record<string, string>; deliveryReference?: string; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; settlementEvidenceOutcome?: EvidenceReportOutcome; }>",
+    "async completeX402MerchantCall(input: { url: string; init?: RequestInit; paymentId: string; paymentHeader: string; mcpTransport?: X402McpTransport; noFundingLeg?: boolean; paidRequestHeaders?: Record<string, string>; deliveryReference?: string; approvedEndpoint?: string; }): Promise<{ status: number; ok: boolean; body: unknown; settlementTxHash?: string; evidenceOutcome?: EvidenceReportOutcome; settlementEvidenceOutcome?: EvidenceReportOutcome; }>",
     "async createIntent(request: PaymentRequest): Promise<PaymentIntent>",
     "async createX402Intent(paymentRequired: X402PaymentRequired, options: X402AuthorizationOptions = {}): Promise<X402Intent>",
     "async discoverTools(options: { category?: string; search?: string; rail?: 'x402' | 'mpp'; verified?: 'any' | 'verified' | 'operator'; } = {}): Promise<HavenCatalogEntry[]>",

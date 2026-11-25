@@ -1625,7 +1625,10 @@ describe('#3527 — settled EIP-3009 replay', () => {
   // two different facts on this scheme (#3527). Since #5084 a payable EIP-3009
   // purchase has them EQUAL (a mismatch is refused before the intent, because
   // completion would refuse it after funding), so the forwarding test below
-  // pins the source of the value, not a difference between the two.
+  // pins the source of the value, not a difference between the two. #5086
+  // (bind completion to the stored endpoint) accepts differing addresses
+  // again: it must restore a differing-address pin here
+  // (`.not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)`).
   const CATALOG_ENTRY_RESPONSE = {
     id: 'cat_3009',
     name: 'Cat 3009',

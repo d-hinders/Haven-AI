@@ -37,7 +37,7 @@
  * `merchant_url`, still reaches completion's 409 after funding.
  * `docs/architecture/04-x402-payment-sequence.md` states the same.
  */
-import { AgentPaymentNextAction, type HavenClient, type X402PaymentRequired } from '@haven_ai/sdk'
+import { AgentPaymentNextAction, HavenApiError, type HavenClient, type X402PaymentRequired } from '@haven_ai/sdk'
 import { HostedToolError } from './errors.js'
 import { paymentStatusHandoff, refusalNextStep } from './guidance.js'
 
@@ -94,6 +94,28 @@ export async function assertStoredAddressMatchesBeforeSpend(
   try {
     status = await haven.getPaymentStatus(paymentId)
   } catch (err) {
+    // A deterministic answer (an unknown or foreign payment_id, an auth
+    // refusal) is not worth a later status read that answers the same: stop.
+    // Anything else — no answer, a 5xx, a 408/429 — may clear: read again.
+    const code = err instanceof HavenApiError ? err.statusCode : undefined
+    if (code !== undefined && code >= 400 && code < 500 && code !== 408 && code !== 429) {
+      throw new HostedToolError({
+        code: 'PAYMENT_STATE_UNAVAILABLE',
+        message:
+          `Haven refused the read of payment ${paymentId} needed to check its approved resource address ` +
+          `(HTTP ${code}: ${(err as Error).message}). This call sent nothing: no funding was relayed and nothing ` +
+          'was submitted. Check that payment_id belongs to this agent.',
+        statusCode: code,
+        paymentId,
+        rail: 'x402',
+        nextStep: refusalNextStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason:
+            'Haven refused to read this payment (an unknown or foreign payment_id, or an auth refusal), so reading it again answers the same; nothing was funded or submitted — tell the user',
+        }),
+      })
+    }
     throw new HostedToolError({
       code: 'PAYMENT_STATE_UNAVAILABLE',
       message:

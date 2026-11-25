@@ -46,6 +46,32 @@ const erc7710Submits = () => recordedCalls().filter((c) => c.method === 'POST' &
 
 const PAY = { merchant_url: ENDPOINT, tool_name: 'paid_tool', arguments: {}, max_amount: '2000000' }
 
+const DELEGATION_AGENT = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
+/** A challenge that also offers erc7710 (the #1456 fixture's shape), naming `url` as its address. */
+const erc7710Header = (url: string) =>
+  btoa(
+    JSON.stringify({
+      ...PAYMENT_REQUIRED,
+      resource: { url, description: 'paid tool' },
+      accepts: [
+        ...PAYMENT_REQUIRED.accepts,
+        {
+          ...PAYMENT_REQUIRED.accepts[0],
+          extra: { assetTransferMethod: 'erc7710', facilitatorAddresses: ['0x4444444444444444444444444444444444444444'] },
+        },
+      ],
+    }),
+  )
+const CHILD = {
+  payment_id: 'pay_7710',
+  status: 'pending_signature',
+  sign_data: {
+    hash: '0x' + '11'.repeat(32),
+    signature_scheme: 'eip712_delegation',
+    typed_data: { domain: {}, types: {}, primaryType: 'Delegation', message: { caveats: [] } },
+  },
+}
+
 describe('haven_pay_mcp_tool (EIP-3009): the challenge address is compared with the endpoint before any intent', () => {
   it('refuses mcp://tool/x at an https endpoint with a typed error, and makes no /x402 request', async () => {
     stubFetch({
@@ -64,8 +90,8 @@ describe('haven_pay_mcp_tool (EIP-3009): the challenge address is compared with 
     expect(out.next_action).toBe('stop_and_tell_user')
     expect(out.next_tool_omitted_reason).toMatch(/nothing was created/)
     expect(intentRequests()).toHaveLength(0)
-    // No refusal-ledger write: the budget pre-check is the tool's only ledger path.
-    expect(precheckRequests()).toHaveLength(0)
+    // This tool makes no budget pre-check; the catalog test below proves the
+    // ordering against one.
   })
 
   it('a challenge whose address IS the endpoint still creates the intent (control)', async () => {
@@ -90,6 +116,20 @@ describe('haven_pay_mcp_tool (EIP-3009): the challenge address is compared with 
     expect(resourceAddressMismatch(`${ENDPOINT}/`, ENDPOINT)).toBe(true)
     expect(resourceAddressMismatch(ENDPOINT, ENDPOINT)).toBe(false)
     expect(resourceAddressMismatch(null, ENDPOINT)).toBe(false)
+  })
+})
+
+describe('haven_pay_mcp_tool (ERC-7710): exempt, since that scheme stores the endpoint itself', () => {
+  it('an mcp://tool/x challenge address prepares the settlement child, not a refusal', async () => {
+    stubFetch({
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header(MCP_TOOL_ADDRESS) } },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /x402': { status: 201, body: CHILD },
+    })
+    const res = await handlers().haven_pay_mcp_tool(PAY)
+    expect(res.success).toBe(true)
+    expect(intentRequests()).toHaveLength(1)
+    expect(intentRequests()[0].body?.settlementScheme).toBe('erc7710')
   })
 })
 
@@ -119,7 +159,9 @@ describe('haven_prepare_catalog_purchase (EIP-3009): the same check, before the 
         status: 402,
         responseHeaders: { 'PAYMENT-REQUIRED': challengeHeader({ url: MCP_TOOL_ADDRESS, description: 'paid tool' }) },
       },
-      'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
+      // A delegation-rail agent: only that rail reaches the budget pre-check,
+      // so "no pre-check" proves the ORDER (the control below reaches it).
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
       'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
       'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
     })
@@ -130,6 +172,34 @@ describe('haven_prepare_catalog_purchase (EIP-3009): the same check, before the 
     expect(out.message).toContain(MCP_TOOL_ADDRESS)
     expect(precheckRequests()).toHaveLength(0)
     expect(intentRequests()).toHaveLength(0)
+  })
+
+  it('the same delegation-rail purchase with a matching address reaches the pre-check and the intent (control)', async () => {
+    stubFetch({
+      'GET /catalog/cat_mcp': { status: 200, body: ENTRY },
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': challengeHeader({ url: ENDPOINT, description: 'paid tool' }) } },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+      'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
+    })
+    const res = await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_mcp', max_amount_human: '2' })
+    expect(res.success).toBe(true)
+    expect(precheckRequests()).toHaveLength(1)
+    expect(intentRequests()).toHaveLength(1)
+  })
+
+  it('ERC-7710 is exempt: an mcp://tool/x challenge address is prepared, since that scheme stores the endpoint', async () => {
+    stubFetch({
+      'GET /catalog/cat_mcp': { status: 200, body: ENTRY },
+      'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': erc7710Header(MCP_TOOL_ADDRESS) } },
+      'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
+      'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
+      'POST /x402': { status: 201, body: CHILD },
+    })
+    const res = await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_mcp', max_amount_human: '2' })
+    expect(res.success).toBe(true)
+    expect(intentRequests()).toHaveLength(1)
+    expect(intentRequests()[0].body?.settlementScheme).toBe('erc7710')
   })
 })
 
@@ -183,6 +253,20 @@ describe('haven_settle_mcp_tool: an explicit merchant_url is compared with the a
     expect(out.message).toMatch(/This call sent nothing/)
     expect(out.next_tool_name).toBe('haven_get_payment_status')
     expect(out.next_arguments).toEqual({ payment_id: 'pay_x402' })
+    expect(fundingRelays()).toHaveLength(0)
+  })
+
+  it('a deterministic 4xx on that read stops (no status-read loop), still before funding', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': { status: 404, body: { error: 'Payment not found' } },
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const res = await handlers().haven_settle_mcp_tool(settle({ payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(res.success).toBe(false)
+    const out = fail(res)
+    expect(out.code).toBe('PAYMENT_STATE_UNAVAILABLE')
+    expect(out.next_action).toBe('stop_and_tell_user')
+    expect(out.next_tool_name).toBeUndefined()
     expect(fundingRelays()).toHaveLength(0)
   })
 

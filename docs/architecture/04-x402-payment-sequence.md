@@ -858,7 +858,10 @@ address still meets completion's 409 after funding. After the pay-time check, no
 new intent from the two pay tools can hold such an address, so this is reached
 only by an intent created before the check or by `haven_pay_x402_quote` with an
 MCP challenge (it stores no call context, so the endpoint is always explicit);
-the same holds for a rehydrated settle of an intent created before the check.
+the same holds for a rehydrated settle of an intent created before the check,
+and for one whose context a direct SDK caller stored through `createX402Intent`'s
+`mcpCallContext` option with an endpoint that is not its challenge's address
+(no caller in this repository does; `catalog-purchase.ts` is the only one).
 
 **`mcp_transport` is snake_case at this boundary, and the other spelling is
 refused (#2282).** Hosted MCP tool arguments are snake_case

@@ -220,12 +220,16 @@ export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
 export function productReceivingAddress(
   product: Product,
   merchantDefault: Address,
-  opts?: { stripeDepositAddress?: Address; salesAddress?: Address },
+  opts?: { stripeDepositAddress?: Address; salesAddress?: Address; allProductsToSales?: boolean },
 ): Address {
   if (product.stripeRecording && opts?.stripeDepositAddress) return opts.stripeDepositAddress
   // #4950: the Sales product is paid into the Sales account. It is offered only
   // when that address is configured, so the fallback below is never quoted.
   if (product.salesAccount && opts?.salesAddress) return opts.salesAddress
+  // MERCHANT_SALES_ALL_PRODUCTS: every product is paid into the Sales account,
+  // so the whole catalogue lands on one account and one Sales page. The Stripe
+  // deposit address still wins above, because Stripe records that payment.
+  if (opts?.allProductsToSales && opts.salesAddress) return opts.salesAddress
   return product.receivingAddress ?? merchantDefault
 }
 

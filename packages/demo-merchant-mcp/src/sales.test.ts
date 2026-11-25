@@ -380,6 +380,28 @@ describe('one report per sale (#4950)', () => {
     expect(NON_REPORTING).toHaveLength(10)
   })
 
+  it('reports every product when MERCHANT_SALES_ALL_PRODUCTS is on', async () => {
+    const receipt = { fakturanummer: 'FAK-1', momsbehandling: 'SE_25' } as never
+    const haven = mockHaven()
+    const sales = createSalesReporting(CONFIG, {
+      chainId: CHAIN_ID,
+      fetch: haven.fetch,
+      log: () => {},
+      allProducts: true,
+    })
+    const payment = {
+      productId: 'vpn_basic',
+      from: PAYER,
+      txHash: TX_HASH,
+      settlement: 'settled_onchain',
+      merchantReference: 'sale_TEST',
+    } as SettledPayment
+    sales.report(PRODUCTS.vpn_basic, payment, receipt)
+    await sales.idle()
+    expect(haven.posts).toHaveLength(1)
+    expect(haven.posts[0].body.product_id).toBe('vpn_basic')
+  })
+
   it.each(NON_REPORTING)('sends no report for a sale of %s', async (id) => {
     const receipt = { fakturanummer: 'FAK-1', momsbehandling: 'SE_25' } as never
     const haven = mockHaven()

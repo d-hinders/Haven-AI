@@ -257,3 +257,39 @@ describe('checkout details (#4873)', () => {
     )
   })
 })
+
+describe('MERCHANT_SALES_ALL_PRODUCTS', () => {
+  const SALES = '0x3333333333333333333333333333333333333333' as const
+  const DEPOSIT = '0x4444444444444444444444444444444444444444' as const
+
+  it('pays every product into the Sales account when on', () => {
+    for (const product of Object.values(PRODUCTS)) {
+      expect(productReceivingAddress(product, MERCHANT_DEFAULT, { salesAddress: SALES, allProductsToSales: true })).toBe(
+        SALES,
+      )
+    }
+  })
+
+  it('leaves every product on the merchant default when off', () => {
+    expect(productReceivingAddress(PRODUCTS.vpn_basic, MERCHANT_DEFAULT, { salesAddress: SALES })).toBe(MERCHANT_DEFAULT)
+    expect(
+      productReceivingAddress(PRODUCTS.vpn_basic, MERCHANT_DEFAULT, { salesAddress: SALES, allProductsToSales: false }),
+    ).toBe(MERCHANT_DEFAULT)
+  })
+
+  it('still pays a Stripe-recorded product to the deposit address', () => {
+    expect(
+      productReceivingAddress(PRODUCTS.joke, MERCHANT_DEFAULT, {
+        salesAddress: SALES,
+        stripeDepositAddress: DEPOSIT,
+        allProductsToSales: true,
+      }),
+    ).toBe(DEPOSIT)
+  })
+
+  it('does nothing without a Sales address', () => {
+    expect(productReceivingAddress(PRODUCTS.vpn_basic, MERCHANT_DEFAULT, { allProductsToSales: true })).toBe(
+      MERCHANT_DEFAULT,
+    )
+  })
+})

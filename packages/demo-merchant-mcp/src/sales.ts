@@ -188,6 +188,12 @@ export interface SalesReportingDeps {
   sleep?: (ms: number) => Promise<void>
   retryDelaysMs?: readonly number[]
   attemptTimeoutMs?: number
+  /**
+   * MERCHANT_SALES_ALL_PRODUCTS: report every product's settled sale, not only
+   * the Sales product's. The merchant also pays every product into the Sales
+   * account when this is on, so the Sales page shows the whole catalogue.
+   */
+  allProducts?: boolean
   /** Where a log line goes; never handed the key. */
   log?: (line: string) => void
 }
@@ -222,7 +228,7 @@ export function createSalesReporting(config: SalesConfig, deps: SalesReportingDe
       // product (the joke, #4953) exactly when the recorder sends it to
       // Stripe: not `paid_other_address`, not anything but `settled_onchain`.
       const reports =
-        (product.salesAccount === true && config.address !== undefined) ||
+        ((product.salesAccount === true || deps.allProducts === true) && config.address !== undefined) ||
         (product.stripeRecording === true && stripeRecordingDecision(stripe, product, payment) === 'record')
       if (!reports) return
       if (payment.settlement !== 'settled_onchain') return

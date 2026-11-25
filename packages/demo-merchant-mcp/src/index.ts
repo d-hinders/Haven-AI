@@ -245,7 +245,23 @@ const SALES_CONFIG = resolveSalesConfig({
   merchantAddress: MERCHANT_ADDRESS,
   stripeDepositAddresses: [process.env.STRIPE_DEPOSIT_ADDRESS, process.env.STRIPE_PREVIOUS_DEPOSIT_ADDRESS],
 })
-const SALES_REPORTING = SALES_CONFIG ? createSalesReporting(SALES_CONFIG, { chainId: CHAIN_ID }) : undefined
+// MERCHANT_SALES_ALL_PRODUCTS: pay every product into the Sales account and
+// report every settled sale, so the whole catalogue lands on one Sales page.
+// It needs the Sales settings; without them it is ignored with a warning and
+// every product keeps MERCHANT_ADDRESS.
+const SALES_ALL_PRODUCTS_REQUESTED = ['1', 'true', 'yes'].includes(
+  (process.env.MERCHANT_SALES_ALL_PRODUCTS ?? '').trim().toLowerCase(),
+)
+if (SALES_ALL_PRODUCTS_REQUESTED && !SALES_CONFIG) {
+  console.warn(
+    'MERCHANT_SALES_ALL_PRODUCTS is set but the Sales settings are not usable ' +
+      '(MERCHANT_SALES_ADDRESS / MERCHANT_SALES_KEY / MERCHANT_HAVEN_BASE_URL). ' +
+      'Every product keeps MERCHANT_ADDRESS and nothing reports.',
+  )
+}
+const SALES_ALL_PRODUCTS_ON = SALES_ALL_PRODUCTS_REQUESTED && Boolean(SALES_CONFIG)
+
+const SALES_REPORTING = SALES_CONFIG ? createSalesReporting(SALES_CONFIG, { chainId: CHAIN_ID, allProducts: SALES_ALL_PRODUCTS_ON }) : undefined
 
 // #4856: the seller on every receipt. With no MERCHANT_SELLER_* set, the demo
 // seller, so the receipt is unchanged.
@@ -283,6 +299,7 @@ const server = createDemoMerchantServer({
   cdpConfigured: Boolean(CDP_CONFIG),
   stripe: STRIPE_RECORDING,
   sales: SALES_REPORTING,
+  salesAllProducts: SALES_ALL_PRODUCTS_ON,
   receiptSeller: RECEIPT_SELLER,
   sekRate: SEK_RATE_FEED,
 })
@@ -295,7 +312,11 @@ function salesStartupLine(): string {
   const reporting: string[] = []
   if (STRIPE_RECORDING) reporting.push('joke (Stripe-settled)')
   if (SALES_REPORTING.address) {
-    reporting.push(`field_notes $${formatUsdc(PRODUCTS.field_notes.price_usdc)} paid into ${SALES_REPORTING.address}`)
+    reporting.push(
+      SALES_ALL_PRODUCTS_ON
+        ? `every product paid into ${SALES_REPORTING.address}`
+        : `field_notes $${formatUsdc(PRODUCTS.field_notes.price_usdc)} paid into ${SALES_REPORTING.address}`,
+    )
   }
   return (
     `  Sales:     ${reporting.length > 0 ? `reporting ${reporting.join('; ')}` : 'no product reports (Stripe not configured)'} to ${SALES_CONFIG.havenBaseUrl}` +

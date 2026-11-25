@@ -76,6 +76,12 @@ export interface MerchantConfig {
    * address. Absent, the server is exactly what it was before the product.
    */
   salesAddress?: Address
+  /**
+   * MERCHANT_SALES_ALL_PRODUCTS: every product is paid into `salesAddress` and
+   * every settled sale is reported, so the whole catalogue lands on one Sales
+   * page. Absent or false, only the Sales product does.
+   */
+  salesAllProducts?: boolean
   /** #4856: the seller every receipt carries; absent, the demo seller. */
   receiptSeller?: ReceiptSellerDetails
   /**
@@ -683,6 +689,7 @@ async function completePurchase(
   const receivingAddress = productReceivingAddress(product, config.merchantAddress, {
     stripeDepositAddress: config.stripeDepositAddress,
     salesAddress: config.salesAddress,
+    allProductsToSales: config.salesAllProducts,
   })
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()

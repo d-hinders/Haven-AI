@@ -92,6 +92,12 @@ export interface DemoMerchantServerOptions {
    */
   sales?: SalesReporting
   /**
+   * MERCHANT_SALES_ALL_PRODUCTS: every product is paid into `sales.address`
+   * and every settled sale is reported, so the whole catalogue lands on one
+   * Sales page. Absent or false, only the Sales product does.
+   */
+  salesAllProducts?: boolean
+  /**
    * #4856: the seller every receipt carries (`resolveReceiptSeller`).
    * Absent, the demo seller.
    */
@@ -482,6 +488,7 @@ async function handle(
       receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
         stripeDepositAddress: options.stripe?.depositAddress,
         salesAddress: options.sales?.address,
+        allProductsToSales: options.salesAllProducts,
       }),
       taxDeclaration,
       checkoutDetails,
@@ -538,6 +545,7 @@ async function handlePaymentGate(
   const receivingAddress = productReceivingAddress(product, options.merchantAddress, {
     stripeDepositAddress: options.stripe?.depositAddress,
     salesAddress: options.sales?.address,
+    allProductsToSales: options.salesAllProducts,
   })
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —

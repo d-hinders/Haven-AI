@@ -35,7 +35,9 @@ afterEach(async () => {
   servers = []
 })
 
-async function startServer(opts: { sales?: SalesConfig | null; stripe?: boolean; cdpConfigured?: boolean } = {}) {
+async function startServer(
+  opts: { sales?: SalesConfig | null; stripe?: boolean; cdpConfigured?: boolean; salesAllProducts?: boolean } = {},
+) {
   const settlementClient: SettlementClient = { submit: vi.fn(), waitForReceipt: vi.fn() }
   const salesConfig = opts.sales === undefined ? CONFIG : opts.sales
   const server = createDemoMerchantServer({
@@ -47,6 +49,7 @@ async function startServer(opts: { sales?: SalesConfig | null; stripe?: boolean;
     ...(salesConfig ? { sales: createSalesReporting(salesConfig, { chainId: CHAIN_ID, fetch: vi.fn() as never, log: () => {} }) } : {}),
     ...(opts.stripe ? { stripe: STRIPE_ON } : {}),
     ...(opts.cdpConfigured ? { cdpConfigured: true } : {}),
+    ...(opts.salesAllProducts ? { salesAllProducts: true } : {}),
   })
   servers.push(server)
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()))
@@ -92,6 +95,24 @@ describe('the kit discovery document (#4987)', () => {
     const origin = await startServer({ cdpConfigured: true })
     const body = (await (await fetch(`${origin}${KIT_DISCOVERY_PATH}`)).json()) as { products: Array<{ id: string }> }
     expect(body.products.map((p) => p.id)).toEqual(['field_notes'])
+  })
+
+  it('lists the whole catalogue when MERCHANT_SALES_ALL_PRODUCTS is on', async () => {
+    const origin = await startServer({ salesAllProducts: true })
+    const body = (await (await fetch(`${origin}${KIT_DISCOVERY_PATH}`)).json()) as { products: Array<{ id: string }> }
+    expect(body.products.map((p) => p.id)).toEqual([
+      'vpn_basic',
+      'vpn_legacy',
+      'vpn_pro',
+      'vpn_ultra',
+      'storage_50gb',
+      'storage_200gb',
+      'storage_1tb',
+      'field_notes',
+      'philip_vpn',
+      'philip_storage',
+      'philip_spoof',
+    ])
   })
 
   it('leaves the joke out when it is not offered (no CDP), even with Stripe on', async () => {

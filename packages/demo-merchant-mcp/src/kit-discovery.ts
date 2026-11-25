@@ -71,6 +71,13 @@ export interface KitDiscoveryOptions {
   stripeConfigured: boolean
   /** CDP is configured, so the CDP-settled joke is offered at all. */
   cdpConfigured: boolean
+  /**
+   * MERCHANT_SALES_ALL_PRODUCTS: every offered product is paid into the Sales
+   * account and reports, so the document lists the whole catalogue. Absent or
+   * false, only the products that report by default (the Sales product, and
+   * the Stripe-recorded joke when Stripe is on).
+   */
+  allProducts?: boolean
   /** Test seam; defaults to the merchant's chain. */
   chainId?: number
   /** Test seam; defaults to the merchant's chain's USDC. */
@@ -79,6 +86,7 @@ export interface KitDiscoveryOptions {
 
 /** Whether `product` reports its sales to Haven, by `createSalesReporting`'s terms. */
 function reportsSales(product: Product, opts: KitDiscoveryOptions): boolean {
+  if (opts.allProducts === true) return true
   return product.salesAccount === true || (product.stripeRecording === true && opts.stripeConfigured)
 }
 

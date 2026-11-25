@@ -386,6 +386,7 @@ async function handle(
       salesAddress: options.sales?.address,
       stripeConfigured: Boolean(options.stripe),
       cdpConfigured: Boolean(options.cdpConfigured),
+      allProducts: options.salesAllProducts,
     })
     if (document) {
       writeJson(res, 200, document)

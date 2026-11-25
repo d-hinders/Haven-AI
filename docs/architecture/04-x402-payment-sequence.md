@@ -68,7 +68,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-18"
+last-verified: "2026-11-25"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -820,6 +820,44 @@ and it settles. Storing a context at `haven_pay_x402_quote` time was considered
 and rejected: the tool has no tool name or arguments to store, so accepting
 them optionally would leave every caller who omitted them in exactly the state
 this removes.
+
+**The resource address is checked before any money moves (#5084).** Hosted
+completion compares the payment's stored resource address with the MCP
+endpoint it calls, string for string, and refuses a mismatch with a 409
+(`resolveCompletionContext`, `packages/sdk/src/merchant-completion.ts`). The two
+schemes store different addresses (#3527): EIP-3009's `createX402Intent` stores
+the challenge's `resource.url`, erc7710 stores the endpoint. So a merchant whose
+challenge named `mcp://tool/<name>` while its tool lived at `https://<host>/mcp`
+got a funded, undeliverable EIP-3009 payment, its value stranded on the delegate
+until swept. The same rule now runs earlier, in
+`packages/mcp-server/src/tools/support/resource-address.ts`:
+
+- **At pay / prepare** — `haven_pay_mcp_tool` and
+  `haven_prepare_catalog_purchase`, on the EIP-3009 branch, compare the
+  challenge's `resource.url` with the DISCOVERED endpoint right after scheme
+  selection, before the cap, the budget pre-check (so no refusal-ledger row) and
+  the intent. A mismatch answers `MERCHANT_RESOURCE_MISMATCH`
+  (`stop_and_tell_user`), with nothing created.
+- **At settle** — `haven_settle_mcp_tool` with an EXPLICIT `merchant_url` reads
+  the payment status and compares its `resource_url` (the address completion
+  reads) with that URL, after the context and egress checks and before the
+  funding relay or the erc7710 submit. A mismatch answers
+  `MERCHANT_RESOURCE_MISMATCH` (`retry_with_explicit_context`); a failed read
+  answers `PAYMENT_STATE_UNAVAILABLE` and relays nothing (fail closed). The
+  check applies only while the payment is `pending_signature`, as the #4872
+  checkout-details decision does; a rehydrated context is the endpoint the pay
+  tool stored and already compared, so it costs no extra read.
+
+Same comparison everywhere: strict `!==`, never the normalising `sameUrl`, and no
+check when there is no address to compare. It adds refusals only.
+
+**Residual.** A payment funded through `haven_submit` and then completed with
+`haven_complete_mcp_tool` and an explicit `merchant_url` that is not its stored
+address still meets completion's 409 after funding. After the pay-time check, no
+new intent from the two pay tools can hold such an address, so this is reached
+only by an intent created before the check or by `haven_pay_x402_quote` with an
+MCP challenge (it stores no call context, so the endpoint is always explicit);
+the same holds for a rehydrated settle of an intent created before the check.
 
 **`mcp_transport` is snake_case at this boundary, and the other spelling is
 refused (#2282).** Hosted MCP tool arguments are snake_case

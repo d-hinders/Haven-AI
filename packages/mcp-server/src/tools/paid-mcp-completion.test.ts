@@ -305,7 +305,9 @@ describe('haven_settle_mcp_tool', () => {
     let statusReads = 0
     vi.spyOn(haven, 'getPaymentStatus').mockImplementation(async (id) => {
       statusReads += 1
-      return statusReads >= 2 ? ({
+      // #5084: read 1 is the pre-spend resource-address check, read 2 the
+      // header preflight; the post-rejection read is the third.
+      return statusReads >= 3 ? ({
       paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
       nextAction: AgentPaymentNextAction.SweepStrandedFunds, message: 'm', amount: '1.50', token: 'USDC', txHash: null,
       expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-rejected',
@@ -345,7 +347,9 @@ describe('haven_settle_mcp_tool', () => {
     let statusReads = 0
     vi.spyOn(haven, 'getPaymentStatus').mockImplementation(async (id) => {
       statusReads += 1
-      return statusReads >= 2 ? ({
+      // #5084: read 1 is the pre-spend resource-address check, read 2 the
+      // header preflight; the post-rejection read is the third.
+      return statusReads >= 3 ? ({
       paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'funded_but_unsettled', phase: 'funded_but_unsettled',
       nextAction: AgentPaymentNextAction.SweepStrandedFunds, message: 'm', amount: '1.50', token: 'USDC', txHash: null,
       expiresAt: '2099-01-01T00:00:00.000Z', chainId: 8453, resourceUrl: 'http://merchant.test/mcp', merchantAddress: '0xMerchant', idempotencyKey: 'idem-rejected',
@@ -385,7 +389,9 @@ describe('haven_settle_mcp_tool', () => {
       // the settle tool delivers to the merchant.
       'GET /machine-payments/pay_x402/status': {
         status: 200,
-        body: x402PreflightStatus({ status: 'confirmed', phase: 'payment_confirmed', next_action: 'none', tx_hash: '0xfund' }),
+        // #5084: approved for the fake merchant's own endpoint, as a real
+        // merchant's challenge names it (the shared fixture names /mcp).
+        body: x402PreflightStatus({ status: 'confirmed', phase: 'payment_confirmed', next_action: 'none', tx_hash: '0xfund', resource_url: 'https://merchant.test/paid' }),
       },
       // The fake merchant: HTTP 200, a plain failed tool result, no receipt.
       'POST /paid': {
@@ -1407,7 +1413,9 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
         allowance: { remaining_atomic: '3500000', remainingAtomic: '3500000' },
       },
     })
-    expect(recordedCalls().filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(2)
+    // #5084: one more read than before — the pre-spend resource-address
+    // check on an explicit merchant_url settle.
+    expect(recordedCalls().filter((call) => call.method === 'GET' && call.url.endsWith('/machine-payments/pay_x402/status'))).toHaveLength(3)
   })
 
   it('does not infer settlement or metadata from a merchant result that merely claims payment', async () => {
@@ -1417,7 +1425,16 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
       'GET /machine-payments/allowances': { status: 200, body: allowancesFixture('3500000', 'delegation') },
     })
     const merchantResult = { paid: true, status: 'confirmed', invoice_id: 'UNTRUSTED' }
+    // #5084: the first pending read is the pre-spend resource-address check.
     vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSignerClient().delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
       .mockResolvedValueOnce({
         paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
         phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
@@ -1598,7 +1615,16 @@ describe('haven_settle_mcp_tool: post-purchase allowance summary (#1310)', () =>
     const haven = havenSettled({
       'GET /machine-payments/pay_x402/status': { status: 200, body: statusFixture() },
     })
+    // #5084: the first pending read is the pre-spend resource-address check.
     vi.spyOn(haven, 'getPaymentStatus')
+      .mockResolvedValueOnce({
+        paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
+        phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',
+        resourceUrl: PAYMENT_REQUIRED.resource.url, merchantAddress: PAYMENT_REQUIRED.accepts[0].payTo,
+        payerAddress: headerSignerClient().delegateAddress, txHash: null, expiresAt: '2099-01-01T00:00:00.000Z',
+        chainId: 8453, message: 'Ready', amountAtomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+        asset: USDC, network: PAYMENT_REQUIRED.accepts[0].network,
+      })
       .mockResolvedValueOnce({
         paymentId: 'pay_x402', kind: 'payment_intent', rail: 'x402', status: 'pending_signature',
         phase: AgentPaymentPhase.AgentSignatureRequired, nextAction: AgentPaymentNextAction.SignAndSubmitPayment, amount: '1.50', token: 'USDC',

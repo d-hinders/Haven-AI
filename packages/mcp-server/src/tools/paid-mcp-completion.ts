@@ -106,6 +106,7 @@ import {
   MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
+import { assertStoredAddressMatchesBeforeSpend } from './support/resource-address.js'
 
 /**
  * #1307: resolve merchant_url/tool_name/arguments/mcp_transport for
@@ -1671,6 +1672,26 @@ export function createPaidMcpCompletionHandlers(
           } catch (err) {
             throw egressRefusalBeforeIntent(err, 'merchant_url')
           }
+        }
+        // #5084: the resource-address check runs HERE too, before the funding
+        // relay and before the erc7710 submit. An EXPLICIT merchant_url is
+        // taken verbatim above, so it can name another endpoint than the one
+        // the payment was approved for; completion would refuse that only
+        // after funding (`resolveCompletionContext`'s 409). Same rule, same
+        // strict comparison, read from the payment status while it is still
+        // pending_signature; a failed read refuses before anything is spent.
+        // A REHYDRATED context is the endpoint the pay tool stored, which the
+        // pay-time check (catalog-purchase.ts) already compared with the
+        // address it stored, so it costs no extra read (#1348's round-trip
+        // budget on the guided path).
+        // Residual (paths 3 and 5 of #5084): a payment funded through
+        // haven_submit — an intent created before the pay-time check, or by
+        // haven_pay_x402_quote with no stored context — and then completed
+        // with a different explicit merchant_url still meets the 409 after
+        // funding, at completion; so does a rehydrated intent created before
+        // the pay-time check.
+        if (typeof args.merchant_url === 'string') {
+          await assertStoredAddressMatchesBeforeSpend(haven, args.payment_id, merchantContext.merchantUrl)
         }
         // #4872: checkout details are decided HERE, before the funding relay
         // and before the erc7710 submit — the same move #2282 made for the

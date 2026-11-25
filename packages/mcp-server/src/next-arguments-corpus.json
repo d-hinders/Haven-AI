@@ -224,6 +224,13 @@
       }
     },
     {
+      "site": "resource-address.ts settle-time: payment status unreadable before spend",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
       "site": "state-direct-recovery.ts check_funds: symbol resolves to no or several allowances (#3213)",
       "tool": "haven_get_allowances",
       "arguments": {}

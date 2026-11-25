@@ -38,8 +38,11 @@ const VALUE_MARKERS = [EMAIL, 'Gömda gatan']
 const SIG = '0x' + '11'.repeat(65)
 
 const ask = (fields: Record<string, { required: boolean }>) => ({ info: { version: 1, fields } })
+/** #5084: a plain-HTTP resource of its own — the shared fixture names the MCP endpoint. */
+const PAID_URL = 'https://merchant.test/paid'
 const challenge = (request?: unknown) => ({
   ...PAYMENT_REQUIRED,
+  resource: { ...PAYMENT_REQUIRED.resource, url: PAID_URL },
   ...(request ? { extensions: { 'haven-checkout-details': request } } : {}),
 })
 const REQUIRED_EMAIL = ask({ receipt_email: { required: true } })
@@ -72,7 +75,7 @@ afterEach(() => {
 })
 
 describe('#4872 hosted plain HTTP: haven_pay_x402_quote refuses before any intent', () => {
-  const PAY = (request?: unknown) => ({ payment_required: challenge(request), url: PAYMENT_REQUIRED.resource.url, max_amount_human: '2' })
+  const PAY = (request?: unknown) => ({ payment_required: challenge(request), url: PAID_URL, max_amount_human: '2' })
   const payStubs = (details?: unknown) => ({
     'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
     ...(details !== undefined ? { [DETAILS_PATH]: { status: 200, body: details } } : {}),
@@ -127,7 +130,7 @@ describe('#4872 hosted plain HTTP: haven_pay_x402_quote refuses before any inten
       ...payStubs(SHARING_OFF),
       'GET /paid': { status: 402, body: challenge(REQUIRED_EMAIL) },
     })
-    const out = fail(await fixtureHandlers().haven_pay_x402_quote({ url: PAYMENT_REQUIRED.resource.url, max_amount_human: '2' }))
+    const out = fail(await fixtureHandlers().haven_pay_x402_quote({ url: PAID_URL, max_amount_human: '2' }))
     expect(out).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', missing_fields: ['receipt_email'], reason: 'not_shared' })
     expect(recordedCalls().some((c) => new URL(c.url).hostname === 'merchant.test')).toBe(true)
     expect(intentCalls()).toEqual([])
@@ -166,7 +169,7 @@ describe('#4872 hosted plain HTTP: haven_pay_x402_quote refuses before any inten
     })
     const out = fail(
       await fixtureHandlers().haven_pay_x402_quote({
-        url: PAYMENT_REQUIRED.resource.url,
+        url: PAID_URL,
         max_amount_human: '2',
         headers: { Cookie: COOKIE },
       }),

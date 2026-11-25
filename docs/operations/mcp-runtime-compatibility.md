@@ -87,7 +87,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-12"
+last-verified: "2026-11-25"
 ---
 
 > **Contract change (#4808, 2026-11-11): the local MCP's settlement-evidence
@@ -2176,6 +2176,10 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
   - Text and next-step fields only; no tool, schema, version or consent-hash change. The server instructions and the `haven_pay_x402_quote` description now name `haven_report_settlement_evidence` after an erc7710 retry.
   - The skill text splits the post-retry step by scheme.
   - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
+
+### Resource-address mismatch refused before funding (#5084)
+
+Hosted behaviour, refusals only. `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` on the EIP-3009 branch refuse a challenge whose `resource.url` is not the discovered MCP endpoint, before any intent or budget pre-check, with `MERCHANT_RESOURCE_MISMATCH` (`stop_and_tell_user`). `haven_settle_mcp_tool` with an explicit `merchant_url` that is not the payment's approved address refuses the same code (`retry_with_explicit_context`) before the funding relay or the erc7710 submit, and answers `PAYMENT_STATE_UNAVAILABLE` (`haven_get_payment_status`) when it cannot read that address. Each of these used to be the 409 "x402 merchant completion does not match the approved resource URL" after funding. No tool, schema, description or consent-hash change; an older client sees the new codes as ordinary refusals with their next-step fields. Detail: `docs/architecture/04-x402-payment-sequence.md`, *Hosted Paid-MCP-Tool Flow*.
 
 ### erc7710 refusal wording on settle/complete (#3784)
 

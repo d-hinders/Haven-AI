@@ -20,7 +20,7 @@ import { normalizeError } from './tools/support/errors.js'
 import { quoteMcpToolCall, withDiscoveryGuidance } from './tools/support/mcp-context.js'
 import { requireAgentIdentity } from './tools/identity-gate.js'
 import { createToolHandlers, type ToolPayload } from './tools.js'
-import { AGENT_RESPONSE, PAYMENT_REQUIRED, x402PreflightStatus } from './test-support/hosted-mcp.js'
+import { AGENT_RESPONSE, PAYMENT_REQUIRED } from './test-support/hosted-mcp.js'
 
 // The reasons, pinned whole: a reworded reason reddens these.
 const NO_ANSWER_READ =
@@ -297,6 +297,11 @@ describe('Part 1 — the funding wait answers both its outcomes (#4470)', () => 
         status: 200,
         json: { payment_id: 'pay_x402', rail: 'x402', status: 'confirmed', tx_hash: FUNDING_TX, chain_id: 8453, message: 'confirmed' },
       },
+      // #5086: the endpoint Haven stored is the one this explicit call names.
+      'GET /x402/pay_x402/merchant-call-context': {
+        status: 200,
+        json: { payment_id: 'pay_x402', merchant_url: 'http://merchant.test/mcp', tool_name: 'create_text', arguments: {} },
+      },
     })
     const haven = client({ chainRpcs: { 8453: rpcUrl }, requestTimeout: 5_000 })
     const merchant = vi.spyOn(haven, 'completeX402MerchantCall')
@@ -446,11 +451,11 @@ describe('#4470 review — the paths round 1 left untested', () => {
   it('haven_settle_mcp_tool\'s erc7710 settle answers a hang with the status read for args.payment_id (S1)', async () => {
     stubBackend({
       'POST /x402/pay_7710/settle': 'hang',
-      // #5084: approved for the endpoint this explicit settle names, so the
-      // pre-spend resource-address check passes and the submit is reached.
-      'GET /machine-payments/pay_7710/status': {
+      // #5086: the endpoint Haven stored is the one this explicit settle
+      // names, so the pre-spend delivery check passes and the submit is reached.
+      'GET /x402/pay_7710/merchant-call-context': {
         status: 200,
-        json: x402PreflightStatus({ payment_id: 'pay_7710', resource_url: 'https://merchant.test/mcp' }),
+        json: { payment_id: 'pay_7710', merchant_url: 'https://merchant.test/mcp', tool_name: 'create_text', arguments: {} },
       },
     })
     const out = failure(

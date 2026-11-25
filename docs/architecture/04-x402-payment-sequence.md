@@ -821,47 +821,56 @@ and rejected: the tool has no tool name or arguments to store, so accepting
 them optionally would leave every caller who omitted them in exactly the state
 this removes.
 
-**The resource address is checked before any money moves (#5084).** Hosted
-completion compares the payment's stored resource address with the MCP
-endpoint it calls, string for string, and refuses a mismatch with a 409
-(`resolveCompletionContext`, `packages/sdk/src/merchant-completion.ts`). The two
-schemes store different addresses (#3527): EIP-3009's `createX402Intent` stores
-the challenge's `resource.url`, erc7710 stores the endpoint. So a merchant whose
-challenge named `mcp://tool/<name>` while its tool lived at `https://<host>/mcp`
-got a funded, undeliverable EIP-3009 payment, its value stranded on the delegate
-until swept. The same rule now runs earlier, in
-`packages/mcp-server/src/tools/support/resource-address.ts`:
+**Where a paid MCP call is delivered (#5084, #5086).** The MCP counterpart of
+the #3097 paragraph above: a hosted MCP payment's identity is the merchant's
+DECLARED address, and delivery is checked against the endpoint Haven stored,
+on both schemes. The two schemes store different addresses (#3527): EIP-3009's
+`createX402Intent` stores the challenge's `resource.url`, which the backend's
+binding signs and the signer compares the challenge with
+(`assertX402MatchesExpected`); erc7710 stores the endpoint. Both store the
+endpoint Haven called at quote time in the intent's MCP call context. So a
+merchant whose challenge names `mcp://tool/<name>` (the form the public
+`@x402/mcp` README uses) while its tool lives at `https://<host>/mcp` is
+payable on EIP-3009: the payment's address stays `mcp://tool/<name>` (receipts
+and the funding evidence report carry it — the backend refuses evidence that
+names another, `resource_mismatch`), and the paid `tools/call` goes only to the
+stored endpoint (owner decision (a1) on #5086, "Check against the stored server
+address"). Until #5086, completion compared the endpoint with the address
+column, so that payment was funded and then refused; #5084 had moved the
+refusal before the intent. The rule lives in
+`packages/mcp-server/src/tools/support/resource-address.ts`
+(`approvedDeliveryTarget`) and is handed to `completeX402MerchantCall` as
+`approvedEndpoint` (`resolveCompletionContext`, `packages/sdk/src/merchant-completion.ts`):
 
-- **At pay / prepare** — `haven_pay_mcp_tool` and
-  `haven_prepare_catalog_purchase`, on the EIP-3009 branch, compare the
-  challenge's `resource.url` with the DISCOVERED endpoint right after scheme
-  selection, before the cap, the budget pre-check (so no refusal-ledger row) and
-  the intent. A mismatch answers `MERCHANT_RESOURCE_MISMATCH`
-  (`stop_and_tell_user`), with nothing created.
-- **At settle** — `haven_settle_mcp_tool` with an EXPLICIT `merchant_url` reads
-  the payment status and compares its `resource_url` (the address completion
-  reads) with that URL, after the context and egress checks and before the
-  funding relay or the erc7710 submit. A mismatch answers
-  `MERCHANT_RESOURCE_MISMATCH` (`retry_with_explicit_context`); a failed read
-  answers `PAYMENT_STATE_UNAVAILABLE` and relays nothing (fail closed). The
-  comparison applies only while the payment is `pending_signature`, as the
-  #4872 checkout-details decision does (the read, and its refusal when it
-  fails, run on every explicit-`merchant_url` settle); a rehydrated context is the endpoint the pay
-  tool stored and already compared, so it costs no extra read.
+- **The approved endpoint comes from the server.** On a rehydrated context it
+  is that context's `merchantUrl`. With an EXPLICIT `merchant_url` it is read
+  from `GET /x402/:id/merchant-call-context` — never taken from the resolved
+  context, which is the agent's own `merchant_url` and would be compared with
+  itself. A different explicit URL answers `MERCHANT_RESOURCE_MISMATCH`
+  (`retry_with_explicit_context`): on `haven_settle_mcp_tool` before the
+  funding relay or the erc7710 submit, on `haven_complete_mcp_tool` before
+  delivery.
+- **No stored context** (a 409 from that read: `haven_pay_x402_quote` with an
+  MCP challenge): the payment's stored address is compared instead, as #5084
+  did — read from the payment status on settle while it is
+  `pending_signature`, and by completion itself on complete.
+- **A failed read refuses** (fail closed): `PAYMENT_STATE_UNAVAILABLE`, the
+  status read for a transient failure, a stop for a deterministic 4xx; a 410 is
+  the expired-payment answer.
 
-Same comparison everywhere: strict `!==`, never the normalising `sameUrl`, and no
-check when there is no address to compare. It adds refusals only.
+Same comparison everywhere: strict `!==`, never the normalising `sameUrl`. The
+binding is per endpoint, not per tool (`tool_name` is not checked at settle).
+The signer, its binding, the stored address column, the budget pre-checks,
+replay matching, the local SDK path (#3155, no completion comparison) and plain
+HTTP are unchanged.
 
-**Residual.** A payment funded through `haven_submit` and then completed with
-`haven_complete_mcp_tool` and an explicit `merchant_url` that is not its stored
-address still meets completion's 409 after funding. After the pay-time check, no
-new intent from the two pay tools can hold such an address, so this is reached
-only by an intent created before the check or by `haven_pay_x402_quote` with an
-MCP challenge (it stores no call context, so the endpoint is always explicit);
-the same holds for a rehydrated settle of an intent created before the check,
-and for one whose context a direct SDK caller stored through `createX402Intent`'s
-`mcpCallContext` option with an endpoint that is not its challenge's address
-(no caller in this repository does; `catalog-purchase.ts` is the only one).
+**Residual.** A payment with no stored call context, funded through
+`haven_submit` and then completed with `haven_complete_mcp_tool` and an
+explicit `merchant_url` that is not its stored address, meets completion's
+refusal after funding (before delivery): `haven_pay_x402_quote` with an MCP
+challenge stores no context, so its endpoint is always explicit. The same holds
+for a direct SDK caller that stored a call context whose endpoint is not where
+its merchant lives.
 
 **`mcp_transport` is snake_case at this boundary, and the other spelling is
 refused (#2282).** Hosted MCP tool arguments are snake_case

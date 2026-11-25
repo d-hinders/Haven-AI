@@ -561,6 +561,8 @@ export class MerchantCompletion {
     url: string
     /** #1508: see completeX402MerchantCall's option of the same name. */
     noFundingLeg?: boolean
+    /** #5086: see completeX402MerchantCall's option of the same name. */
+    approvedEndpoint?: string
   }): Promise<{
     paymentId: string
     /** Null on a no-funding-leg scheme — there is no Haven-submitted tx. */
@@ -619,7 +621,19 @@ export class MerchantCompletion {
     }
 
     const approvedResourceUrl = status.resourceUrl ?? status.x402?.resourceUrl ?? null
-    if (approvedResourceUrl && approvedResourceUrl !== input.url) {
+    // #5086: an MCP payment is delivered to the endpoint Haven stored with its
+    // call context; the stored address keeps the merchant's declared value
+    // (it is the payment's identity and what the evidence reports carry).
+    if (input.approvedEndpoint !== undefined) {
+      if (input.approvedEndpoint !== input.url) {
+        throw new HavenApiError(
+          'x402 merchant completion does not match the approved MCP endpoint.',
+          409,
+          { status, url: input.url, approvedEndpoint: input.approvedEndpoint },
+          status.paymentId,
+        )
+      }
+    } else if (approvedResourceUrl && approvedResourceUrl !== input.url) {
       throw new HavenApiError(
         'x402 merchant completion does not match the approved resource URL.',
         409,

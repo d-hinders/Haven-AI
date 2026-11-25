@@ -60,7 +60,9 @@ export function recordedCalls(): CapturedCall[] {
  * Install the shared fetch stub. Records every request, models the MCP
  * streamable-HTTP lifecycle (initialize → mcp-session-id, notifications/initialized
  * → 202) for configured routes, and answers unconfigured
- * `GET /machine-payments/:id/status` with the default preflight status.
+ * `GET /machine-payments/:id/status` with the default preflight status and
+ * unconfigured `GET /x402/:id/merchant-call-context` with the default stored
+ * MCP context (#5086).
  */
 export function stubFetch(routes: Record<string, RouteDefinition>) {
   vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
@@ -113,7 +115,9 @@ export function stubFetch(routes: Record<string, RouteDefinition>) {
     const bodySnapshot = route?.body ?? (
       method === 'GET' && /^\/machine-payments\/[^/]+\/status$/.test(path)
         ? x402PreflightStatus()
-        : undefined
+        : method === 'GET' && /^\/x402\/[^/]+\/merchant-call-context$/.test(path)
+          ? defaultMerchantCallContext(path.split('/')[2])
+          : undefined
     )
     const response = {
       ok: status >= 200 && status < 300,
@@ -131,6 +135,16 @@ export function stubFetch(routes: Record<string, RouteDefinition>) {
     }
     return response
   })
+}
+
+/**
+ * #5086: the stored MCP call context an unconfigured
+ * `GET /x402/:id/merchant-call-context` answers — the endpoint the paid-tool
+ * fixtures call (`PAYMENT_REQUIRED.resource.url`), as `haven_pay_mcp_tool`
+ * stores it. Settle and complete compare an explicit `merchant_url` with it.
+ */
+export function defaultMerchantCallContext(paymentId: string) {
+  return { payment_id: paymentId, merchant_url: PAYMENT_REQUIRED.resource.url, tool_name: 'create_text', arguments: {} }
 }
 
 /** Shared afterEach hygiene for every suite using `stubFetch`. */

@@ -1897,6 +1897,17 @@ export class HavenClient {
      * by the backend's semantic layer.
      */
     deliveryReference?: string
+    /**
+     * #5086: the MCP endpoint Haven stored with this payment's call context.
+     * When given, delivery is checked against it (string for string) instead
+     * of the payment's stored resource address, which on EIP-3009 holds the
+     * merchant's DECLARED address (for example `mcp://tool/<name>`) and need
+     * not be a URL at all. The address is still what the evidence reports
+     * carry. Omit it (the local SDK path, plain HTTP, a payment with no stored
+     * call context) to keep the address comparison. Pass only a value Haven
+     * stored — never the URL being called, or the check compares it with itself.
+     */
+    approvedEndpoint?: string
   }): Promise<{
     status: number
     ok: boolean
@@ -1931,6 +1942,7 @@ export class HavenClient {
       paymentId: input.paymentId,
       url: input.url,
       noFundingLeg: input.noFundingLeg === true,
+      ...(input.approvedEndpoint !== undefined ? { approvedEndpoint: input.approvedEndpoint } : {}),
     })
     // Non-null on the funding-leg path (the gate below throws without it) and
     // always null on erc7710. Bound once so the evidence calls — which require

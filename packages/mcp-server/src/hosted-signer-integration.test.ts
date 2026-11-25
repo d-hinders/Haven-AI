@@ -212,13 +212,15 @@ const REALISTIC_TYPED_DATA = {
 async function makeX402ExpectedAuth(
   rail: 'legacy' | 'delegation' = 'delegation',
   typedData: Record<string, unknown> = TYPED_DATA,
+  // #5086: the address the payment stores — the challenge's `resource.url`.
+  resourceUrl: string = PAYMENT_REQUIRED.resource.url,
 ) {
   // camelCase keys for SDK's buildX402ExpectedMessage
   const context = {
     paymentId: FUNDING_PAYMENT_ID,
     // #3281: the x402 arm checks the #3271 binding against this declared hash.
     payloadHash: packedUserOperationHash(typedData as never) as string,
-    resourceUrl: PAYMENT_REQUIRED.resource.url,
+    resourceUrl,
     merchantTo: PAYMENT_REQUIRED.accepts[0].payTo,
     amount: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
     asset: PAYMENT_REQUIRED.accepts[0].asset,
@@ -1560,5 +1562,237 @@ describe('#3739 — request mode: the header echoes the probed challenge', () =>
     const decoded = JSON.parse(atob(signed.payment_header)) as Record<string, unknown>
     expect(decoded.extensions).toEqual(REQUEST_MODE_CHALLENGE.extensions)
     expect(decoded.resource).toEqual(REQUEST_MODE_CHALLENGE.resource)
+  })
+})
+
+/**
+ * #5086 (owner decision (a1), "Check against the stored server address"): a
+ * paid MCP tool whose x402 challenge names `mcp://tool/<name>` — the form the
+ * public `@x402/mcp` README uses — is payable on the hosted EIP-3009 bridge,
+ * end to end with the REAL signer core. The payment stores the merchant's
+ * declared address (the signer binds it and the evidence report carries it);
+ * delivery is checked against the MCP endpoint Haven stored with the call
+ * context. A mocked signer would hide the reason the address column was left
+ * alone: the signer refuses a header whose challenge address is not the
+ * funded intent's (`assertX402MatchesExpected`).
+ */
+describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 (real signer)', () => {
+  const MCP_ENDPOINT = 'https://merchant.test/mcp'
+  const TOOL_ADDRESS = 'mcp://tool/x'
+  // The EIP-712 domain of the token rides `extra`, as a real merchant's does:
+  // the signer signs under it and the settle preflight recovers under it.
+  const MCP_CHALLENGE = {
+    ...PAYMENT_REQUIRED,
+    resource: { url: TOOL_ADDRESS, description: 'paid tool' },
+    accepts: [{ ...PAYMENT_REQUIRED.accepts[0], extra: { name: 'USD Coin', version: '2' } }],
+  }
+  const SETTLEMENT_TX = '0x' + '5e'.repeat(32)
+  const FUNDING_TX = '0x' + 'ef'.repeat(32)
+  const CATALOG_ENTRY = {
+    id: 'cat_mcp_tool',
+    name: 'Haiku',
+    description: 'A paid MCP tool',
+    category: 'ai',
+    resource_url: MCP_ENDPOINT,
+    rail: 'x402',
+    protocol: 'mcp',
+    tool_name: 'haiku',
+    tool_arguments: {},
+    price_display: '$1.50 USDC',
+    price_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+    asset: PAYMENT_REQUIRED.accepts[0].asset,
+    network: PAYMENT_REQUIRED.accepts[0].network,
+    status: 'active',
+    verified_at: '2026-06-16T08:50:39.772Z',
+  }
+
+  interface World {
+    calls: CapturedCall[]
+    storedContext: Record<string, unknown> | null
+    paidCalls: number
+  }
+
+  /**
+   * One stateful fake: Haven's backend (intent, stored call context, status
+   * pending → confirmed on the funding relay, evidence) and a streamable-HTTP
+   * MCP merchant that answers the unpaid `tools/call` with the challenge and
+   * the paid one with its result and a settlement receipt.
+   */
+  async function installWorld(): Promise<World> {
+    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, TOOL_ADDRESS)
+    const world: World = { calls: [], storedContext: null, paidCalls: 0 }
+    let funded = false
+    const status = () => ({
+      payment_id: FUNDING_PAYMENT_ID,
+      kind: 'payment_intent',
+      rail: 'x402',
+      status: funded ? 'confirmed' : 'pending_signature',
+      phase: funded ? 'payment_confirmed' : 'agent_signature_required',
+      next_action: funded ? 'none' : 'sign_and_submit_payment',
+      amount: '1.50',
+      token: 'USDC',
+      // The payment's stored address: the merchant's declared mcp://tool/x.
+      resource_url: TOOL_ADDRESS,
+      merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
+      payer_address: DELEGATE_ADDR,
+      tx_hash: funded ? FUNDING_TX : null,
+      expires_at: '2099-01-01T00:00:00.000Z',
+      chain_id: 8453,
+      message: funded ? 'Confirmed.' : 'Ready to sign.',
+      amount_atomic: PAYMENT_REQUIRED.accepts[0].maxAmountRequired,
+      asset: PAYMENT_REQUIRED.accepts[0].asset,
+      network: PAYMENT_REQUIRED.accepts[0].network,
+    })
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit = {}) => {
+      const method = (init.method ?? 'GET').toUpperCase()
+      const parsed = new URL(url)
+      const body = init.body ? JSON.parse(init.body as string) : null
+      const headers = new Headers(init.headers ?? {})
+      world.calls.push({ url, method, body, headers: Object.fromEntries(headers.entries()) })
+
+      if (parsed.hostname === 'merchant.test') {
+        if (body?.method === 'initialize') {
+          return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { protocolVersion: '2025-06-18' } }), {
+            status: 200,
+            headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-5086' },
+          })
+        }
+        if (body?.method === 'notifications/initialized') return new Response(null, { status: 202 })
+        const paid = headers.get('PAYMENT-SIGNATURE') ?? headers.get('X-PAYMENT')
+        if (!paid) {
+          return new Response(JSON.stringify({ error: 'payment required' }), {
+            status: 402,
+            headers: { 'content-type': 'application/json', 'PAYMENT-REQUIRED': btoa(JSON.stringify(MCP_CHALLENGE)) },
+          })
+        }
+        world.paidCalls += 1
+        return new Response(
+          JSON.stringify({ jsonrpc: '2.0', id: body?.id ?? 1, result: { content: [{ type: 'text', text: 'an old pond' }] } }),
+          {
+            status: 200,
+            headers: {
+              'content-type': 'application/json',
+              'PAYMENT-RESPONSE': btoa(JSON.stringify({ success: true, transaction: SETTLEMENT_TX, network: 'base' })),
+            },
+          },
+        )
+      }
+
+      const path = parsed.pathname
+      if (method === 'GET' && path === '/machine-payments/agent') {
+        return jsonResponse(200, { id: 'agt_1', name: 'Integration Test Agent', status: 'active', delegate_address: DELEGATE_ADDR, chain_id: 8453, execution_rail: 'delegation' })
+      }
+      if (method === 'GET' && path === `/catalog/${CATALOG_ENTRY.id}`) return jsonResponse(200, CATALOG_ENTRY)
+      if (method === 'POST' && path === '/machine-payments/budget-precheck') {
+        return jsonResponse(200, { sufficient: true, remaining_atomic: '5000000' })
+      }
+      if (method === 'POST' && path === '/x402') {
+        // What the backend stores: the declared address in the resource
+        // column (body.url) and the endpoint in the MCP call context.
+        world.storedContext = body?.mcpCallContext ?? null
+        return jsonResponse(201, {
+          payment_id: FUNDING_PAYMENT_ID,
+          status: 'pending_signature',
+          merchant_to: PAYMENT_REQUIRED.accepts[0].payTo,
+          x402_expected_auth: expected.camel.auth,
+          sign_data: { hash: FUNDING_HASH, signature_scheme: 'eip712_userop', typed_data: TYPED_DATA },
+          expires_at: '2099-01-01T00:00:00.000Z',
+        })
+      }
+      if (method === 'GET' && path === `/x402/${FUNDING_PAYMENT_ID}/merchant-call-context`) {
+        const ctx = world.storedContext as { merchantUrl: string; toolName: string; arguments?: unknown } | null
+        if (!ctx) return jsonResponse(409, { error: 'No stored merchant call context', error_code: 'merchant_call_context_unavailable' })
+        return jsonResponse(200, { payment_id: FUNDING_PAYMENT_ID, merchant_url: ctx.merchantUrl, tool_name: ctx.toolName, arguments: ctx.arguments ?? {} })
+      }
+      if (method === 'GET' && path === `/machine-payments/${FUNDING_PAYMENT_ID}/status`) return jsonResponse(200, status())
+      if (method === 'POST' && path === `/payments/${FUNDING_PAYMENT_ID}/sign`) {
+        funded = true
+        return jsonResponse(200, { status: 'confirmed', tx_hash: FUNDING_TX })
+      }
+      if (method === 'GET' && path === `/payments/${FUNDING_PAYMENT_ID}`) {
+        return jsonResponse(200, { payment_id: FUNDING_PAYMENT_ID, status: 'confirmed', tx_hash: FUNDING_TX, chain_id: 8453 })
+      }
+      if (method === 'POST' && path === '/machine-payments/evidence') {
+        return jsonResponse(202, { evidence: { id: `ev_${world.calls.length}` } })
+      }
+      return jsonResponse(404, { error: `No stub for ${method} ${path}` })
+    })
+    return world
+  }
+
+  function hosted() {
+    return createHostedHandlers(
+      new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test', merchantEgress: fixtureMerchantEgress() }),
+    )
+  }
+
+  /** Sign with the REAL signer core and settle through the hosted tool, rehydrating the stored context. */
+  async function signAndSettle(world: World, hostedHandlers: ReturnType<typeof hosted>) {
+    const signerHandlers = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }))
+    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, TOOL_ADDRESS)
+    const signed = ok<{ signature: string; payment_header: string }>(
+      await signerHandlers.haven_sign_x402({
+        payload_hash: FUNDING_HASH,
+        typed_data: TYPED_DATA,
+        x402_expected: expected.snake,
+        payment_required: MCP_CHALLENGE,
+      }),
+    )
+    const settled = await hostedHandlers.haven_settle_mcp_tool({
+      payment_id: FUNDING_PAYMENT_ID,
+      signature: signed.signature,
+      payment_header: signed.payment_header,
+    })
+    const evidence = world.calls.filter((c) => c.method === 'POST' && new URL(c.url).pathname === '/machine-payments/evidence')
+    return { settled, evidence }
+  }
+
+  it('haven_pay_mcp_tool → real signer → haven_settle_mcp_tool: the merchant is paid, the evidence carries mcp://tool/x', async () => {
+    const world = await installWorld()
+    const hostedHandlers = hosted()
+    const pay = ok<{ payment_id: string; merchant_url: string }>(
+      await hostedHandlers.haven_pay_mcp_tool({ merchant_url: MCP_ENDPOINT, tool_name: 'haiku', arguments: {}, max_amount: '2000000' }),
+    )
+    expect(pay.payment_id).toBe(FUNDING_PAYMENT_ID)
+    expect(world.calls.find((c) => new URL(c.url).pathname === '/x402')?.body).toMatchObject({ url: TOOL_ADDRESS })
+    expect(world.storedContext).toMatchObject({ merchantUrl: MCP_ENDPOINT, toolName: 'haiku' })
+
+    const { settled, evidence } = await signAndSettle(world, hostedHandlers)
+    expect(settled.success).toBe(true)
+    const data = ok<{ settled: boolean; result: unknown }>(settled)
+    expect(data.result).toMatchObject({ result: { content: [{ type: 'text', text: 'an old pond' }] } })
+    expect(data.settled).toBe(true)
+    expect(world.paidCalls).toBe(1)
+    // Two reports: the funding leg, then the merchant's settlement. The one
+    // that names a resource (the funding report) names the payment's stored
+    // address — the backend refuses any other (resource_mismatch) — and no
+    // report names the endpoint. (Measured: the settlement report carries no
+    // resourceUrl at all; the issue's "both carry it" overstated it.)
+    expect(evidence.map((r) => (r.body as Record<string, unknown>).txHash)).toEqual([FUNDING_TX, SETTLEMENT_TX])
+    expect(evidence[0].body).toMatchObject({ paymentId: FUNDING_PAYMENT_ID, resourceUrl: TOOL_ADDRESS })
+    for (const report of evidence) {
+      const resourceUrl = (report.body as Record<string, unknown>).resourceUrl
+      expect(resourceUrl === undefined || resourceUrl === TOOL_ADDRESS).toBe(true)
+    }
+  })
+
+  it('the same through haven_prepare_catalog_purchase', async () => {
+    const world = await installWorld()
+    const hostedHandlers = hosted()
+    const prepared = ok<{ payment_id: string }>(
+      await hostedHandlers.haven_prepare_catalog_purchase({ catalog_id: CATALOG_ENTRY.id, max_amount_human: '2' }),
+    )
+    expect(prepared.payment_id).toBe(FUNDING_PAYMENT_ID)
+    expect(world.storedContext).toMatchObject({ merchantUrl: MCP_ENDPOINT, toolName: 'haiku' })
+
+    const { settled, evidence } = await signAndSettle(world, hostedHandlers)
+    expect(settled.success).toBe(true)
+    expect(world.paidCalls).toBe(1)
+    expect(evidence).toHaveLength(2)
+    expect(evidence[0].body).toMatchObject({ resourceUrl: TOOL_ADDRESS })
+    for (const report of evidence) {
+      const resourceUrl = (report.body as Record<string, unknown>).resourceUrl
+      expect(resourceUrl === undefined || resourceUrl === TOOL_ADDRESS).toBe(true)
+    }
   })
 })

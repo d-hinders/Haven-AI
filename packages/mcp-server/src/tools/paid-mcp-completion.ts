@@ -106,7 +106,7 @@ import {
   MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
-import { assertStoredAddressMatchesBeforeSpend } from './support/resource-address.js'
+import { approvedDeliveryTarget } from './support/resource-address.js'
 
 /**
  * #1307: resolve merchant_url/tool_name/arguments/mcp_transport for
@@ -138,6 +138,48 @@ export interface ResolvedMerchantCallContext {
    * details are never sent to it. Absent when nothing was stored or asked.
    */
   checkoutDetailsStored?: StoredCheckoutRequest
+  /**
+   * #5086: the MCP endpoint Haven stored for this payment, as decided by
+   * `approvedDeliveryTarget` before anything moves — handed to
+   * `completeX402MerchantCall` as `approvedEndpoint`. `undefined` when the
+   * payment has no stored call context (completion then keeps the stored-
+   * address comparison) or the check has not run yet.
+   */
+  approvedEndpoint?: string
+  /**
+   * #5086: the explicit path already read the stored context for the delivery
+   * check; its checkout-details request rides `checkoutDetailsStored`, so it
+   * is not read a second time.
+   */
+  storedContextRead?: boolean
+}
+
+/**
+ * #5086: decide where this payment may be delivered (see
+ * `approvedDeliveryTarget`) and carry the decision on the context. On the
+ * explicit path the stored context read for the check also supplies the
+ * checkout-details request (#4872); an explicit URL that differs from the
+ * stored one is refused there, so `merchantMismatch` cannot arise from it.
+ */
+async function withDeliveryTarget(
+  haven: HavenClient,
+  args: Record<string, any>,
+  context: ResolvedMerchantCallContext,
+  phase: 'settle' | 'complete',
+): Promise<ResolvedMerchantCallContext> {
+  const decided = await approvedDeliveryTarget(haven, args.payment_id, context.merchantUrl, {
+    explicit: typeof args.merchant_url === 'string',
+    phase,
+  })
+  const storedRequest = decided.stored?.checkoutDetailsRequest
+  return {
+    ...context,
+    ...(decided.approvedEndpoint !== undefined ? { approvedEndpoint: decided.approvedEndpoint } : {}),
+    ...(decided.stored ? { storedContextRead: true } : {}),
+    ...(context.checkoutDetailsStored === undefined && storedRequest !== undefined
+      ? { checkoutDetailsStored: { value: storedRequest } }
+      : {}),
+  }
 }
 
 /**
@@ -179,6 +221,7 @@ async function explicitCheckoutRequest(
   context: ResolvedMerchantCallContext,
 ): Promise<StoredCheckoutRequest | undefined> {
   if (typeof args.merchant_url !== 'string') return undefined
+  if (context.storedContextRead) return undefined
   return (await storedCheckoutRequestFor(haven, args.payment_id as string, context.merchantUrl)).checkoutDetailsStored
 }
 
@@ -801,7 +844,14 @@ export async function deliverMerchantPayment(
   // context could change, and a second GET is a second chance to disagree).
   // (#3778: the delivery reference is refused in the HANDLERS, which know
   // their own tool name and run before any submit — never here.)
-  const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
+  // #5086: haven_complete_mcp_tool resolves its context here, so its delivery
+  // check runs here too — before the funding wait and before delivery. The
+  // settle handler decided it before spending and hands it in with the
+  // context (`approvedEndpoint` may then be undefined on purpose: no stored
+  // call context, completion keeps the stored-address comparison).
+  const context =
+    options?.context ?? (await withDeliveryTarget(haven, args, await resolveMerchantCallContext(haven, args), 'complete'))
+  const approvedEndpoint = context.approvedEndpoint
 
   const requestHeaders = MERCHANT_REQUEST_HEADERS
 
@@ -868,6 +918,9 @@ export async function deliverMerchantPayment(
       // #1508: the same flag that skips the funding wait above also has to
       // reach the SDK's completion gate, which is where the real refusal was.
       noFundingLeg: options?.noFundingLeg === true,
+      // #5086: deliver to the endpoint Haven stored, not to whatever the
+      // merchant's declared address says (it may be mcp://tool/<name>).
+      ...(approvedEndpoint !== undefined ? { approvedEndpoint } : {}),
     })
   } catch (err) {
     // #1300 review finding: at this point funding is CONFIRMED on-chain, so a
@@ -1656,7 +1709,7 @@ export function createPaidMcpCompletionHandlers(
         // reported sooner. Same reasoning as the erc7710 branch below: there
         // the submit burns the settlement child, which is not recoverable by
         // re-signing either.
-        const merchantContext = await resolveMerchantCallContext(haven, args)
+        const resolvedContext = await resolveMerchantCallContext(haven, args)
         // #3747: the egress policy also runs HERE — before the funding
         // signature relay and before the erc7710 submit (both schemes resolve
         // at this site; erc7710 has no funding leg, so refusing pre-submit is
@@ -1668,31 +1721,22 @@ export function createPaidMcpCompletionHandlers(
         // outcome the issue criterion forbids.
         if (haven.merchantEgress) {
           try {
-            haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
+            haven.merchantEgress.assertUrl(resolvedContext.merchantUrl)
           } catch (err) {
             throw egressRefusalBeforeIntent(err, 'merchant_url')
           }
         }
-        // #5084: the resource-address check runs HERE too, before the funding
-        // relay and before the erc7710 submit. An EXPLICIT merchant_url is
-        // taken verbatim above, so it can name another endpoint than the one
-        // the payment was approved for; completion would refuse that only
-        // after funding (`resolveCompletionContext`'s 409). Same rule, same
-        // strict comparison, read from the payment status while it is still
-        // pending_signature; a failed read refuses before anything is spent.
-        // A REHYDRATED context is the endpoint the pay tool stored, which the
-        // pay-time check (catalog-purchase.ts) already compared with the
-        // address it stored, so it costs no extra read (#1348's round-trip
-        // budget on the guided path).
-        // Residual (paths 3 and 5 of #5084): a payment funded through
-        // haven_submit — an intent created before the pay-time check, or by
-        // haven_pay_x402_quote with no stored context — and then completed
-        // with a different explicit merchant_url still meets the 409 after
-        // funding, at completion; so does a rehydrated intent created before
-        // the pay-time check.
-        if (typeof args.merchant_url === 'string') {
-          await assertStoredAddressMatchesBeforeSpend(haven, args.payment_id, merchantContext.merchantUrl)
-        }
+        // #5084 / #5086: where this payment may be delivered is decided HERE,
+        // before the funding relay and before the erc7710 submit. An EXPLICIT
+        // merchant_url is taken verbatim above, so it can name another
+        // endpoint than the one the payment was approved for: it is compared
+        // with the endpoint the SERVER stored (never with the resolved
+        // context, which would compare it with itself), or — with no stored
+        // call context — with the payment's stored address. A rehydrated
+        // context is the stored endpoint already. A failed read refuses
+        // before anything is spent. The decision rides the context into
+        // completion as `approvedEndpoint`.
+        const merchantContext = await withDeliveryTarget(haven, args, resolvedContext, 'settle')
         // #4872: checkout details are decided HERE, before the funding relay
         // and before the erc7710 submit — the same move #2282 made for the
         // context refusal. On EIP-3009 the agent's payment header is in hand,

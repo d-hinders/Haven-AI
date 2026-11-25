@@ -330,7 +330,10 @@ describe('#4872 hosted: the answer at settle', () => {
         tool_name: 'buy_cloud_storage',
       }),
     )
-    expect(result).toMatchObject({ code: 'CHECKOUT_DETAILS_UNAVAILABLE', reason: 'merchant_mismatch', phase: 'not_started' })
+    // #5086: an explicit merchant_url that is not the stored endpoint is now
+    // refused outright before funding (the delivery check), ahead of the
+    // checkout-details decision — so the details are still never sent.
+    expect(result).toMatchObject({ code: 'MERCHANT_RESOURCE_MISMATCH' })
     expect(fundingRelays()).toEqual([])
     expect(detailReads()).toEqual([])
     expect(complete).not.toHaveBeenCalled()

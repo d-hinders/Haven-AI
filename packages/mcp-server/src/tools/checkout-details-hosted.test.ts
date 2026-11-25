@@ -113,7 +113,7 @@ describe('#4872 hosted: refused before any intent', () => {
         status: 200,
         body: {
           id: 'cat_1', name: 'create_text', description: 'Generate text', category: 'ai',
-          resource_url: 'https://mcp.soundside.ai/mcp', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
+          resource_url: 'http://merchant.test/mcp', rail: 'x402', protocol: 'mcp', tool_name: 'create_text',
           tool_arguments: { prompt: 'hello' }, price_display: '$1.50 USDC', price_atomic: '1500000',
           asset: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', network: 'eip155:8453', status: 'active',
           verified_at: '2026-06-16T08:50:39.772Z',

@@ -184,7 +184,7 @@ describe('haven_discover_tools', () => {
               name: 'create_text',
               description: 'Generate text',
               category: 'ai',
-              resource_url: 'https://mcp.soundside.ai/mcp',
+              resource_url: 'http://merchant.test/mcp',
               rail: 'x402',
               protocol: 'mcp',
               tool_name: 'create_text',
@@ -417,7 +417,7 @@ describe('haven_quote_mcp_tool', () => {
       amount: '1.5',
       token: 'USDC',
       decimals: 6,
-      resource_url: 'https://merchant.test/paid',
+      resource_url: 'http://merchant.test/mcp',
       merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
       mcp_transport: { handshake_required: true, source: 'path' },
       quote_is_informational: true,
@@ -1621,9 +1621,14 @@ describe('#3527 — settled EIP-3009 replay', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
   const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
-  // Deliberately DIFFERENT from PAYMENT_REQUIRED.resource.url
-  // ('https://merchant.test/paid') — the discovered merchant URL and the
-  // merchant's own declared resource are two different facts on this scheme.
+  // The discovered merchant URL and the merchant's own declared resource are
+  // two different facts on this scheme (#3527). Since #5084 a payable EIP-3009
+  // purchase has them EQUAL (a mismatch is refused before the intent, because
+  // completion would refuse it after funding), so the forwarding test below
+  // pins the source of the value, not a difference between the two. #5086
+  // (bind completion to the stored endpoint) accepts differing addresses
+  // again: it must restore a differing-address pin here
+  // (`.not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)`).
   const CATALOG_ENTRY_RESPONSE = {
     id: 'cat_3009',
     name: 'Cat 3009',
@@ -1669,7 +1674,6 @@ describe('#3527 — settled EIP-3009 replay', () => {
       await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_3009', max_amount: '2000000' })
 
       expect(precheckBody()).toMatchObject({ resourceUrl: PAYMENT_REQUIRED.resource.url })
-      expect(precheckBody()?.resourceUrl).not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)
       expect(typeof precheckBody()?.idempotencyKey).toBe('string')
       expect(precheckBody()?.idempotencyKey).toBe(xBody()?.idempotencyKey)
     })
@@ -2115,7 +2119,10 @@ describe('#3527 — settled EIP-3009 replay', () => {
 
 
 describe('merchant MCP endpoint discovery (#1271)', () => {
-  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  // #5084: a merchant names its own endpoint as resource.url, so a custom
+  // endpoint path gets a challenge that names that path.
+  const paymentRequiredHeader = (url: string = PAYMENT_REQUIRED.resource.url) =>
+    btoa(JSON.stringify({ ...PAYMENT_REQUIRED, resource: { ...PAYMENT_REQUIRED.resource, url } }))
   const DISCOVERY_DOC = { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' }
   const havenStubs = () => ({
     'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
@@ -2183,7 +2190,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       },
       'POST /v1': {
         status: 402,
-        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader('http://merchant.test/v1') },
       },
       ...havenStubs(),
     })
@@ -2212,7 +2219,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     stubFetch({
       'POST /v1': {
         status: 402,
-        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader('http://merchant.test/v1') },
       },
       ...havenStubs(),
     })

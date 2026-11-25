@@ -1343,7 +1343,7 @@ describe('human-unit spending caps (#1351)', () => {
       name: 'create_text',
       description: 'Generate text',
       category: 'ai',
-      resource_url: 'https://mcp.soundside.ai/mcp',
+      resource_url: 'http://merchant.test/mcp',
       rail: 'x402',
       protocol: 'mcp',
       tool_name: 'create_text',

@@ -61,6 +61,7 @@ import {
 } from './support/cap-price.js'
 import { getUsableCatalogMcpEntry } from './support/catalog-entry.js'
 import { refuseUnshareableCheckoutDetails } from './support/checkout-details.js'
+import { assertChallengeAddressMatchesEndpoint } from './support/resource-address.js'
 import { resolveCatalogCallArguments } from './support/catalog-arguments.js'
 import { DELEGATION_EXPIRED_OMITTED_REASON, HostedToolError, runTool } from './support/errors.js'
 import {
@@ -316,6 +317,13 @@ export function createCatalogPurchaseHandlers(
             (quote.paymentRequired as X402PaymentRequired).accepts,
             { known: prefetchedAgent !== undefined, value: prefetchedAgent?.executionRail },
           )
+          // #5084: on EIP-3009 the stored address is the challenge's
+          // resource.url, and completion compares it with the endpoint string
+          // for string — a mismatch is refused HERE, before the intent exists,
+          // instead of after the funding leg. ERC-7710 stores the endpoint itself.
+          if (paySelection.scheme !== 'erc7710') {
+            assertChallengeAddressMatchesEndpoint(quote.paymentRequired as X402PaymentRequired, merchantUrl)
+          }
 
           // Enforce the required price cap against the LIVE merchant price,
           // before creating any intent — funding or settlement child.
@@ -709,6 +717,12 @@ export function createCatalogPurchaseHandlers(
             // pre-intent refusal (#1319) — the rail is always known.
             { known: true, value: rail },
           )
+          // #5084: the resource-address check, before the cap, the budget
+          // pre-check (so a refused purchase leaves no refusal-ledger row) and
+          // the intent — the same rule as haven_pay_mcp_tool's EIP-3009 branch.
+          if (catalogSelection.scheme !== 'erc7710') {
+            assertChallengeAddressMatchesEndpoint(quote.paymentRequired as X402PaymentRequired, merchantUrl)
+          }
 
           // 5. A cap is REQUIRED on this guided path (readMaxAmountCap above,
           // before any network call) — no cap_warning softness. Enforced

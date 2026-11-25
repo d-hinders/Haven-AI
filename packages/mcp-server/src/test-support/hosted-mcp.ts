@@ -220,7 +220,11 @@ export function installSharedFixtureLifecycle(): void {
 
 export const PAYMENT_REQUIRED = {
   x402Version: 1,
-  resource: { url: 'https://merchant.test/paid', description: 'paid data' },
+  // #5084: the MCP endpoint the paid-tool tests call. A merchant names its own
+  // endpoint here; a different address is refused before funding on EIP-3009
+  // (`tools/support/resource-address.ts`), so plain-HTTP tests that need a
+  // `/paid` resource declare one of their own.
+  resource: { url: 'http://merchant.test/mcp', description: 'paid data' },
   accepts: [
     {
       scheme: 'exact',

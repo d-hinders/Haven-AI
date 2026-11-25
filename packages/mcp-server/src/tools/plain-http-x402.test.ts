@@ -1070,7 +1070,7 @@ describe('generic plain-HTTP x402: settlement-scheme selection (#2041)', () => {
     it('a replayed key whose payment already settled answers with the original payment (#3417)', async () => {
       stubFetch({
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT },
-        'POST /x402': { status: 200, body: settledReplayBody('https://merchant.test/paid') },
+        'POST /x402': { status: 200, body: settledReplayBody(PAYMENT_REQUIRED.resource.url) },
       })
       const res = ok(
         await handlers().haven_pay_x402_quote({

@@ -20,7 +20,7 @@ import { normalizeError } from './tools/support/errors.js'
 import { quoteMcpToolCall, withDiscoveryGuidance } from './tools/support/mcp-context.js'
 import { requireAgentIdentity } from './tools/identity-gate.js'
 import { createToolHandlers, type ToolPayload } from './tools.js'
-import { AGENT_RESPONSE, PAYMENT_REQUIRED } from './test-support/hosted-mcp.js'
+import { AGENT_RESPONSE, PAYMENT_REQUIRED, x402PreflightStatus } from './test-support/hosted-mcp.js'
 
 // The reasons, pinned whole: a reworded reason reddens these.
 const NO_ANSWER_READ =
@@ -444,7 +444,15 @@ describe('Part 2 — a deterministic SDK failure is not transient (#4470)', () =
 
 describe('#4470 review — the paths round 1 left untested', () => {
   it('haven_settle_mcp_tool\'s erc7710 settle answers a hang with the status read for args.payment_id (S1)', async () => {
-    stubBackend({ 'POST /x402/pay_7710/settle': 'hang' })
+    stubBackend({
+      'POST /x402/pay_7710/settle': 'hang',
+      // #5084: approved for the endpoint this explicit settle names, so the
+      // pre-spend resource-address check passes and the submit is reached.
+      'GET /machine-payments/pay_7710/status': {
+        status: 200,
+        json: x402PreflightStatus({ payment_id: 'pay_7710', resource_url: 'https://merchant.test/mcp' }),
+      },
+    })
     const out = failure(
       await createToolHandlers(client()).haven_settle_mcp_tool({
         payment_id: 'pay_7710',

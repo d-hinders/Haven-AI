@@ -844,8 +844,9 @@ until swept. The same rule now runs earlier, in
   funding relay or the erc7710 submit. A mismatch answers
   `MERCHANT_RESOURCE_MISMATCH` (`retry_with_explicit_context`); a failed read
   answers `PAYMENT_STATE_UNAVAILABLE` and relays nothing (fail closed). The
-  check applies only while the payment is `pending_signature`, as the #4872
-  checkout-details decision does; a rehydrated context is the endpoint the pay
+  comparison applies only while the payment is `pending_signature`, as the
+  #4872 checkout-details decision does (the read, and its refusal when it
+  fails, run on every explicit-`merchant_url` settle); a rehydrated context is the endpoint the pay
   tool stored and already compared, so it costs no extra read.
 
 Same comparison everywhere: strict `!==`, never the normalising `sameUrl`, and no

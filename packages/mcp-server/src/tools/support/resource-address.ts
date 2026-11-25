@@ -24,10 +24,12 @@
  *   payment status (the same `resource_url` completion reads) and compared
  *   before the funding relay or the ERC-7710 submit.
  *
- * The rule is completion's own, so this refuses exactly what completion
- * refuses and nothing more: strict `!==` (never the normalising `sameUrl`),
- * and no check when there is no address to compare (completion skips a null
- * stored address).
+ * The rule is completion's own: strict `!==` (never the normalising
+ * `sameUrl`), and no check when there is no address to compare (completion
+ * skips a null stored address). So no payment completion refuses gets through.
+ * The pay-time check compares with the DISCOVERED endpoint, so it also refuses
+ * a purchase that could only have completed by passing the challenge's own
+ * address as an explicit `merchant_url` at settle — before any money moves.
  *
  * Residual, not closed here: an intent created before this check, or by
  * `haven_pay_x402_quote` with an MCP challenge (no stored call context),

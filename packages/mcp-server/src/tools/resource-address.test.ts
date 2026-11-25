@@ -270,6 +270,20 @@ describe('haven_settle_mcp_tool: an explicit merchant_url is compared with the a
     expect(fundingRelays()).toHaveLength(0)
   })
 
+  it('a 429 on that read is not deterministic: it hands the status read, not a stop', async () => {
+    stubFetch({
+      'GET /machine-payments/pay_x402/status': { status: 429, body: { error: 'rate_limited' } },
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const res = await handlers().haven_settle_mcp_tool(settle({ payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(res.success).toBe(false)
+    const out = fail(res)
+    expect(out.code).toBe('PAYMENT_STATE_UNAVAILABLE')
+    expect(out.next_action).toBe('check_status_later')
+    expect(out.next_tool_name).toBe('haven_get_payment_status')
+    expect(fundingRelays()).toHaveLength(0)
+  })
+
   it('a payment that already moved past pending_signature is left to the relay\'s own answer', async () => {
     stubFetch({
       'GET /machine-payments/pay_x402/status': {

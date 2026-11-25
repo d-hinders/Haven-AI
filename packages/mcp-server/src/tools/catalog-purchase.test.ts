@@ -1622,13 +1622,14 @@ describe('#3527 — settled EIP-3009 replay', () => {
   const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
   // The discovered merchant URL and the merchant's own declared resource are
-  // two different facts on this scheme (#3527). Since #5084 a payable EIP-3009
-  // purchase has them EQUAL (a mismatch is refused before the intent, because
-  // completion would refuse it after funding), so the forwarding test below
-  // pins the source of the value, not a difference between the two. #5086
-  // (bind completion to the stored endpoint) accepts differing addresses
-  // again: it must restore a differing-address pin here
-  // (`.not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)`).
+  // two different facts on this scheme (#3527). Since #5086 they may differ on
+  // a payable EIP-3009 purchase (delivery is bound to the stored endpoint), so
+  // the forwarding test below uses a challenge that declares its own address
+  // and pins that the pre-check forwards it, never the endpoint.
+  const DECLARED_ADDRESS = 'mcp://tool/create_text'
+  const declaredHeader = btoa(
+    JSON.stringify({ ...PAYMENT_REQUIRED, resource: { ...PAYMENT_REQUIRED.resource, url: DECLARED_ADDRESS } }),
+  )
   const CATALOG_ENTRY_RESPONSE = {
     id: 'cat_3009',
     name: 'Cat 3009',
@@ -1663,7 +1664,7 @@ describe('#3527 — settled EIP-3009 replay', () => {
     it('forwards the quote\'s resource.url (never merchantUrl) and the EFFECTIVE idempotency key on the 3009 branch', async () => {
       stubFetch({
         'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
-        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': declaredHeader } },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
         'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
         'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
@@ -1673,7 +1674,8 @@ describe('#3527 — settled EIP-3009 replay', () => {
       // quote's own derived one, the same one step 9 authorizes with.
       await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_3009', max_amount: '2000000' })
 
-      expect(precheckBody()).toMatchObject({ resourceUrl: PAYMENT_REQUIRED.resource.url })
+      expect(precheckBody()).toMatchObject({ resourceUrl: DECLARED_ADDRESS })
+      expect(precheckBody()?.resourceUrl).not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)
       expect(typeof precheckBody()?.idempotencyKey).toBe('string')
       expect(precheckBody()?.idempotencyKey).toBe(xBody()?.idempotencyKey)
     })

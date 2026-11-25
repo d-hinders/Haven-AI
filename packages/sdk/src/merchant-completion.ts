@@ -623,7 +623,7 @@ export class MerchantCompletion {
     const approvedResourceUrl = status.resourceUrl ?? status.x402?.resourceUrl ?? null
     // #5086: an MCP payment is delivered to the endpoint Haven stored with its
     // call context; the stored address keeps the merchant's declared value
-    // (it is the payment's identity and what the evidence reports carry).
+    // (it is the payment's identity and what the funding evidence report carries).
     if (input.approvedEndpoint !== undefined) {
       if (input.approvedEndpoint !== input.url) {
         throw new HavenApiError(

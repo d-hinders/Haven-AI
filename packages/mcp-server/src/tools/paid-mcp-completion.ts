@@ -175,7 +175,9 @@ async function withDeliveryTarget(
   return {
     ...context,
     ...(decided.approvedEndpoint !== undefined ? { approvedEndpoint: decided.approvedEndpoint } : {}),
-    ...(decided.stored ? { storedContextRead: true } : {}),
+    // A 409 (no stored context) is an answer too: the checkout-details read
+    // would get the same 409, so it is not made a second time.
+    ...(decided.stored || decided.noStoredContext ? { storedContextRead: true } : {}),
     ...(context.checkoutDetailsStored === undefined && storedRequest !== undefined
       ? { checkoutDetailsStored: { value: storedRequest } }
       : {}),
@@ -204,6 +206,10 @@ async function storedCheckoutRequestFor(
   return {
     checkoutDetailsStored: {
       value: stored.checkoutDetailsRequest,
+      // #5086: defence in depth. An explicit merchant_url that is not the
+      // stored endpoint is refused by `approvedDeliveryTarget` before this
+      // read can run, so this marks a mismatch only if the stored context
+      // changed between the two reads.
       ...(stored.merchantUrl !== explicitMerchantUrl ? { merchantMismatch: true } : {}),
     },
   }

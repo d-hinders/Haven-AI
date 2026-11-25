@@ -1902,8 +1902,8 @@ export class HavenClient {
      * When given, delivery is checked against it (string for string) instead
      * of the payment's stored resource address, which on EIP-3009 holds the
      * merchant's DECLARED address (for example `mcp://tool/<name>`) and need
-     * not be a URL at all. The address is still what the evidence reports
-     * carry. Omit it (the local SDK path, plain HTTP, a payment with no stored
+     * not be a URL at all. The address is still what the funding evidence report
+     * carries. Omit it (the local SDK path, plain HTTP, a payment with no stored
      * call context) to keep the address comparison. Pass only a value Haven
      * stored — never the URL being called, or the check compares it with itself.
      */

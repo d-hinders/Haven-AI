@@ -13,7 +13,7 @@
  *   `merchant_url` and would be compared with itself. The payment's stored
  *   address keeps the merchant's DECLARED `resource.url` (on EIP-3009 that is
  *   what `createX402Intent` stores, what the signer binds and what the
- *   evidence reports carry), so an `mcp://tool/<name>` address is payable.
+ *   funding evidence report carries), so an `mcp://tool/<name>` address is payable.
  * - **No stored call context** (`haven_pay_x402_quote` with an MCP challenge,
  *   a 409 from the context read): the payment's stored address, as before —
  *   read from the payment status (#5084).
@@ -70,7 +70,7 @@ function readRefusal(err: unknown, paymentId: string, phase: DeliveryCheckPhase)
         nextTool: null,
         nextToolOmittedReason:
           phase === 'settle'
-            ? 'Haven refused to read this payment (an unknown or foreign payment_id, or an auth refusal), so reading it again answers the same; nothing was funded or submitted — tell the user'
+            ? 'Haven refused to read this payment (an unknown or foreign payment_id, or an auth refusal), so reading it again answers the same; this call funded and submitted nothing — tell the user'
             : 'Haven refused to read this payment (an unknown or foreign payment_id, or an auth refusal), so reading it again answers the same; the payment header was not delivered — tell the user',
       }),
     })
@@ -111,7 +111,7 @@ export async function approvedDeliveryTarget(
   paymentId: string,
   deliveryUrl: string,
   options: { explicit: boolean; phase: DeliveryCheckPhase },
-): Promise<{ approvedEndpoint?: string; stored?: X402MerchantCallContext }> {
+): Promise<{ approvedEndpoint?: string; stored?: X402MerchantCallContext; noStoredContext?: boolean }> {
   if (!options.explicit) return { approvedEndpoint: deliveryUrl }
   let stored: X402MerchantCallContext
   try {
@@ -119,7 +119,7 @@ export async function approvedDeliveryTarget(
   } catch (err) {
     if (err instanceof HavenApiError && err.statusCode === 409) {
       if (options.phase === 'settle') await assertStoredAddressMatchesBeforeSpend(haven, paymentId, deliveryUrl)
-      return {}
+      return { noStoredContext: true }
     }
     if (err instanceof HavenApiError && err.statusCode === 410) {
       throw paymentWindowExpiredError({ paymentId, status: 'expired', phase: 'expired', rail: 'x402' })
@@ -143,7 +143,7 @@ export async function approvedDeliveryTarget(
         nextTool: null,
         nextToolOmittedReason:
           options.phase === 'settle'
-            ? 're-call the same tool without merchant_url (Haven rehydrates the stored context) or with merchant_url set to the approved endpoint the message names; nothing was funded or submitted'
+            ? 're-call the same tool without merchant_url (Haven rehydrates the stored context) or with merchant_url set to the approved endpoint the message names; this call funded and submitted nothing'
             : 're-call the same tool without merchant_url (Haven rehydrates the stored context) or with merchant_url set to the approved endpoint the message names; the payment header was not delivered',
       }),
     })

@@ -105,7 +105,7 @@ describe('haven_pay_mcp_tool (EIP-3009): an mcp://tool/<name> address is payable
     expect(intentRequests()).toHaveLength(1)
     const body = intentRequests()[0].body as Record<string, any>
     // The payment's identity stays the merchant's declared address (what the
-    // signer binds and the evidence reports carry) …
+    // signer binds and the funding evidence report carries) …
     expect(body.url).toBe(MCP_TOOL_ADDRESS)
     // … and the endpoint delivery is checked against is the one Haven called.
     expect(body.mcpCallContext?.merchantUrl).toBe(ENDPOINT)
@@ -255,6 +255,56 @@ describe('haven_settle_mcp_tool: delivery is bound to the stored endpoint before
     expect(complete.mock.calls[0][0]).toMatchObject({ url: ENDPOINT, approvedEndpoint: ENDPOINT })
   })
 
+  it('compares with the stored endpoint string for string: a trailing slash is a different endpoint', async () => {
+    stubFetch({
+      'GET /x402/pay_x402/merchant-call-context': storedContext(ENDPOINT),
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const res = await handlers().haven_settle_mcp_tool(settle({ merchant_url: `${ENDPOINT}/`, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(res.success).toBe(false)
+    expect(fail(res).code).toBe('MERCHANT_RESOURCE_MISMATCH')
+    expect(fundingRelays()).toHaveLength(0)
+  })
+
+  it('an expired payment (410 on the context read) answers the expired-window refusal', async () => {
+    stubFetch({
+      'GET /x402/pay_x402/merchant-call-context': { status: 410, body: { payment_id: 'pay_x402', status: 'expired', error_code: 'expired' } },
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const res = await handlers().haven_settle_mcp_tool(settle({ payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(res.success).toBe(false)
+    expect(fail(res).code).toBe('PAYMENT_WINDOW_EXPIRED')
+    expect(fundingRelays()).toHaveLength(0)
+  })
+
+  it('an explicit settle reads the stored context once (the delivery check also feeds checkout details)', async () => {
+    stubFetch({
+      'GET /x402/pay_x402/merchant-call-context': storedContext(ENDPOINT),
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementEvidenceOutcome: { outcome: 'confirmed' },
+    } as never)
+    await createToolHandlers(haven).haven_settle_mcp_tool(settle({ merchant_url: ENDPOINT, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(recordedCalls().filter((c) => path(c) === '/x402/pay_x402/merchant-call-context')).toHaveLength(1)
+  })
+
+  it('no stored context (409): the context is read once, not again for checkout details', async () => {
+    stubFetch({
+      'GET /x402/pay_x402/merchant-call-context': NO_STORED_CONTEXT,
+      'POST /payments/pay_x402/sign': { status: 200, body: { status: 'confirmed', tx_hash: '0xfund' } },
+    })
+    const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementEvidenceOutcome: { outcome: 'confirmed' },
+    } as never)
+    await createToolHandlers(haven).haven_settle_mcp_tool(settle({ merchant_url: ENDPOINT, payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    expect(recordedCalls().filter((c) => path(c) === '/x402/pay_x402/merchant-call-context')).toHaveLength(1)
+  })
+
   it('no stored context (409): falls back to the payment\'s address, still before funding', async () => {
     stubFetch({
       'GET /x402/pay_x402/merchant-call-context': NO_STORED_CONTEXT,
@@ -378,6 +428,19 @@ describe('haven_complete_mcp_tool: an explicit, different merchant_url is refuse
         payment_header: VALID_PAYMENT_HEADER_REF.v1,
       }),
     )
+    expect(complete.mock.calls[0][0]).toMatchObject({ url: ENDPOINT, approvedEndpoint: ENDPOINT })
+  })
+
+  it('a rehydrated complete (after haven_submit) of an mcp://tool/x payment is bound to the stored endpoint', async () => {
+    stubFetch({ 'GET /x402/pay_x402/merchant-call-context': storedContext(ENDPOINT) })
+    const haven = new HavenClient({ apiKey: 'test-key', baseUrl: 'http://haven.test' })
+    vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined)
+    const complete = vi.spyOn(haven, 'completeX402MerchantCall').mockResolvedValue({
+      status: 200, ok: true, body: { result: 'ok' }, settlementEvidenceOutcome: { outcome: 'confirmed' },
+    } as never)
+    ok(await createToolHandlers(haven).haven_complete_mcp_tool({ payment_id: 'pay_x402', payment_header: VALID_PAYMENT_HEADER_REF.v1 }))
+    // Without approvedEndpoint, completion would compare mcp://tool/x with the
+    // endpoint and refuse after funding — the stranded payment #5084 fixed.
     expect(complete.mock.calls[0][0]).toMatchObject({ url: ENDPOINT, approvedEndpoint: ENDPOINT })
   })
 

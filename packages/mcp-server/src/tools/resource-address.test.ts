@@ -207,6 +207,11 @@ describe('haven_settle_mcp_tool: delivery is bound to the stored endpoint before
     expect(out.code).toBe('MERCHANT_RESOURCE_MISMATCH')
     expect(out.message).toContain(`approved for the MCP endpoint ${ENDPOINT}, but this call would deliver it to ${OTHER}`)
     expect(out.next_action).toBe('retry_with_explicit_context')
+    // Per call, never "nothing was funded": a repeated settle of a funded
+    // payment reaches this refusal too.
+    expect(out.next_tool_omitted_reason).toBe(
+      're-call the same tool without merchant_url (Haven rehydrates the stored context) or with merchant_url set to the approved endpoint the message names; this call funded and submitted nothing',
+    )
     expect(fundingRelays()).toHaveLength(0)
   })
 

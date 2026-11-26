@@ -36,7 +36,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-19"
+last-verified: "2026-11-26"
 ---
 
 # Merchant kit: design
@@ -466,8 +466,10 @@ reader needs only `version`, `network`, `pay_to` and `products`, and a missing
 
 It is served only when the demo merchant has a Sales account
 (`MERCHANT_SALES_ADDRESS`), which is its `pay_to`; otherwise the path is a 404.
-It lists only the products that report a sale to Haven: Field Notes, and the
-joke when Stripe recording is on. The joke is paid to the Stripe deposit
+It lists only the products whose sales appear on that Sales account, decided by
+the same function the sale reporter uses (`salesAccountRoute` in the demo
+merchant's `products.ts`, #5091): every product paid into the Sales account (by
+default only Field Notes), and the joke when Stripe recording is on. The joke is paid to the Stripe deposit
 address, not to `pay_to`: a kit document has one `pay_to`, and nothing pays
 from this document (the SDK never reads this path).
 

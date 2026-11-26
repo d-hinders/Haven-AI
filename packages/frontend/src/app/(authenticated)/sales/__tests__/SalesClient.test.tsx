@@ -589,6 +589,23 @@ describe('payers', () => {
     expect(sentence).not.toMatch(/haven/i)
   })
 
+  it('the Revenue tile and the Payments summary show a sum’s sub-cent part (#5088): 0.0135 is $0.0135', async () => {
+    serve({
+      summary: {
+        ...SUMMARY,
+        revenue_raw: '13500',
+        revenue_in_account_raw: '3500',
+        received_in_stripe: { count: 1, amount_raw: '10000' },
+      },
+    })
+    await renderPage()
+    const tiles = await screen.findByTestId('sales-tiles')
+    expect(within(tiles).getByText('$0.0135')).toBeTruthy()
+    expect(within(tiles).getByText('$0.0035 in Haven · $0.01 in Stripe')).toBeTruthy()
+    const summaryLine = await screen.findByTestId('sales-payments-summary')
+    expect(summaryLine.textContent).toBe('Revenue $0.0135 ($0.0035 in Haven · $0.01 in Stripe)')
+  })
+
   it("shows a payer row's sub-cent part (#5088): 0.011 is $0.0110, 0.0025 stays $0.0025", async () => {
     serve({
       summary: {

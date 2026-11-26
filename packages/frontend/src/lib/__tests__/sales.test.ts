@@ -148,11 +148,12 @@ describe('amounts', () => {
 
     it('the split names each part with its sub-cent part', () => {
       const split = {
-        revenue_raw: '13500',
-        revenue_in_account_raw: '3500',
+        revenue_raw: '21000',
+        revenue_in_account_raw: '11000',
         received_in_stripe: { count: 1, amount_raw: '10000' },
       } as unknown as SalesSummary
-      expect(revenueSplitText(split, usd)).toBe('$0.0035 in Haven · $0.01 in Stripe')
+      // The in-Haven part is itself a sum: 0.011, not "$0.01".
+      expect(revenueSplitText(split, usd)).toBe('$0.0110 in Haven · $0.01 in Stripe')
     })
   })
 

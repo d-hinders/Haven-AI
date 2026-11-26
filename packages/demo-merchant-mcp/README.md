@@ -745,9 +745,10 @@ if the address was registered at or before the payment's block time, and the
 merchant never resends a refused report, so a joke paid before registration
 never appears on the Sales page. The address
 is the owner's own statement and is shown as "registered by you, not verified by
-Haven". **The buyer must be a Haven user other than the Sales account's owner:**
-a Field Notes payment from the owner's own agent is a move between the owner's
-accounts ("Not counted", outside Revenue), and a joke from one is refused. A
+Haven". **Any x402 buyer can pay, but only a buyer other than the Sales
+account's owner makes a sale:** a Field Notes payment from the owner's own agent
+goes through and is a move between the owner's accounts ("Not counted", outside
+Revenue), and a joke from one is refused. A
 Stripe-held sale never counts in a Haven balance; it counts in Revenue, split as
 "in Stripe", and its row is marked "Received in Stripe". When the deposit address changes, register the new one and
 retire the old one only after the last payment to it has settled (see
@@ -1030,9 +1031,10 @@ merchant's state: a restart forgets them. `/healthz` counts `reported`,
 `pending`, `refused` and `gave_up` for the running process. No log line,
 `/healthz` field or error names the Sales key.
 
-**The buyer must be another Haven user.** Haven counts a transfer from the
-owner's own addresses — every delegate address of the owner's agents included
-— as a move between the owner's accounts, not a sale. On EIP-3009 the payer is
+**A sale needs a buyer other than the Sales account's owner.** Any x402
+buyer can pay (every live run so far used a Haven agent; a buyer outside Haven
+has not been exercised). Haven counts a transfer from the owner's own
+addresses — every delegate address of the owner's agents included — as a move between the owner's accounts, not a sale. On EIP-3009 the payer is
 the buying agent's delegate, so a sale bought by the Sales account owner's own
 agent is stored as an internal move and shows no revenue. The demo's buying
 agent belongs to a different Haven user from the Sales account's owner.

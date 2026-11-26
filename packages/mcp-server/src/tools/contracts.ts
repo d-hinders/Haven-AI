@@ -1291,12 +1291,12 @@ const QUOTE_CATALOG_PURCHASE_DESCRIPTION = composeDescription({
 
 const COMPLETE_MCP_TOOL_DESCRIPTION = composeDescription({
   summary:
-    'Final step of the decomposed x402 MCP purchase: deliver the signed merchant payment header (both x402 wire names) and return the tool result.',
+    'Final step of the x402 MCP purchase: deliver the signed payment header (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1) and return the tool result.',
   behavior:
     'Pass payment_id and payment_header (from haven_x402_sign_header); merchant_url/tool_name/arguments/mcp_transport are optional — rehydrated by payment_id. Call only after haven_submit confirmed funding. The header is a signed, single-use, amount/merchant/nonce-bound authorization — not a key. ' +
     'Merchant-issued credentials in `result` (JWTs, *_token/*_link/session fields) are withheld unless include_merchant_credentials=true — if you receive one, use it with the merchant it came from and never echo or log it. ' +
     'Optionally pass delivery_reference — a NON-SECRET pointer to what the merchant delivered (product, order id) shown on the owner\'s receipt; a credential-shaped value is refused before the call. ' +
-    'On a settled x402 payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (same names/values as haven_get_agent) beside the deprecated snake_case spellings. ' +
+    'On a settled payment the allowance block reports remainingAtomic / remainingDisplay / resetPeriodMin / tokenSymbol / tokenAddress (same names/values as haven_get_agent) beside deprecated snake_case spellings. ' +
     'settled:true only after on-chain verification, never a merchant 2xx; unverified: settled:false, delivered:true, code SETTLEMENT_PENDING or DELIVERED_UNSETTLED, SETTLEMENT_UNCONFIRMED warning, null settlement_tx_hash, no purchase_summary — poll haven_get_payment_status after ~3 minutes; sweep only if merchant_settlement_recorded is still not true. ' +
     'Exceptional states: PAYMENT_WINDOW_EXPIRED (retry_with_new_quote=true); MERCHANT_REJECTED_AFTER_FUNDING on eip3009 means stranded funds — verify with haven_get_payment_status before haven_sweep_delegate. erc7710 settles via haven_settle_mcp_tool.',
   nextActionGuidance:

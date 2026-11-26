@@ -25,7 +25,10 @@ You need:
    setup on Base comes later.
 2. Your own Coinbase developer keys: a CDP secret API key (key id and secret),
    created in the Coinbase Developer Platform. Haven does not offer its key.
-3. An upstream HTTP API and its API key.
+3. An upstream HTTP API and its API key. For a first test call any public
+   API that needs no key will do (set `UPSTREAM_AUTH=none`): Haven's
+   2026-11-26 Railway test used the echo service `https://httpbin.org/anything`
+   as `UPSTREAM_BASE_URL`.
 4. An RPC URL for Base Sepolia, unless you use the public default
    ([Settings](#settings)).
 5. Docker, and a public `https` address for the proxy: a Haven agent pays only
@@ -77,6 +80,12 @@ Then:
    Delete the `PRODUCTS_FILE` and `PAYMENTS_DB` lines: the image sets both
    ([Run it as a container](#run-it-as-a-container)). Every other setting has a
    default; [All settings](#all-settings) lists them.
+
+   **Hosting on Railway?** Do not write a `.env` file. Put these settings in
+   the Railway service's variables, and run the step 6 check on Railway, not
+   on your machine. That way the Coinbase secret and the Sales key never sit in
+   a file on your laptop. [Host it on Railway](#host-it-on-railway) has the
+   steps. Then come back for step 8.
 6. **Check the settings.** With the proxy not running:
 
    ```bash
@@ -163,6 +172,9 @@ Then:
      Base Sepolia.
    - The same payment header presented again gets `payment_already_delivered`:
      one payment buys one call.
+   - The sale on your Sales page. To see your products on its **Products** tab
+     too, enter your proxy's origin as the product list address
+     ([The Products tab](#the-sales-account-and-its-receiving-address)).
 
 Before you take real traffic, read [Running it for real](#running-it-for-real):
 what you run, and what you monitor.
@@ -252,6 +264,15 @@ arrives in.
 
 Then open **Sales → Setup → Receiving address** and choose **Show address**.
 Copy that address. It is `PAY_TO`.
+
+**The Products tab.** Haven lists your products on the Sales page's
+**Products** tab once it knows where your proxy runs. Once the proxy is up,
+enter its public origin, `PUBLIC_BASE_URL` with no path, under **Sales → Setup →
+Product list address**. Haven reads [the discovery document](#the-discovery-document)
+from `<origin>/.well-known/x402` and lists what it finds. An account has one
+product list address, and saving a different one marks every product the old
+address listed as *No longer offered*; past sales keep their names. Without an
+address, sales still arrive and show the product the sale record names.
 
 ## Coinbase developer keys
 
@@ -637,7 +658,8 @@ image with your own products file, which is why the two are kept apart.
 **The products file.** Railway cannot mount a single file into a container: a
 volume mounts a directory. So the image's `PRODUCTS_FILE=/config/products.json`
 has nothing to read unless the file is in the image. Put a two-line Dockerfile
-in your own repository, beside your `products.json`:
+beside your `products.json`, in your own repository or in a folder you deploy
+with `railway up`:
 
 ```dockerfile
 FROM ghcr.io/d-hinders/haven-paywall-proxy:dev-<short-sha>
@@ -657,7 +679,7 @@ the healthcheck path `/healthz`:
 
 | Setting | Value |
 |---|---|
-| Source | your repository, with the Dockerfile above at its root |
+| Source | the folder or repository with the Dockerfile above at its root |
 | Volume | one, mounted at `/data` |
 | Replicas | one. The proxy locks `PAYMENTS_DB`, and a second process on the same store refuses to start |
 | Healthcheck | `/healthz` |
@@ -678,6 +700,50 @@ the public domain served `/healthz` with no port setting). Do not paste
 image's paths, and the image's paths are the ones this recipe mounts. Delete
 those two lines, as Quickstart step 5 says.
 
+**Step by step.** This order works (followed end to end on 2026-11-26, from a
+folder holding only the Dockerfile and `products.json`, with the Railway CLI;
+the dashboard does the same things):
+
+1. **Create the project and the service.** `railway init` creates a project
+   and `railway add` adds an empty service. A new project's first environment
+   is called `production` by Railway, whatever network you run; the name does
+   not change anything here.
+2. **Add the volume** at `/data` (`railway volume add`, mount path `/data`).
+3. **Generate the domain** (`railway domain`). Do this before the variables:
+   `PUBLIC_BASE_URL` is that domain, and it does not exist until you generate
+   it.
+4. **Set the variables**, including `RAILWAY_RUN_UID=0`, before the first
+   deploy. Paste the secrets (`CDP_API_KEY_ID`, `CDP_API_KEY_SECRET`,
+   `HAVEN_MERCHANT_KEY`) straight into the service's variables. In the
+   dashboard, an edit is held as a *staged change* until you click **Deploy**
+   on the banner at the top of the canvas (Railway's staged-changes guide,
+   checked 2026-11-26): a variable you pasted is not in the service until you
+   do. With no source deployed yet, applying runs nothing.
+5. **Run the check on Railway.** Add a third line to the Dockerfile for one
+   deploy:
+
+   ```dockerfile
+   CMD ["check"]
+   ```
+
+   The image's entrypoint is the proxy's CLI, so this deploy runs `check` with
+   the service's own variables and volume, prints one line per check in the
+   deploy log, and exits. No proxy is running yet, so the store's lock is free.
+   Deploy it from the folder with `railway up` (it uploads the folder and
+   builds the Dockerfile at its root), or by pushing it to the connected
+   repository. Checked 2026-11-26: every line `ok`, and the store and outbox
+   lines named `/data`. Do this before you set the healthcheck: the check
+   container exits without serving `/healthz`.
+6. **Deploy the proxy.** Remove the `CMD` line and deploy again. What you
+   should see: the `started` line in the deploy log, and `status: ok` on
+   `https://<your-domain>/healthz`.
+7. **Set the healthcheck, replicas and sleep** in the service's settings:
+   the healthcheck path `/healthz`, one replica (the *Scale* section), and
+   Serverless (Railway's new name for Sleep) as you choose. Railway's
+   healthcheck and scaling pages place these "in the service settings"
+   (checked 2026-11-26). A `railway.json` can set them too, but Railway CLI
+   5.62 reports that file as deprecated (2026-11-26).
+
 **Volume ownership, and the non-root user.** Railway mounts a volume as `root`
 (Railway's volumes page, checked 2026-11-23), so a volume at `/data` is not
 writable by the image's `node` user (uid 1000). The proxy then exits at startup
@@ -695,16 +761,16 @@ container, and a compromise of the proxy is no longer contained by the user
 boundary. The alternative is a host where you can set the volume's ownership to
 uid 1000; Railway does not offer that.
 
-The volume mount itself was not exercised in this pass: Railway's volumes page
-states the root mount (checked 2026-11-23), and a root-owned `/data` produces
-the error above (checked locally 2026-11-23). Verify it on your first deploy:
-the `started` line means the store opened, and the error above means it did
-not.
+Checked on a Railway volume on 2026-11-26: with `RAILWAY_RUN_UID=0`, `check`
+named `/data/payments.sqlite` and `/data/sales-outbox.jsonl`, and the proxy
+logged `started` with the store open. If you see the error above instead, the
+variable is missing.
 
 **Check before the first deploy.** `check` cannot run inside the running
 service: it takes the store's exclusive lock and fails with `in use by a
-running proxy; stop it first`. Run it locally against the same settings before
-you deploy:
+running proxy; stop it first`. On Railway, run it as its own deploy (step 5
+above). To run it on your own machine instead, you need the same settings in a
+local `.env`, secrets included:
 
 ```bash
 docker run --rm --env-file .env \
@@ -718,8 +784,10 @@ Use the same tag as your Dockerfile ([Which tag to pin](#which-tag-to-pin)).
 **Redeploys.** Railway does not run two deployments of a service with a volume
 at once: it stops the old container before starting the new one, so the store
 lock is never contended, and a redeploy has a short window with no container
-serving (Railway's healthcheck documentation, checked 2026-11-23; not exercised
-on a volume-backed service in this pass). A buyer's call in that window gets a
+serving (Railway's healthcheck documentation, checked 2026-11-23). On
+2026-11-26 a second deploy on the same volume started cleanly, but the first
+deploy was the `check` run, which had already exited: taking the lock over from
+a running proxy is still untested. A buyer's call in that window gets a
 connection error, not a charge.
 
 **Sleep.** Railway's Sleep setting stops an idle service after about ten

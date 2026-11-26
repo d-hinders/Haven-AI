@@ -26,7 +26,9 @@
  *     `fixture-shape-parity.test.ts`; the harness itself is a CLI that
  *     Playwright's loader cannot collect (see that file for the measurement).
  *     So no parallel fixture set is introduced either: one declared shape, read
- *     by three surfaces.
+ *     by three surfaces. The revenue side (`revenue`, `revenue-subcent`) reads
+ *     the Sales fixtures instead (`salesSummary`, `salesSummarySubCent` in
+ *     `fixtures/haven-api.ts`), the same ones the Sales spec photographs.
  *   - The viewports are the single committed pair from
  *     `scripts/evidence-viewports.mjs` (1280×800 and 390×844), so the pixel
  *     gate and the #896 evidence captures render the same two widths.

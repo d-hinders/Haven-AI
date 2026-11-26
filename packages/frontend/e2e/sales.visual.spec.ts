@@ -8,8 +8,9 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Eight scenarios × two viewports (× the two schemes the projects run) =
- * `sales-<scenario>-<viewport>[-dark].png` under
+ * Eight scenarios × two viewports, light only (the spec is not in the dark
+ * project's `testMatch`) = sixteen baselines, `sales-<scenario>-<viewport>.png`
+ * under
  * `e2e/__screenshots__/sales.visual.spec.ts/`:
  *
  *   - `overview` — tiles, the not-counted notice, the by-day chart, By product,

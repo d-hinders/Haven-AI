@@ -1392,10 +1392,12 @@ figure does not fit the four-across row at `text-2xl` asks for the smaller
 size, and the caller decides, because it knows the figure. Its one user is the
 Sales and Analytics Revenue tile in USDC mode (no rate for the display
 currency). There, `salesRevenueTile` (`lib/sales.ts`) puts "USDC" in the unit
-slot and asks for `compact` from 1,000 USDC. Measured at desktop 1280, the
+slot and asks for `compact` from 1,000 USDC. Measured at desktop 1280 at
+`8caf959d0` (2026-11-26, a local Playwright probe), the
 tile's text track is 190px; `12,345.6789 USDC` at `text-2xl` was 227px. The
 other display modes fit at the default size: `$123,456.7891` is 184px and
-`≈ 129 629,63 kr` is 186px. Owner decision on #5105, 2026-11-26. The inline
+`≈129 629,63 kr` is at most 186px (the probe measured it with a space after
+the ≈, which the page does not render). Owner decision on #5105, 2026-11-26. The inline
 variant ignores it.
 
 ### Amount: currency mode (#3805)

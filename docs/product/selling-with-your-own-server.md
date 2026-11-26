@@ -303,7 +303,9 @@ One free tool (`ping`) and one paid tool (`haiku`, 0.001 USDC). Save it as
 environment variables below, and run `node server.mjs` (it was run on
 Node.js 24). Buyers call `$PUBLIC_URL/mcp`, so it must be a public https
 address. On your own machine a tunnel (for example
-`cloudflared tunnel --url http://localhost:4402`) gives you one.
+`cloudflared tunnel --url http://localhost:4402`) gives you one. A new tunnel
+address can take a few minutes before Haven can reach it; until then a
+quote fails with the session message from rule 1, and nothing is paid.
 
 | Variable | What it is |
 |---|---|

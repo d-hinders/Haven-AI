@@ -2179,7 +2179,7 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
 
 ### `haven_complete_mcp_tool` names the wire header per x402 version (#5096)
 
-Hosted text only. The description's first sentence said the signed payment header goes out under "both x402 wire names", which has not been true for a v2 payload since #2341 and #4754: delivery sends `PAYMENT-SIGNATURE` alone for erc7710 and for x402 v2, and both names only for v1. It now reads "(PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1)", the wording `haven_pay_x402_quote` already uses. Three phrases in the same description were tightened to keep the description budget unchanged. No tool, schema, behaviour or consent-hash change. The contract fingerprint moves, as on any description change, so an agent whose session predates the deploy is told once to reconnect (*Hosted tool lists*, above).
+Hosted text only. The description's first sentence said the signed payment header goes out under "both x402 wire names", which has not been true for a v2 payload since #2341 and #4754: delivery sends `PAYMENT-SIGNATURE` alone for erc7710 and for x402 v2, and both names only for v1. It now reads "(PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1)", the wording `haven_pay_x402_quote` already uses. Four words in the same description were dropped ("decomposed", "merchant", "x402" in "On a settled x402 payment", "the") to keep the description budget unchanged. No tool, schema, behaviour or consent-hash change. The contract fingerprint moves, as on any description change, so an agent whose session predates the deploy is told once to reconnect (*Hosted tool lists*, above).
 
 ### A stateless MCP server is payable (#5089)
 

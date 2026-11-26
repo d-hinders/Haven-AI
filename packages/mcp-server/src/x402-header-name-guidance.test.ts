@@ -8,8 +8,9 @@
  * ## What this exists to catch
  *
  * #2289 fixed the header name where Haven makes the request: `deliverPayment`
- * sets `PAYMENT-SIGNATURE` and `X-PAYMENT` to the same value, and every
- * SDK-driven retry routes through it. Eight tests pin that.
+ * then set `PAYMENT-SIGNATURE` and `X-PAYMENT` to the same value (since #2341
+ * and #4754 it sets `PAYMENT-SIGNATURE` alone for erc7710 and x402 v2), and
+ * every SDK-driven retry routes through it. Eight tests pin that.
  *
  * It did not fix the header name where Haven *tells the agent* to make the
  * request — and `haven_pay_x402_quote`'s whole premise is "retry the merchant
@@ -26,7 +27,7 @@
  *
  * ## Why the assertion is shaped this way
  *
- * Per-DESCRIPTION, not per-line: the legitimate form names both names, and
+ * Per-DESCRIPTION, not per-line: a legitimate form may name both names, and
  * they routinely land on different lines of the same string. Purely literal —
  * it asks whether one substring appears when another does, and never
  * interprets a sentence (ship-next § Rework caps). It cannot verify that the
@@ -167,7 +168,7 @@ describe('#2330 — no agent-facing surface names the v1 header alone', () => {
     expect(firstSentence).toBe(
       'Final step of the x402 MCP purchase: deliver the signed payment header (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1) and return the tool result.',
     )
-    expect(complete).not.toContain('both x402 wire names')
+    expect(complete).not.toMatch(/both (x402 )?wire names|under both/i)
   })
 })
 

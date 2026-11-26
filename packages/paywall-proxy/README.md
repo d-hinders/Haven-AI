@@ -685,7 +685,8 @@ the healthcheck path `/healthz`:
 | Healthcheck | `/healthz` |
 | Sleep | your choice; see *Sleep* below |
 
-**Variables.** Set the variables from Quickstart step 5, and add:
+**Variables.** Set the variables from Quickstart step 5, with these values on
+Railway (`PUBLIC_BASE_URL` is in step 5 already; the other two are new):
 
 | Variable | Value |
 |---|---|

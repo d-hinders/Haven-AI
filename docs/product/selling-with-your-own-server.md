@@ -85,9 +85,9 @@ merchant's own Coinbase facilitator key, not Haven's: Haven never holds a
 merchant's facilitator credentials and never settles on a merchant's behalf
 (owner decision (a) on epic #4884). Haven's own key is not offered to sellers.
 
-**Who can pay.** Any x402 buyer that pays your challenge can pay, except the
-Sales account owner's own agents and accounts: their payments show as a move
-between the owner's accounts, not a sale. A Haven agent needs an open, unpinned
+**Who can pay.** Any x402 buyer that pays your challenge can pay. A payment
+from the Sales account owner's own agents or accounts goes through too, but it
+shows as a move between the owner's accounts, not a sale. A Haven agent needs an open, unpinned
 budget; one whose budget is pinned to named merchants cannot pay a merchant it
 was not given. Every live run of this guide so far used a Haven agent as the
 buyer; a buyer outside Haven has not been exercised.

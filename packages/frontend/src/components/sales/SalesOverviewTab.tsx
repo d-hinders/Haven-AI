@@ -54,12 +54,6 @@ import { SalesBreakdownCard, type BreakdownLine } from './SalesBreakdownCard'
 import { SalesPaymentsList, type SalesListControls } from './SalesPaymentsList'
 
 /**
- * The By payer lines: contacts and your own accounts by name, every other
- * payer as "Wallet" with a short address, then the folded "Other payers" and
- * the payments from several payers at once. The page never says a payer uses
- * Haven.
- */
-/**
  * #5088 (owner decision 1): a payer is the address the money came from on
  * chain, so one buyer can show as more than one wallet (a payment by one
  * settlement scheme leaves from the buyer's account, by the other from its
@@ -69,6 +63,12 @@ import { SalesPaymentsList, type SalesListControls } from './SalesPaymentsList'
 export const BY_PAYER_DESCRIPTION =
   'Who paid. A payer is the address the money came from, so one buyer can appear as more than one wallet. Only your contacts and your own agents and accounts are named.'
 
+/**
+ * The By payer lines: contacts and your own accounts by name, every other
+ * payer as "Wallet" with a short address, then the folded "Other payers" and
+ * the payments from several payers at once. The page never says a payer uses
+ * Haven.
+ */
 export function payerLines(summary: SalesSummary, money: SalesMoney, now: Date = new Date()): BreakdownLine[] {
   const lines: BreakdownLine[] = summary.by_payer.map((entry) => ({
     key: payerKey(entry.payer),

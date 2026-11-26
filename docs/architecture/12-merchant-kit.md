@@ -712,7 +712,7 @@ transfer: the delegate key on EIP-3009, the Haven account on ERC-7710. So one
 buyer that pays by both schemes shows as two payers, each a **Wallet** unless
 it is one of the merchant's own contacts, accounts or agents; the page says
 that one buyer can appear as more than one wallet, and never that two rows are
-the same buyer or that a payer uses Haven (owner decision 1, #4894).
+the same buyer or that a payer uses Haven (#5088 owner decision 1; owner decision 2 on #4894).
 
 For a buyer that is not a Haven agent, `payer` is whatever address signed the
 authorization. The proxy does not guess an identity from it.

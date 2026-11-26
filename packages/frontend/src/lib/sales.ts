@@ -237,7 +237,8 @@ const USDC_CENT_ATOMIC = 10n ** BigInt(USDC_DECIMALS - 2)
  * (`tokenText`'s boundary). The reads carry sums, not their payments, so that
  * sub-cent remainder stands in for "a part that needs 4 decimals".
  * `formatFiatDisplay` and its threshold are untouched: a single amount and
- * every figure outside Sales keep the 2026-10-22 rule
+ * every figure outside these Sales and Analytics revenue sums keep the
+ * 2026-10-22 rule
  * (`docs/product/design-system.md`).
  */
 export function salesSumNeedsFourDecimals(raw: string, money: SalesMoney): boolean {

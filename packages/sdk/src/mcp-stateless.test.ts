@@ -39,6 +39,7 @@ type InitializeAnswer =
   | 'no-protocol-version'
   | 'large-html'
   | 'large-json'
+  | 'endless-html'
 
 interface Call { url: string; method: string; body: Record<string, any> | null; headers: Headers }
 
@@ -57,6 +58,12 @@ function installMerchant(answer: InitializeAnswer, opts: { require406?: boolean 
       if (answer === 'html') return new Response('<html>hello</html>', { status: 200, headers: { 'Content-Type': 'text/html' } })
       // Over the hosted 256 KiB mcpSession cap.
       if (answer === 'large-html') return new Response(`<html>${'x'.repeat(300_000)}</html>`, { status: 200, headers: { 'Content-Type': 'text/html' } })
+      // A web page whose body never ends: reading it would hold the handshake
+      // open until a deadline (the local fetch() has up to merchantTimeout).
+      if (answer === 'endless-html') {
+        const endless = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode('<html>')) } })
+        return new Response(endless, { status: 200, headers: { 'Content-Type': 'text/html' } })
+      }
       if (answer === 'large-json') return new Response(JSON.stringify({ pad: 'x'.repeat(300_000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       if (answer === 'json-not-initialize') return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       if (answer === 'jsonrpc-error') {
@@ -142,6 +149,15 @@ describe('#5089 McpMerchantTransport.handshake — a stateless server is told ap
       expect(outcome).toBeUndefined()
     })
   }
+
+  it('a session-less web page is left unread: a body that never ends does not hold the handshake open', async () => {
+    installMerchant('endless-html')
+    const outcome = await Promise.race([
+      new McpMerchantTransport().handshake(mcpUrl),
+      new Promise((resolve) => setTimeout(() => resolve('still reading'), 1_000)),
+    ])
+    expect(outcome).toBeUndefined()
+  })
 
   it('withMcpHeaders adds Accept on a stateless handshake and the session headers on a stateful one', () => {
     const transport = new McpMerchantTransport()

@@ -20,14 +20,22 @@ export const CLIENT_RELEASE_DATA = {
       {
         "version": "0.15.0-alpha.0",
         "date": "2026-11-26",
-        "summary": "completeX402MerchantCall can bind delivery to a stored MCP endpoint. (+5 more in the changelog)",
+        "summary": "quoteMcpX402 and completeX402MerchantCall accept a stateless MCP server. (+6 more in the changelog)",
         "summary_segments": [
+          {
+            "text": "quoteMcpX402",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
           {
             "text": "completeX402MerchantCall",
             "code": true
           },
           {
-            "text": " can bind delivery to a stored MCP endpoint. (+5 more in the changelog)",
+            "text": " accept a stateless MCP server. (+6 more in the changelog)",
             "code": false
           }
         ],

@@ -71,6 +71,7 @@ import {
   revenueCount,
   salesChartFormat,
   salesRangeDays,
+  salesSumText,
   salesTotalText,
   type SalesCurrency,
   type SalesDayRange,
@@ -159,7 +160,7 @@ export function RevenueSection({
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="analytics-revenue-tiles">
         <StatTile
           label="Revenue"
-          value={salesTotalText(data.revenue_raw, money)}
+          value={salesSumText(data.revenue_raw, money)}
           footnote={`from ${plural(revenuePayments, 'payment')}`}
         />
         <StatTile

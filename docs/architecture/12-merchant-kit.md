@@ -682,7 +682,7 @@ nothing and the figures stay atomic USDC.
 | `product_id` | Yes | The product's `id` from the products file. |
 | `product_name` | No | The product's `name` when the products file has one; otherwise the proxy sends the `id`. |
 | `amount` | Yes | The settled amount in whole atomic USDC units, as a decimal string. It must equal the product's `price`. |
-| `payer` | Yes | The address that paid. For an EIP-3009 payment from a Haven agent this is the agent's delegate address, not the Haven account (see below). |
+| `payer` | Yes | The address that paid. For an EIP-3009 payment from a Haven agent this is the agent's delegate address, not the Haven account; for an ERC-7710 payment it is the agent's delegate smart account (see below). Haven checks its shape and does not store it: the Sales page's payer is the sender of the on-chain transfer (#5088). |
 | `merchant_reference` | Yes | The merchant's own reference for the sale. A ULID generated once per payment (`sale_<ulid>`, `newMerchantReference` in the core) when the payment is reserved, kept in the consumed-payment store (section 6) and, on the demo merchant, on the settled payment (`SettledPayment.merchantReference`), sent, and logged. A payment has one reference however often its call is retried or its record resent. Haven stores it and does not interpret it. |
 | `receipt_number` | When a VAT rule is configured | The number the payment's receipt carries (section 11), derived from `tx_hash`, so it is known at settlement whether or not the call later delivers. It lets the merchant find the sale on Haven from the receipt and the other way round. Absent when the deployment has no VAT rule and so issues no receipts. |
 | `vat_treatment` | When a VAT rule is configured | The VAT treatment for this payment, `SE_25` or `REVERSE_CHARGE`, decided at settlement from the rule and the request's declaration (section 11). Absent with `receipt_number`. |
@@ -697,6 +697,22 @@ merchant is therefore from the delegate, and the delegate is the address the
 proxy reads from the payment payload's `from` field and writes into the record.
 The Haven account never appears in the transfer and must not appear in the
 record.
+
+For an **ERC-7710** payment (the demo merchant's behaviour today, the kit's
+after #4887; the kit itself advertises EIP-3009 only) the merchant redeems a
+chain of delegations and the USDC moves **from the buyer's Haven account**
+straight to the merchant. The merchant's own record and receipt name the
+agent's **delegate smart account** as `payer` — the settlement child's
+delegator (`agent_delegate_account` on the receipt; `party-model.ts`) — which
+is neither the account the money left nor the delegate key.
+
+Haven checks the record's `payer` for shape and does not store it (#5088,
+owner decision 2). The Sales page's payer is the sender of the on-chain USDC
+transfer: the delegate key on EIP-3009, the Haven account on ERC-7710. So one
+buyer that pays by both schemes shows as two payers, each a **Wallet** unless
+it is one of the merchant's own contacts, accounts or agents; the page says
+that one buyer can appear as more than one wallet, and never that two rows are
+the same buyer or that a payer uses Haven (owner decision 1, #4894).
 
 For a buyer that is not a Haven agent, `payer` is whatever address signed the
 authorization. The proxy does not guess an identity from it.

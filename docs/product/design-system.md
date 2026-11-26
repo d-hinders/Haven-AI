@@ -140,7 +140,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-19
+last-verified: 2026-11-26
 ---
 
 # Haven Design System
@@ -1417,7 +1417,21 @@ decimals in the currency's own format — `$0.0010`, `$0.0049`, `0,0010 kr`,
 renders `<$0.0001` (`<0,0001 kr`, `<0,0001 €`). The sign still comes from the
 caller (`-$0.0040` in activity, `≈0,0040 kr of 10,00 kr` in a SEK budget
 caption). Zero stays `$0.00`; everything from `0.005` up rounds at 2 decimals
-as before. The rule lives
+as before.
+
+**Exception — revenue sums on Sales and Analytics (owner decision 3 on #5088,
+2026-11-25, "Yes, make the exception"):** a revenue figure that is a SUM — the
+Revenue tile and its Haven/Stripe split, the Payments summary, each By payer
+and By product row, and Analytics' Revenue tile — must not round its sub-cent
+part away ("$0.01" for 0.0135 USDC hid a quarter of the revenue while its
+parts read "$0.0035" and "$0.01"). It shows 4 decimals when the part below a
+whole cent would itself need them in the display mode: under half a cent
+after conversion (`isSubCent`), or under 0.01 in USDC mode. So 0.0135 reads
+`$0.0135`, 0.011 reads `$0.0110`, and 0.30 + 0.20 still reads `$0.50`. The
+rule is `salesSumText` / `salesSumAmountText` in `lib/sales.ts`;
+`formatFiatDisplay` and `SUB_CENT_THRESHOLD` are untouched, and a single
+payment's amount, the average sale and every figure outside these surfaces
+keep the rule above. The rule lives
 in `formatFiatDisplay`, not `formatFiat`, which also drives the balance
 count-up, the "since yesterday" line and /accounts and keeps plain rounding.
 `Amount`'s currency mode, the budget caption's fiat mode and the dashboard

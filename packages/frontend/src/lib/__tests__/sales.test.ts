@@ -26,6 +26,9 @@ import {
   salesApprox,
   salesRate,
   salesTotalText,
+  salesSumAmountText,
+  salesSumNeedsFourDecimals,
+  salesSumText,
   type SalesMoney,
   salesChartDays,
   salesDayRange,
@@ -106,6 +109,52 @@ describe('amounts', () => {
   const sek: SalesMoney = { currency: 'SEK', chainId: BASE, rates: RATES }
   const eur: SalesMoney = { currency: 'EUR', chainId: BASE, rates: RATES }
   const nbsp = '\u00a0'
+
+  // #5088 (owner decision 3): a revenue SUM shows its sub-cent part. The
+  // cold run's data: payments of 0.001 and 0.0025 in the account and a 0.01
+  // Stripe-held sale — revenue 0.0135, one payer's row 0.011, another 0.0025.
+  describe('revenue sums (#5088)', () => {
+    const token: SalesMoney = { ...sek, rates: undefined }
+
+    it('shows the sub-cent part of a sum in $ mode: $0.0135, $0.0110, $0.0025', () => {
+      expect(salesSumText('13500', usd)).toBe('$0.0135')
+      expect(salesSumAmountText('11000', usd)).toBe('$0.0110')
+      expect(salesSumAmountText('2500', usd)).toBe('$0.0025')
+      // Today's rule for the same figures, kept for a single amount.
+      expect(salesAmountText('13500', usd)).toBe('$0.01')
+      expect(salesAmountText('11000', usd)).toBe('$0.01')
+    })
+
+    it('shows the same sums with 4 decimals in USDC mode', () => {
+      expect(salesSumText('13500', token)).toBe('0.0135 USDC')
+      expect(salesSumAmountText('11000', token)).toBe('0.0110 USDC')
+      expect(salesSumAmountText('1234500', token)).toBe('1.2345 USDC')
+    })
+
+    it('a sum with no sub-cent part keeps 2 decimals: 0.30 + 0.20 is $0.50', () => {
+      expect(salesSumText('500000', usd)).toBe('$0.50')
+      expect(salesSumAmountText('500000', token)).toBe('0.50 USDC')
+      expect(salesSumNeedsFourDecimals('500000', usd)).toBe(false)
+    })
+
+    it('in a converted currency, the sub-cent part counts only if it is under half a cent there', () => {
+      // 0.001 USDC is 0.0105 kr at 10.5: no part needs 4 decimals in SEK.
+      expect(salesSumNeedsFourDecimals('11000', sek)).toBe(false)
+      expect(salesSumText('11000', sek)).toBe(salesTotalText('11000', sek))
+      // 0.0001 USDC is 0.00105 kr: under half an öre, so it does.
+      expect(salesSumNeedsFourDecimals('1110100', sek)).toBe(true)
+      expect(salesSumAmountText('1110100', sek)).toBe(`11,6561${nbsp}kr`)
+    })
+
+    it('the split names each part with its sub-cent part', () => {
+      const split = {
+        revenue_raw: '13500',
+        revenue_in_account_raw: '3500',
+        received_in_stripe: { count: 1, amount_raw: '10000' },
+      } as unknown as SalesSummary
+      expect(revenueSplitText(split, usd)).toBe('$0.0035 in Haven · $0.01 in Stripe')
+    })
+  })
 
   it('follows the sub-cent rule in USD', () => {
     expect(salesAmountText('18000', usd)).toBe('$0.02')

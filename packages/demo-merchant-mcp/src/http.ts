@@ -382,7 +382,8 @@ async function handle(
   if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === KIT_DISCOVERY_PATH) {
     const document = buildKitDiscovery({
       salesAddress: options.sales?.address,
-      stripeConfigured: Boolean(options.stripe),
+      merchantAddress: options.merchantAddress,
+      stripeDepositAddress: options.stripe?.depositAddress,
       cdpConfigured: Boolean(options.cdpConfigured),
     })
     if (document) {

@@ -6,8 +6,9 @@
  * `reportSale` in `@haven_ai/merchant-payments`); this module decides only
  * what the demo merchant reports and holds what is in flight:
  *
- * - only the Sales product and (#4953) the Stripe-recorded joke when the
- *   recorder sends it to Stripe, only a payment `settled_onchain` (never the zero
+ * - only a product paid into the Sales account (by default the Sales product)
+ *   and (#4953) the Stripe-recorded joke when the recorder sends it to Stripe,
+ *   decided by `salesAccountRoute` (#5091), only a payment `settled_onchain` (never the zero
  *   hash of `already_settled_earlier`), and once per transaction — a replayed
  *   payment header re-serves the same payment, and the dedupe drops it;
  * - fire-and-forget: `report` returns at once and never throws, so the buyer's
@@ -27,7 +28,7 @@ import {
   type SaleRecord,
 } from '@haven_ai/merchant-payments'
 import type { InvoiceJson } from './invoice.js'
-import type { Product } from './products.js'
+import { salesAccountRoute, type Product } from './products.js'
 import { stripeRecordingDecision, type StripeRecording } from './stripe.js'
 import type { SettledPayment } from './x402.js'
 
@@ -48,6 +49,12 @@ export interface SalesConfig {
   salesKey: string
   /** Haven's API origin (`MERCHANT_HAVEN_BASE_URL`), no trailing slash. */
   havenBaseUrl: string
+  /**
+   * #5091: the merchant's default receiving address (`MERCHANT_ADDRESS`), so
+   * the reporter reads "paid into the Sales account" through
+   * `productReceivingAddress` exactly as the 402 quotes it.
+   */
+  merchantAddress: Address
 }
 
 export interface ResolveSalesConfigInput {
@@ -106,7 +113,7 @@ export function resolveSalesConfig(input: ResolveSalesConfigInput): SalesConfig 
   }
   const havenBaseUrl = baseRaw.replace(/\/+$/, '')
   const address = addressRaw ? usableSalesAddress(addressRaw, input, warn) : undefined
-  return { ...(address ? { address } : {}), salesKey, havenBaseUrl }
+  return { ...(address ? { address } : {}), salesKey, havenBaseUrl, merchantAddress: input.merchantAddress }
 }
 
 /** The Sales address if it passes #4950's checks; otherwise a warning and `undefined`. */
@@ -218,12 +225,18 @@ export function createSalesReporting(config: SalesConfig, deps: SalesReportingDe
   function report(product: Product, payment: SettledPayment, receipt: InvoiceJson, stripe?: StripeRecording): void {
     try {
       if (product.id !== payment.productId) return
-      // The Sales product, when its account is set; or a Stripe-recorded
-      // product (the joke, #4953) exactly when the recorder sends it to
-      // Stripe: not `paid_other_address`, not anything but `settled_onchain`.
+      // #5091: the shared rule (`salesAccountRoute`), the same one the kit
+      // discovery document lists by. A product paid into the Sales account
+      // reports; a Stripe-recorded product (the joke, #4953) reports exactly
+      // when the recorder sends it to Stripe: not `paid_other_address`, not
+      // anything but `settled_onchain`.
+      const route = salesAccountRoute(product, config.merchantAddress, {
+        salesAddress: config.address,
+        stripeDepositAddress: stripe?.depositAddress,
+      })
       const reports =
-        (product.salesAccount === true && config.address !== undefined) ||
-        (product.stripeRecording === true && stripeRecordingDecision(stripe, product, payment) === 'record')
+        route === 'paid_into_sales_account' ||
+        (route === 'stripe_recorded' && stripeRecordingDecision(stripe, product, payment) === 'record')
       if (!reports) return
       if (payment.settlement !== 'settled_onchain') return
       const key = payment.txHash.toLowerCase()

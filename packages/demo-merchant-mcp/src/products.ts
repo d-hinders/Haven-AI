@@ -226,6 +226,45 @@ export function productReceivingAddress(
   return product.receivingAddress ?? merchantDefault
 }
 
+/**
+ * #5091: why a product's sales appear on the merchant's Haven Sales account,
+ * or `null` when they do not.
+ * - `paid_into_sales_account`: its receiving address IS the Sales account.
+ * - `stripe_recorded`: Stripe records it (the joke, #4953), so its settled
+ *   sales are reported to Haven though its money lands on the deposit address.
+ */
+export type SalesAccountRoute = 'paid_into_sales_account' | 'stripe_recorded'
+
+/**
+ * #5091: the ONE rule for "this product's sales appear on the Sales account",
+ * read by both the sale reporter (`createSalesReporting`, which also needs the
+ * Stripe recorder's per-payment decision) and the kit discovery document
+ * (`buildKitDiscovery`, which lists exactly these products). Two copies of it
+ * drifted once: routing more of the catalogue into the Sales account moved the
+ * reporter and not the document, so Sales → Products showed one product of
+ * eleven.
+ *
+ * "Paid into the Sales account" is read through `productReceivingAddress`
+ * with the same options the 402 is quoted with, never off `salesAccount`, so a
+ * change to which products pay the Sales account changes both readers at once.
+ */
+export function salesAccountRoute(
+  product: Product,
+  merchantDefault: Address,
+  opts: { stripeDepositAddress?: Address; salesAddress?: Address },
+): SalesAccountRoute | null {
+  // The deposit address wins in `productReceivingAddress` too: a
+  // Stripe-recorded product with Stripe on is paid there, not into Sales.
+  if (product.stripeRecording && opts.stripeDepositAddress) return 'stripe_recorded'
+  if (!opts.salesAddress) return null
+  // Only the products that name the Sales account answer yes here, because
+  // `resolveSalesConfig` refuses a Sales address equal to MERCHANT_ADDRESS.
+  // Callers pass the same MERCHANT_ADDRESS the 402 is quoted with (index.ts
+  // feeds both `SalesConfig.merchantAddress` and the server's).
+  const receiving = productReceivingAddress(product, merchantDefault, opts)
+  return receiving.toLowerCase() === opts.salesAddress.toLowerCase() ? 'paid_into_sales_account' : null
+}
+
 /** #4850: who verifies and settles a payment for `product`. */
 export function productSettlementKind(product: Product): SettlementKind {
   return product.settlement ?? DEFAULT_SETTLEMENT_KIND

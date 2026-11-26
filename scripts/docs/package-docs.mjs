@@ -746,7 +746,21 @@ export const GOVERNED_PACKAGE_DOCS = [
     // `logExtensionResponsesHeader`; the `sales key` row quotes `check.ts`'s
     // 401, 400 and 429 texts. The Railway trial message and the UUID key id
     // are the cold run's observations, not re-run here.
-    'last-verified': '2026-11-24',
+    // Re-verified 2026-11-26 (#5097, the Railway cold run of this README): the
+    // recipe was followed end to end on a Railway service with image
+    // dev-21cff2c (paid call, sale report 201, Products tab filled).
+    // § "Host it on Railway" gains numbered steps (project, volume, domain
+    // before `PUBLIC_BASE_URL`, variables with the staged-change note, `check`
+    // as a one-off `CMD ["check"]` deploy, then the proxy, then the healthcheck,
+    // replica and sleep settings), and the volume and redeploy notes say what
+    // that run checked; Quickstart step 5 sends a Railway merchant there rather
+    // than to a local `.env`; § "The Sales account and its receiving address"
+    // gains the Products tab and the product list address (read from
+    // merchant-catalogue.ts `RETIRE_ALL_PRODUCTS_SQL` and the Setup tab);
+    // prerequisite 3 names a no-key echo upstream for a first call. The Railway
+    // dashboard wording is from Railway's docs pages on 2026-11-26, not from
+    // the dashboard itself.
+    'last-verified': '2026-11-26',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

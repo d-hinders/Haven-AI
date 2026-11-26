@@ -85,9 +85,12 @@ merchant's own Coinbase facilitator key, not Haven's: Haven never holds a
 merchant's facilitator credentials and never settles on a merchant's behalf
 (owner decision (a) on epic #4884). Haven's own key is not offered to sellers.
 
-**Who can pay.** During the pilot only a Haven agent with an open, unpinned
-budget can pay an arbitrary merchant. A buyer whose budget is pinned to named
-merchants cannot pay a merchant it was not given.
+**Who can pay.** Any x402 buyer that pays your challenge can pay. A payment
+from the Sales account owner's own agents or accounts goes through too, but it
+shows as a move between the owner's accounts, not a sale. A Haven agent needs an open, unpinned
+budget; one whose budget is pinned to named merchants cannot pay a merchant it
+was not given. Every live run of this guide so far used a Haven agent as the
+buyer; a buyer outside Haven has not been exercised.
 
 If you use a third-party x402 server library rather than writing the challenge
 yourself, check its call shape against its current documentation. The reference
@@ -496,10 +499,10 @@ app.listen(PORT, () => console.log(`listening on ${PORT}; buyers call ${ENDPOINT
 What to expect when a Haven agent buys `haiku`: the agent's first call gets
 the challenge; its second carries the payment; the tool's answer comes back
 with the settlement in `_meta`; and a moment later the console prints
-`sale report <tx hash> 201`. A resent report gets `200`. The buyer must be
-another Haven user's agent with an open budget: a payment from one of the Sales
-account owner's own agents shows on the Sales page as a move between the
-owner's accounts, not a sale.
+`sale report <tx hash> 201`. A resent report gets `200`. A Haven buyer
+must be another Haven user's agent with an open budget: a payment from one of
+the Sales account owner's own agents shows on the Sales page as a move between
+the owner's accounts, not a sale.
 
 ## What the Sales key can and cannot do
 

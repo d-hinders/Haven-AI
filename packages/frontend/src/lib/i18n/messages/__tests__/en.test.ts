@@ -84,3 +84,27 @@ describe('the merchant kit setup prompt hosting step (#5059)', () => {
     expect(ownServer).not.toMatch(/where I host|Railway/i)
   })
 })
+
+/**
+ * #5085: an MCP seller is pointed at the guide's MCP section, and told the
+ * rule that fails first (a server without an MCP session id is refused at the
+ * quote). Pinned whole, as one literal line right after step 2's values.
+ */
+describe('the own-server setup prompt MCP line (#5085)', () => {
+  const prompt = ownServerSetupPrompt({
+    accountAddress: '0x0000000000000000000000000000000000000001',
+    salesUrl: 'https://haven-api.example',
+  })
+
+  it('points an MCP seller at the MCP section, as one literal line under step 2', () => {
+    const lines = prompt.split('\n')
+    expect(lines[7]).toBe(
+      "   If you sell MCP tools, follow the worked example's MCP section: your server must issue an MCP session id.",
+    )
+    expect(lines[8]).toBe('3. After each payment settles, report the sale to Haven:')
+  })
+
+  it('says session id, never session key', () => {
+    expect(prompt).not.toMatch(/session key/i)
+  })
+})

@@ -748,7 +748,8 @@ is the owner's own statement and is shown as "registered by you, not verified by
 Haven". **Any x402 buyer can pay, but only a buyer other than the Sales
 account's owner makes a sale:** a Field Notes payment from the owner's own agent
 goes through and is a move between the owner's accounts ("Not counted", outside
-Revenue), and a joke from one is refused. A
+Revenue), and a joke from one goes through too, but Haven refuses its sale, so
+it never appears on the Sales page. A
 Stripe-held sale never counts in a Haven balance; it counts in Revenue, split as
 "in Stripe", and its row is marked "Received in Stripe". When the deposit address changes, register the new one and
 retire the old one only after the last payment to it has settled (see
@@ -1031,13 +1032,14 @@ merchant's state: a restart forgets them. `/healthz` counts `reported`,
 `pending`, `refused` and `gave_up` for the running process. No log line,
 `/healthz` field or error names the Sales key.
 
-**A sale needs a buyer other than the Sales account's owner.** Any x402
-buyer can pay (every live run so far used a Haven agent; a buyer outside Haven
-has not been exercised). Haven counts a transfer from the owner's own
-addresses — every delegate address of the owner's agents included — as a move between the owner's accounts, not a sale. On EIP-3009 the payer is
-the buying agent's delegate, so a sale bought by the Sales account owner's own
-agent is stored as an internal move and shows no revenue. The demo's buying
-agent belongs to a different Haven user from the Sales account's owner.
+**A sale needs a buyer other than the Sales account's owner.** Any x402 buyer
+can pay (every live run so far used a Haven agent; no live payment from a buyer
+outside Haven has been exercised). Haven counts a transfer from the owner's own
+addresses — every delegate address of the owner's agents included — as a move
+between the owner's accounts, not a sale. On EIP-3009 the payer is the buying
+agent's delegate, so a sale bought by the Sales account owner's own agent is
+stored as an internal move and shows no revenue. The demo's buying agent
+belongs to a different Haven user from the Sales account's owner.
 
 **The product list for the Sales page (#4987).** With `MERCHANT_SALES_ADDRESS`
 set, `GET /.well-known/x402` serves the merchant kit's discovery document

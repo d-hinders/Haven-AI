@@ -240,13 +240,15 @@ the result for you.
    planned (#5089) and not available yet.
 2. **Set `resource.url` to your MCP endpoint**, the https address buyers call,
    for example `https://mcp.example.com/mcp`. If you leave it out, `@x402/mcp`
-   fills in an `mcp://tool/…` address. Haven's MCP payment tools accept that
-   too since #5086: they deliver the payment to the endpoint they called when
-   they quoted, whatever the challenge names
-   (`packages/mcp-server/src/tools/support/resource-address.ts`). Haven's SDK
-   called directly, and its `haven_pay_x402_quote` tool, still compare the two
-   string for string (`packages/sdk/src/merchant-completion.ts`), so the
-   endpoint is the value to use.
+   fills in an `mcp://tool/…` address. Haven's paid-MCP tools
+   (`haven_pay_mcp_tool` or `haven_prepare_catalog_purchase`, then
+   `haven_settle_mcp_tool`) accept that too since #5086: they deliver the
+   payment to the endpoint they called when they quoted, whatever the
+   challenge names (`packages/mcp-server/src/tools/support/resource-address.ts`).
+   Haven's SDK called directly, and the hosted `haven_pay_x402_quote` tool,
+   still compare the two string for string
+   (`packages/sdk/src/merchant-completion.ts`), so the endpoint is the value
+   to use.
 3. **Set `maxTimeoutSeconds: 300` yourself.** It is how long the buyer's
    signed payment stays valid, and Haven's buyer needs time to fund, sign and
    send it. The library's README gives a default of 60 while its code uses
@@ -419,7 +421,7 @@ const paid = createPaymentWrapper(resourceServer, {
 // Reserve the payment before the library verifies it; release it on every failure before settlement.
 const oncePerPayment = (handler) => async (args, extra) => {
   const payment = extra?._meta?.["x402/payment"];
-  if (payment === undefined) return handler(args, extra); // no payment yet: the library answers with the challenge
+  if (payment == null) return handler(args, extra); // no payment yet: the library answers with the challenge
   const key = keyOf(payment);
   if (!key) return refuse("Only EIP-3009 payments are accepted.");
   const digest = digestOf(payment);

@@ -285,11 +285,11 @@ export function salesRevenueTile(
 ): { value: string; unit?: string; valueSize: 'default' | 'compact' } {
   const text = salesSumText(raw, money)
   if (salesRate(money) !== null || !text.endsWith(' USDC')) return { value: text, valueSize: 'default' }
-  return {
-    value: text.slice(0, -' USDC'.length),
-    unit: 'USDC',
-    valueSize: Math.abs(usdcOf(raw)) >= 1000 ? 'compact' : 'default',
-  }
+  const value = text.slice(0, -' USDC'.length)
+  // The PRINTED figure's integer digits, not the raw amount: 999.99995 USDC
+  // prints as "1,000.0000", a four-digit figure.
+  const integerDigits = (value.split('.')[0] ?? '').replace(/\D/g, '').length
+  return { value, unit: 'USDC', valueSize: integerDigits >= 4 ? 'compact' : 'default' }
 }
 
 // ── Payers ──────────────────────────────────────────────────────────────────

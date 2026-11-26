@@ -172,6 +172,10 @@ const SCENARIOS: Scenario[] = [
       await expect(revenue).not.toContainText('\u2248')
       await expect(revenue).not.toContainText('kr')
       await expectFigureOnOneLine(revenue, 'Sales Revenue')
+      // The Average tile is the same class of figure at the default size
+      // (the owner decision limits compact to Revenue): it must fit as well.
+      await expect(page.getByTestId('stat-tile-average-sale')).toContainText('4,115.23 USDC')
+      await expectFigureOnOneLine(page.getByTestId('stat-tile-average-sale'), 'Sales Average sale')
       await expect(page.getByTestId('sales-by-product')).toContainText('8,230.4526 USDC')
     },
   },

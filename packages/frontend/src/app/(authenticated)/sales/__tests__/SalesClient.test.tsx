@@ -548,6 +548,8 @@ describe('the display currency (#4963)', () => {
     // #5105: in USDC mode the unit sits in the tile's unit slot, its own element.
     expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toMatch(/2\.14\s*USDC/)
     expect(within(tiles).getByTestId('stat-tile-revenue').textContent).not.toContain('≈')
+    // The unit is the tile's unit span, not part of the value text.
+    expect(within(within(tiles).getByTestId('stat-tile-revenue')).getByText('USDC', { selector: 'span' })).toBeTruthy()
   })
 
   it('reads in USDC when the whole rate read failed (null) or the field is missing (older backend)', async () => {

@@ -701,6 +701,7 @@ const SCENARIOS: Scenario[] = [
       await expect(revenue).not.toContainText('\u2248')
       await expect(revenue).not.toContainText('kr')
       await expectFigureOnOneLine(revenue, 'Analytics Revenue')
+      await expectFigureOnOneLine(tiles.getByTestId('stat-tile-average-sale'), 'Analytics Average sale')
       expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
     },
   },

@@ -167,6 +167,9 @@ describe('amounts', () => {
       expect(salesRevenueTile('12345678900', token)).toEqual({ value: '12,345.6789', unit: 'USDC', valueSize: 'compact' })
       expect(salesRevenueTile('1000000000', token)).toEqual({ value: '1,000.00', unit: 'USDC', valueSize: 'compact' })
       expect(salesRevenueTile('999990000', token)).toEqual({ value: '999.99', unit: 'USDC', valueSize: 'default' })
+      // The printed figure decides: 999.99995 prints as a four-digit 1,000.0000.
+      expect(salesRevenueTile('999999950', token)).toEqual({ value: '1,000.0000', unit: 'USDC', valueSize: 'compact' })
+      expect(salesRevenueTile('-12345678900', token)).toEqual({ value: '-12,345.6789', unit: 'USDC', valueSize: 'compact' })
       expect(salesRevenueTile('13500', token)).toEqual({ value: '0.0135', unit: 'USDC', valueSize: 'default' })
     })
 

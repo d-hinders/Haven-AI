@@ -137,7 +137,7 @@ Then:
    - **Your own host.** Put your HTTPS front (your host's edge, or a reverse
      proxy) in front of port 8080 at `PUBLIC_BASE_URL`.
    - **Railway.** Railway runs the image itself, with its own recipe: a
-     two-line Dockerfile, a volume, no published port and three more variables.
+     two-line Dockerfile, a volume, no published port and two more variables.
      It needs a paid Railway plan or an active trial. See
      [Host it on Railway](#host-it-on-railway).
 
@@ -705,7 +705,8 @@ folder holding only the Dockerfile and `products.json`, with the Railway CLI;
 the dashboard does the same things):
 
 1. **Create the project and the service.** `railway init` creates a project
-   and `railway add` adds an empty service. A new project's first environment
+   and `railway add` adds an empty service (or, in the dashboard, connect your
+   repository as the service's source). A new project's first environment
    is called `production` by Railway, whatever network you run; the name does
    not change anything here.
 2. **Add the volume** at `/data` (`railway volume add`, mount path `/data`).
@@ -738,11 +739,10 @@ the dashboard does the same things):
    should see: the `started` line in the deploy log, and `status: ok` on
    `https://<your-domain>/healthz`.
 7. **Set the healthcheck, replicas and sleep** in the service's settings:
-   the healthcheck path `/healthz`, one replica (the *Scale* section), and
-   Serverless (Railway's new name for Sleep) as you choose. Railway's
-   healthcheck and scaling pages place these "in the service settings"
-   (checked 2026-11-26). A `railway.json` can set them too, but Railway CLI
-   5.62 reports that file as deprecated (2026-11-26).
+   the healthcheck path `/healthz`, one replica, and Serverless (Railway's
+   new name for Sleep) as you choose. Railway's healthcheck page puts the
+   path "under your service settings", and its scaling guide puts replicas
+   in the service settings' *Scale* section (both checked 2026-11-26).
 
 **Volume ownership, and the non-root user.** Railway mounts a volume as `root`
 (Railway's volumes page, checked 2026-11-23), so a volume at `/data` is not
@@ -790,7 +790,7 @@ deploy was the `check` run, which had already exited: taking the lock over from
 a running proxy is still untested. A buyer's call in that window gets a
 connection error, not a charge.
 
-**Sleep.** Railway's Sleep setting stops an idle service after about ten
+**Sleep.** Railway's Sleep setting (now called Serverless) stops an idle service after about ten
 minutes without traffic and cold-starts it on the next request
 ([`railway-services.md`](../../docs/operations/railway-services.md) § *Sleep*).
 Haven's own demo is configured with Sleep on. With Sleep on, a buyer's first

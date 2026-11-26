@@ -82,7 +82,7 @@ import {
 } from '../../../../../scripts/screenshot.mjs'
 import type { AnalyticsOverviewResponse } from '@/types/analytics'
 import type { SalesSummary } from '@/lib/sales'
-import { salesRangeDays } from '@/lib/sales'
+import { salesRangeDays, salesSumText } from '@/lib/sales'
 import { ANALYTICS_RANGE_STORAGE_KEY } from '@/lib/analytics-range'
 
 // See the note above: the parity test owns the fixture's fidelity to the
@@ -1146,6 +1146,19 @@ describe('Analytics — the Spending / Revenue switch (#4901)', () => {
     expect(screen.queryByTestId('analytics-revenue')).toBeNull()
     expect(screen.getByTestId('analytics-tiles')).toBeTruthy()
     expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd', null)
+  })
+
+  it('the Revenue tile shows a sum’s sub-cent part as the Sales tile does (#5088): 0.0135 is $0.0135', () => {
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    mockUseSalesSummary.mockReturnValue(
+      revenue({ data: { ...REVENUE_SUMMARY, revenue_raw: '13500', average_sale_raw: '4500' } }),
+    )
+    render(<AnalyticsClient />)
+    const tiles = screen.getByTestId('analytics-revenue-tiles')
+    expect(within(tiles).getByText('$0.0135')).toBeTruthy()
+    // The same helper the Sales tile reads, so the same figure never shows two ways.
+    expect(salesSumText('13500', { currency: 'USD', chainId: 8453, rates: undefined })).toBe('$0.0135')
   })
 
   it('renders the revenue side’s own loading, empty and error states', () => {

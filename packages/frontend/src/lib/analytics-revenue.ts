@@ -29,6 +29,7 @@ import {
   plural,
   revenueCount,
   salesDayKeys,
+  salesSumText,
   salesTotalText,
   usdcOf,
   type SalesCurrency,
@@ -159,7 +160,7 @@ export function revenueChartDays(
  * payment is not a sale, and this chart draws no refusal mark.
  */
 export function revenueChartLabel(summary: SalesSummary, money: SalesMoney, days: number): string {
-  return `Revenue over ${days} days: ${salesTotalText(summary.revenue_raw, money)} from ${plural(
+  return `Revenue over ${days} days: ${salesSumText(summary.revenue_raw, money)} from ${plural(
     revenueCount(summary),
     'payment',
   )}.`

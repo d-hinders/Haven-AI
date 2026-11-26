@@ -39,6 +39,8 @@ import {
   salesChartDays,
   salesChartFormat,
   salesRangeDays,
+  salesSumAmountText,
+  salesSumText,
   salesTotalText,
   revenueSplitText,
   type SalesCurrency,
@@ -52,6 +54,16 @@ import { SalesBreakdownCard, type BreakdownLine } from './SalesBreakdownCard'
 import { SalesPaymentsList, type SalesListControls } from './SalesPaymentsList'
 
 /**
+ * #5088 (owner decision 1): a payer is the address the money came from on
+ * chain, so one buyer can show as more than one wallet (a payment by one
+ * settlement scheme leaves from the buyer's account, by the other from its
+ * delegate key). The page says so, and never says or implies that a payer
+ * uses Haven (owner decision 2, #4894) or that two rows are one buyer.
+ */
+export const BY_PAYER_DESCRIPTION =
+  'Who paid. A payer is the address the money came from, so one buyer can appear as more than one wallet. Only your contacts and your own agents and accounts are named.'
+
+/**
  * The By payer lines: contacts and your own accounts by name, every other
  * payer as "Wallet" with a short address, then the folded "Other payers" and
  * the payments from several payers at once. The page never says a payer uses
@@ -62,7 +74,7 @@ export function payerLines(summary: SalesSummary, money: SalesMoney, now: Date =
     key: payerKey(entry.payer),
     name: payerName(entry.payer),
     detail: payerKindLine(entry.payer),
-    revenue: salesAmountText(entry.amount_raw, money),
+    revenue: salesSumAmountText(entry.amount_raw, money),
     count: entry.payments,
     // An older backend sends no `last_paid_at`: the cell stays empty, never "Invalid Date".
     lastPaid: entry.last_paid_at ? lastPaidText(entry.last_paid_at, now) : undefined,
@@ -73,7 +85,7 @@ export function payerLines(summary: SalesSummary, money: SalesMoney, now: Date =
       key: 'payer:other',
       name: 'Other payers',
       detail: plural(other.payers, 'payer'),
-      revenue: salesAmountText(other.amount_raw, money),
+      revenue: salesSumAmountText(other.amount_raw, money),
       count: other.payments,
     })
   }
@@ -82,7 +94,7 @@ export function payerLines(summary: SalesSummary, money: SalesMoney, now: Date =
       key: 'payer:several',
       name: 'Several payers',
       detail: 'Paid by more than one wallet at once',
-      revenue: salesAmountText(summary.unattributed.amount_raw, money),
+      revenue: salesSumAmountText(summary.unattributed.amount_raw, money),
       count: summary.unattributed.payments,
     })
   }
@@ -237,7 +249,7 @@ export function SalesOverviewTab({
   const listShownFor = useRef<string | null>(null)
   if (filtered || (data !== null && !emptyUnfiltered)) listShownFor.current = rangeKey
   const showList = !emptyUnfiltered && listShownFor.current === rangeKey
-  const revenueText = data !== null ? salesTotalText(data.revenue_raw, money) : null
+  const revenueText = data !== null ? salesSumText(data.revenue_raw, money) : null
   const splitText = data !== null ? revenueSplitText(data, money) : null
 
   return (
@@ -349,14 +361,14 @@ function OverviewFigures({
   // #4963: the bars are struck in the display currency, so the values and the
   // axis ticks format them as they are (USDC in token mode).
   const { formatValue, formatTick } = chart
-  const chartLabel = `Revenue over ${days} days: ${salesTotalText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
+  const chartLabel = `Revenue over ${days} days: ${salesSumText(data.revenue_raw, money)} from ${plural(revenuePayments, 'payment')}.`
 
   return (
     <>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4" data-testid="sales-tiles">
         <StatTile
           label="Revenue"
-          value={salesTotalText(data.revenue_raw, money)}
+          value={salesSumText(data.revenue_raw, money)}
           {...(change !== null
             ? {
                 delta: change,
@@ -449,7 +461,7 @@ function OverviewFigures({
         <SalesBreakdownCard
           testId="sales-by-payer"
           title="By payer"
-          description="Who paid. Only your contacts and your own agents and accounts are named."
+          description={BY_PAYER_DESCRIPTION}
           nameHeader="Payer"
           countHeader="Payments"
           countNoun="payment"

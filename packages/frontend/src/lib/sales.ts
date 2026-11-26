@@ -14,7 +14,7 @@
 
 import { shouldMarkApprox, tokenPeg, type ApiSchema } from '@haven_ai/core'
 import { formatAnalyticsDay, formatAnalyticsTick, unknownRecipientShortAddress } from '@/lib/analytics-format'
-import { formatClockTime, formatFiatDisplay } from '@/lib/format'
+import { currencyLocale, formatClockTime, formatFiatDisplay, isSubCent } from '@/lib/format'
 import type { ListState, PeriodValue } from '@/components/ui/list-url-codec'
 import type { StackedBarDay } from '@/components/ui/StackedBarChart'
 import type { BreakdownLine } from '@/components/sales/SalesBreakdownCard'
@@ -225,6 +225,50 @@ export function salesTotalText(raw: string, money: SalesMoney, kind: 'total' | '
   return `${salesApprox(money, kind) ? '≈' : ''}${salesAmountText(raw, money)}`
 }
 
+/** One cent of USDC in atomic units. */
+const USDC_CENT_ATOMIC = 10n ** BigInt(USDC_DECIMALS - 2)
+
+/**
+ * #5088 (owner decision 3, 2026-11-25): a revenue SUM must not round its
+ * sub-cent part away. "$0.01" for 0.0135 USDC hid a quarter of the revenue
+ * while its parts read "$0.0035" and "$0.01". The reads carry sums, not their
+ * payments, so the sum's remainder below a whole USDC cent is the signal:
+ * - unconverted ($ at the USDC peg, or USDC mode): any remainder shows 4
+ *   decimals, so $ and USDC agree and 6 x 0.001 reads $0.0060, not $0.01;
+ * - a converted currency ("≈"): only a remainder under half a cent there
+ *   (`isSubCent`), so a figure struck at today's rate does not claim 4
+ *   decimals of precision it does not have.
+ * `formatFiatDisplay` and its threshold are untouched: a single amount and
+ * every figure outside these Sales and Analytics revenue sums keep the
+ * 2026-10-22 rule (`docs/product/design-system.md`).
+ */
+export function salesSumNeedsFourDecimals(raw: string, money: SalesMoney): boolean {
+  const remainder = BigInt(raw || '0') % USDC_CENT_ATOMIC
+  if (remainder === 0n) return false
+  const rate = salesRate(money)
+  if (rate === null || rate === 1) return true
+  return isSubCent((Number(remainder) / 10 ** USDC_DECIMALS) * rate)
+}
+
+/** A revenue sum as text (#5088): `salesAmountText`, with 4 decimals when its sub-cent part needs them. */
+export function salesSumAmountText(raw: string, money: SalesMoney): string {
+  const human = usdcOf(raw)
+  const fiat = salesFiatAmount(human, money)
+  // Already a sub-cent figure (or a whole-cent sum): the ordinary rule shows it,
+  // with its "<0.0001" floor.
+  if (!salesSumNeedsFourDecimals(raw, money) || (fiat === null ? Math.abs(human) < 0.01 : isSubCent(fiat))) {
+    return salesAmountText(raw, money)
+  }
+  const digits = { minimumFractionDigits: 4, maximumFractionDigits: 4 }
+  if (fiat === null) return `${new Intl.NumberFormat('en-US', digits).format(human)} USDC`
+  return new Intl.NumberFormat(currencyLocale(money.currency), { style: 'currency', currency: money.currency, ...digits }).format(fiat)
+}
+
+/** A revenue sum as a total (#5088): `salesTotalText`'s "≈" with `salesSumAmountText`'s decimals. */
+export function salesSumText(raw: string, money: SalesMoney, kind: 'total' | 'detail' = 'total'): string {
+  return `${salesApprox(money, kind) ? '≈' : ''}${salesSumAmountText(raw, money)}`
+}
+
 // ── Payers ──────────────────────────────────────────────────────────────────
 
 /**
@@ -324,7 +368,7 @@ export function revenueSplitText(summary: SalesSummary, money: SalesMoney): stri
   if (stripeSalesCount(summary) === 0) return null
   const inAccount = revenueInAccountRaw(summary)
   if (inAccount === null) return null
-  return `${salesTotalText(inAccount, money)} in Haven · ${salesTotalText(stripeSalesRaw(summary), money)} in Stripe`
+  return `${salesSumText(inAccount, money)} in Haven · ${salesSumText(stripeSalesRaw(summary), money)} in Stripe`
 }
 
 /** True for a sale received in Stripe, from the row's `held_by` (the registry's answer, never the record's). */
@@ -358,7 +402,7 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
     key: `product:${product.product_id}`,
     name: product.label,
     detail: product.product_id !== product.label ? product.product_id : undefined,
-    revenue: salesAmountText(product.amount_raw, money),
+    revenue: salesSumAmountText(product.amount_raw, money),
     count: product.sales,
   }))
   const other = summary.by_product_other
@@ -367,7 +411,7 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
       key: 'product:other',
       name: 'Other',
       detail: plural(other.products, 'product'),
-      revenue: salesAmountText(other.amount_raw, money),
+      revenue: salesSumAmountText(other.amount_raw, money),
       count: other.sales,
     })
   }
@@ -376,7 +420,7 @@ export function productLines(summary: SalesSummary, money: SalesMoney): Breakdow
       key: 'product:none',
       name: 'No product',
       detail: 'Paid, but your seller sent no sale record',
-      revenue: salesAmountText(summary.without_product.amount_raw, money),
+      revenue: salesSumAmountText(summary.without_product.amount_raw, money),
       count: summary.without_product.count,
       muted: true,
       countNoun: 'payment',

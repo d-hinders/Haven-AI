@@ -13,7 +13,7 @@ covers:
   - packages/frontend/src/components/sales/SalesKeysSection.tsx
   - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
   - packages/frontend/src/components/sales/SalesPaymentPanel.tsx
-last-verified: "2026-11-19"
+last-verified: "2026-11-26"
 ---
 
 # Merchant Services Demo
@@ -201,7 +201,9 @@ The Stripe sandbox dashboard is optional, for the joke.
 4. **Show:**
    - **Revenue** up by 0.0025 USDC, and **Sales** up by 1;
    - the row for Haven Field Notes, with the buyer shown as **Wallet**. Haven
-     never tells the merchant that the buyer is a Haven user;
+     never tells the merchant that the buyer is a Haven user. The same buyer can
+     show as a second wallet when it pays by the other settlement scheme
+     (EIP-3009 pays from its delegate key, ERC-7710 from its account);
    - opening the row: the on-chain payment, with its transaction hash.
 
 ### 2.2 A sale received in Stripe *(not yet verified)*

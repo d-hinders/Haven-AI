@@ -818,7 +818,7 @@ describe('the seller on the receipt comes from configuration (#4856)', () => {
 const SALES_KEY = 'sk_merchant_test_do_not_log_0123456789'
 const HAVEN = 'https://haven.example'
 /** No `address`: the joke reports without MERCHANT_SALES_ADDRESS. */
-const JOKE_SALES_CONFIG: SalesConfig = { salesKey: SALES_KEY, havenBaseUrl: HAVEN }
+const JOKE_SALES_CONFIG: SalesConfig = { salesKey: SALES_KEY, havenBaseUrl: HAVEN, merchantAddress: MERCHANT }
 
 function mockHaven(mode: 'accept' | 'refuse' | 'unreachable' = 'accept') {
   const posts: Array<{ url: string; headers: Record<string, string>; body: Record<string, unknown> }> = []

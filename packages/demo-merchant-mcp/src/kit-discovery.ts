@@ -22,15 +22,19 @@
  * merchant's OWN document (`/` and `/.well-known/haven-demo-merchant`), which
  * this does not touch; §4 keeps it out of the kit document.
  *
- * ## Only the products that report a sale
+ * ## Only the products whose sales appear on the Sales account
  *
  * `pay_to` is the Sales account (`MERCHANT_SALES_ADDRESS`), because Haven uses
  * none of a document's products when `pay_to` is not the account's own
- * address. The list is the products that are offered AND report their sales to
- * Haven (`createSalesReporting` in `sales.ts`): the Sales product
- * (`field_notes`), and the Stripe-recorded joke when Stripe recording is on.
+ * address. The list is the products that are offered AND whose sales appear
+ * on that account, decided by `salesAccountRoute` in `products.ts` — the same
+ * function the sale reporter (`createSalesReporting` in `sales.ts`) decides by
+ * (#5091): every product paid into the Sales account (by default only
+ * `field_notes`), and the Stripe-recorded joke when Stripe recording is on.
  * The VPN and storage products pay `MERCHANT_ADDRESS` and never report, so
  * listing them would show products that can never sell on that Sales account.
+ * A merchant that routes more of its catalogue into the Sales account lists
+ * more, with no second rule to update.
  *
  * The joke's money lands on the Stripe deposit address, not on `pay_to`. A
  * kit document has one `pay_to`, and nothing pays from this document: the SDK
@@ -38,7 +42,7 @@
  * decision on #4987).
  */
 import type { Address } from 'viem'
-import { CHAIN_ID, USDC_ADDRESS, offeredProducts, type Product } from './products.js'
+import { CHAIN_ID, USDC_ADDRESS, offeredProducts, salesAccountRoute } from './products.js'
 
 /** The path the kit serves its discovery document at (12-merchant-kit.md §4). */
 export const KIT_DISCOVERY_PATH = '/.well-known/x402'
@@ -67,8 +71,10 @@ export interface KitDiscoveryDocument {
 export interface KitDiscoveryOptions {
   /** The Sales account; without it there is no document (Haven would refuse it). */
   salesAddress: Address | undefined
-  /** Stripe recording is on, so the joke reports its sales. */
-  stripeConfigured: boolean
+  /** The merchant's default receiving address (`MERCHANT_ADDRESS`). */
+  merchantAddress: Address
+  /** The Stripe deposit address when Stripe recording is on, so the joke reports its sales. */
+  stripeDepositAddress?: Address
   /** CDP is configured, so the CDP-settled joke is offered at all. */
   cdpConfigured: boolean
   /** Test seam; defaults to the merchant's chain. */
@@ -77,16 +83,17 @@ export interface KitDiscoveryOptions {
   asset?: Address
 }
 
-/** Whether `product` reports its sales to Haven, by `createSalesReporting`'s terms. */
-function reportsSales(product: Product, opts: KitDiscoveryOptions): boolean {
-  return product.salesAccount === true || (product.stripeRecording === true && opts.stripeConfigured)
-}
-
 /** The document, or `null` when there is no Sales account to name as `pay_to`. */
 export function buildKitDiscovery(opts: KitDiscoveryOptions): KitDiscoveryDocument | null {
   if (!opts.salesAddress) return null
   const products = offeredProducts({ cdpConfigured: opts.cdpConfigured, salesConfigured: true })
-    .filter((product) => reportsSales(product, opts))
+    .filter(
+      (product) =>
+        salesAccountRoute(product, opts.merchantAddress, {
+          salesAddress: opts.salesAddress,
+          stripeDepositAddress: opts.stripeDepositAddress,
+        }) !== null,
+    )
     .map((product) => ({
       id: product.id,
       name: product.name,

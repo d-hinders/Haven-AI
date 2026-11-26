@@ -39,7 +39,7 @@ const HAVEN = 'https://haven.example'
 const PAYER_KEY = `0x${'01'.repeat(32)}` as const
 const PAYER = privateKeyToAccount(PAYER_KEY).address
 const TX_HASH = `0x${'ef'.repeat(32)}` as Hex
-const CONFIG: SalesConfig = { address: SALES, salesKey: SALES_KEY, havenBaseUrl: HAVEN }
+const CONFIG: SalesConfig = { address: SALES, salesKey: SALES_KEY, havenBaseUrl: HAVEN, merchantAddress: MERCHANT }
 
 let servers: Server[] = []
 afterEach(async () => {
@@ -93,7 +93,7 @@ async function startServer(
   const sales =
     opts.sales === false
       ? undefined
-      : createSalesReporting(opts.noAddress ? { salesKey: SALES_KEY, havenBaseUrl: HAVEN } : CONFIG, {
+      : createSalesReporting(opts.noAddress ? { salesKey: SALES_KEY, havenBaseUrl: HAVEN, merchantAddress: MERCHANT } : CONFIG, {
           chainId: CHAIN_ID,
           fetch: haven.fetch,
           sleep: async () => {},
@@ -216,7 +216,7 @@ describe('resolveSalesConfig', () => {
   it('#4953: with the key and base URL and no address, reports (for the joke) and offers no Sales product', () => {
     const warn = vi.fn()
     const config = resolveSalesConfig({ ...base, addressRaw: undefined, warn })
-    expect(config).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN })
+    expect(config).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN, merchantAddress: MERCHANT })
     expect(config?.address).toBeUndefined()
     expect(warn).not.toHaveBeenCalled()
   })
@@ -228,7 +228,7 @@ describe('resolveSalesConfig', () => {
     ['the Stripe deposit address as the Sales address', { addressRaw: STRIPE_DEPOSIT }],
   ])('#4953: keeps #4950 checks of the address: with %s the Sales product is off, the joke still reports', (_label, patch) => {
     const warn = vi.fn()
-    expect(resolveSalesConfig({ ...base, ...patch, warn })).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN })
+    expect(resolveSalesConfig({ ...base, ...patch, warn })).toEqual({ salesKey: SALES_KEY, havenBaseUrl: HAVEN, merchantAddress: MERCHANT })
     expect(warn).toHaveBeenCalledTimes(1)
     const message = String(warn.mock.calls[0][0])
     expect(message).toContain('Sales product is not offered')

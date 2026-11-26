@@ -434,8 +434,9 @@ export class McpMerchantTransport {
 
   /**
    * Establish an MCP Streamable-HTTP session and return its id. Any handshake
-   * failure — and, since #5089, a stateless server too (no session id) —
-   * degrades to `undefined`, allowing the caller to fall back to plain x402.
+   * failure, and a stateless server (no session id), degrades to `undefined`,
+   * allowing the caller to fall back to plain x402. Since #5089 a stateless
+   * server is also sent `notifications/initialized` on the way.
    * The local SDK `fetch()` and session recovery read this; the hosted quote
    * and completion read {@link handshake}, which tells a stateless server
    * apart from a failure.

@@ -365,8 +365,8 @@ export const toolSchemas = {
     include_signing_payload: z.boolean().optional(),
   },
   haven_quote_mcp_tool: {
-    // The read-only counterpart to haven_pay_mcp_tool. It establishes the
-    // merchant's MCP session and obtains its live 402, but deliberately takes
+    // The read-only counterpart to haven_pay_mcp_tool. It completes the
+    // merchant's MCP handshake and obtains its live 402, but deliberately takes
     // no cap/idempotency argument: a quote is informational only, never a
     // reservation or a payment input.
     merchant_url: z.string().url(),

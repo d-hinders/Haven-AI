@@ -150,7 +150,7 @@ export function ownServerSetupPrompt(params: { accountAddress: string; salesUrl:
     `   payTo=${params.accountAddress}`,
     '   NETWORK=eip155:84532',
     `   HAVEN_SALES_URL=${params.salesUrl}`,
-    "   If you sell MCP tools, follow the worked example's MCP section: your server must issue an MCP session id.",
+    "   If you sell MCP tools, follow the worked example's MCP section: your server must answer initialize as a streamable HTTP MCP server, with sessions or without.",
     '3. After each payment settles, report the sale to Haven:',
     `   POST ${params.salesUrl}/merchant/sales`,
     '4. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into the Authorization header. Never invent one.',

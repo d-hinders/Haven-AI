@@ -1394,7 +1394,7 @@ export class HavenClient {
       // like a 402. The transport signal is read exactly as for a 402 (path
       // or Bazaar); a stateless merchant that answered a bare `tools/call`
       // with a tool result has shown it needs no session, so nothing is
-      // forced — `quoteMcpX402` still pins its own established session.
+      // forced — `quoteMcpX402` still pins its own MCP handshake (a session, or #5089 stateless).
       const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response, initialInit)
       if (toolResultChallenge) {
         const mcpTransport = await this.merchantTransport.detect(url, toolResultChallenge, response)

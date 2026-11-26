@@ -1341,8 +1341,9 @@ the payment id remains, call `getResumeState(paymentId)` to rehydrate Haven's
 stored x402 context. It is a plain read with no status precondition, and it is
 rail-neutral. Haven stores payment context, not the agent's local request
 stream, so request bodies, tool names, and tool arguments may still need to be
-preserved or reconstructed. SDK and hosted MCP tool completion establish a
-fresh MCP transport session; callers do not need to preserve the old session
+preserved or reconstructed. SDK and hosted MCP tool completion run a
+fresh MCP handshake (a new transport session, or — #5089 — a stateless
+server's `initialize`); callers do not need to preserve the old session
 id. Local MCP normalizes most fields to camelCase while retaining
 `resume_state` (and, since #3103, dual-emits `nextAction` / `next_action` on
 its failure envelope, the converged spelling being `next_action`); backend

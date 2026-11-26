@@ -14,7 +14,7 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Four scenarios × two viewports × two colour schemes = sixteen baselines, all
+ * Six scenarios × two viewports × two colour schemes = twenty-four baselines, all
  * named `<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/analytics.visual.spec.ts/`.
  *
@@ -26,7 +26,9 @@
  *     `fixture-shape-parity.test.ts`; the harness itself is a CLI that
  *     Playwright's loader cannot collect (see that file for the measurement).
  *     So no parallel fixture set is introduced either: one declared shape, read
- *     by three surfaces.
+ *     by three surfaces. The revenue side (`revenue`, `revenue-subcent`) reads
+ *     the Sales fixtures instead (`salesSummary`, `salesSummarySubCent` in
+ *     `fixtures/haven-api.ts`), the same ones the Sales spec photographs.
  *   - The viewports are the single committed pair from
  *     `scripts/evidence-viewports.mjs` (1280×800 and 390×844), so the pixel
  *     gate and the #896 evidence captures render the same two widths.
@@ -103,6 +105,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectFigureOnOneLine } from './support/money-figure'
 import {
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
@@ -110,6 +113,8 @@ import {
   SALES_FROZEN_NOW,
   seedAuthenticatedSession,
   serveSales,
+  serveSekUser,
+  type SalesScenario,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared
@@ -286,7 +291,7 @@ const OVERVIEW_FAILURE = analyticsOverviewFailure
 type OverviewBody = typeof analyticsOverview | typeof analyticsOverviewEmpty
 
 type Scenario = {
-  name: 'populated' | 'empty' | 'error' | 'filtered' | 'revenue'
+  name: 'populated' | 'empty' | 'error' | 'filtered' | 'revenue' | 'revenue-subcent'
   /**
    * The query the page is opened with. `filtered` (#4401) lands on
    * `?agentId=agent-research`, whose agent the `/agents` handler then names
@@ -301,6 +306,14 @@ type Scenario = {
    * Spending / Revenue switch exists and the revenue side has its one answer.
    */
   sales?: boolean
+  /**
+   * #5105: which Sales scenario to serve when `sales` is on (default
+   * `overview`), and whether the session is the SEK user. `revenue-subcent`
+   * serves the rate-less sub-cent period to the SEK user, so the revenue side
+   * is in USDC mode.
+   */
+  salesScenario?: SalesScenario
+  sek?: boolean
   /**
    * The instant the page's clock is frozen to. The default is the analytics
    * fixture's own window; the revenue side reads the Sales fixture, whose days
@@ -667,6 +680,32 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    // #5105: the revenue side on the rate-less sub-cent period, in USDC mode
+    // (a SEK user, no rate served): Analytics' Revenue tile is the second copy
+    // of the #5088 sum rule's widest figure, and it stays on one line (#4400).
+    name: 'revenue-subcent',
+    query: '?view=revenue',
+    body: analyticsOverview,
+    sales: true,
+    salesScenario: 'overview-subcent',
+    sek: true,
+    now: SALES_FROZEN_NOW,
+    async assert(page) {
+      const tiles = page.getByTestId('analytics-revenue-tiles')
+      await expect(tiles).toHaveCount(1)
+      const revenue = tiles.getByTestId('stat-tile-revenue')
+      // #5105 owner decision: in USDC mode the unit sits in the tile's unit
+      // slot and a 4+ integer-digit figure is set one size down (compact).
+      await expect(revenue.locator('p').nth(1)).toHaveText(/^12,345\.6789\s*USDC$/)
+      await expect(revenue.locator('p').nth(1)).toHaveClass(/text-xl/)
+      await expect(revenue).not.toContainText('\u2248')
+      await expect(revenue).not.toContainText('kr')
+      await expectFigureOnOneLine(revenue, 'Analytics Revenue')
+      await expectFigureOnOneLine(tiles.getByTestId('stat-tile-average-sale'), 'Analytics Average sale')
+      expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    },
+  },
+  {
     name: 'error',
     body: null,
     async assert(page) {
@@ -838,7 +877,8 @@ test.describe('analytics visual regression', () => {
         // #4901: the revenue side's switch exists only while merchant services
         // are on, and its one read is the Sales summary — served here, after
         // the overview override, so the merchant routes answer first.
-        if (scenario.sales) await serveSales(page, 'overview')
+        if (scenario.sales) await serveSales(page, scenario.salesScenario ?? 'overview')
+        if (scenario.sek) await serveSekUser(page)
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
         await page.goto(`/analytics${scenario.query ?? ''}`)

@@ -28,6 +28,7 @@ import {
   salesTotalText,
   salesSumAmountText,
   salesSumNeedsFourDecimals,
+  salesRevenueTile,
   salesSumText,
   type SalesMoney,
   salesChartDays,
@@ -160,6 +161,21 @@ describe('amounts', () => {
       // 0.0001 USDC is 0.00105 kr: under half an öre, so it does.
       expect(salesSumNeedsFourDecimals('1110100', sek)).toBe(true)
       expect(salesSumAmountText('1110100', sek)).toBe(`11,6561${nbsp}kr`)
+    })
+
+    it('the Revenue tile figure in USDC mode moves USDC to the unit and goes compact from 1,000 (#5105)', () => {
+      expect(salesRevenueTile('12345678900', token)).toEqual({ value: '12,345.6789', unit: 'USDC', valueSize: 'compact' })
+      expect(salesRevenueTile('1000000000', token)).toEqual({ value: '1,000.00', unit: 'USDC', valueSize: 'compact' })
+      expect(salesRevenueTile('999990000', token)).toEqual({ value: '999.99', unit: 'USDC', valueSize: 'default' })
+      // The printed figure decides: 999.99995 prints as a four-digit 1,000.0000.
+      expect(salesRevenueTile('999999950', token)).toEqual({ value: '1,000.0000', unit: 'USDC', valueSize: 'compact' })
+      expect(salesRevenueTile('-12345678900', token)).toEqual({ value: '-12,345.6789', unit: 'USDC', valueSize: 'compact' })
+      expect(salesRevenueTile('13500', token)).toEqual({ value: '0.0135', unit: 'USDC', valueSize: 'default' })
+    })
+
+    it('a $, kr or € Revenue figure keeps its default size and has no unit, however long (#5105)', () => {
+      expect(salesRevenueTile('12345678900', usd)).toEqual({ value: '$12,345.6789', valueSize: 'default' })
+      expect(salesRevenueTile('12345678900', sek)).toEqual({ value: salesSumText('12345678900', sek), valueSize: 'default' })
     })
 
     it('the split names each part with its sub-cent part', () => {

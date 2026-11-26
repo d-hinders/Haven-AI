@@ -104,7 +104,9 @@ counted tile carrying the figure. The Revenue tile, the By product rows and the
 chart's spoken total are sums, so they keep a sub-cent part (#5088): in `$` or
 USDC a sum that is not a whole USDC cent reads with four decimals
 ("$0.0135"); the full rule, converted currencies included, is in
-[`design-system.md`](design-system.md).
+[`design-system.md`](design-system.md). In USDC mode the Revenue tile carries "USDC" in its
+unit slot and, from 1,000 USDC, the compact value size, so a five-digit total
+stays on one line (#5105).
 
 **Revenue over time** is the shared `StackedBarChart`, one slot per calendar day
 of the period, stacked by product: the five products with the most revenue take

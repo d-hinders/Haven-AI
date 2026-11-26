@@ -1385,6 +1385,21 @@ hint), never essential copy: § Tooltips' rules bind the call site. Ops tiles
 pass nothing and are unchanged; the hint carries no colour of its own, so a
 tile with a hint still renders its figure in ink in every state.
 
+**The `valueSize` prop (#5105).** `compact` sets the card value one size down
+(`text-xl`); `default` is every other caller's `text-2xl`. It exists for the
+#4400 rule (a money figure never wraps): a caller whose longest realistic
+figure does not fit the four-across row at `text-2xl` asks for the smaller
+size, and the caller decides, because it knows the figure. Its one user is the
+Sales and Analytics Revenue tile in USDC mode (no rate for the display
+currency). There, `salesRevenueTile` (`lib/sales.ts`) puts "USDC" in the unit
+slot and asks for `compact` from 1,000 USDC. Measured at desktop 1280 at
+`8caf959d0` (2026-11-26, a local Playwright probe), the
+tile's text track is 190px; `12,345.6789 USDC` at `text-2xl` was 227px. The
+other display modes fit at the default size: `$123,456.7891` is 184px and
+`≈129 629,63 kr` is at most 186px (the probe measured it with a space after
+the ≈, which the page does not render). Owner decision on #5105, 2026-11-26. The inline
+variant ignores it.
+
 ### Amount: currency mode (#3805)
 
 `Amount` has two modes. The token mode is the original contract: a

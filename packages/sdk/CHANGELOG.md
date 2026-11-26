@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
 ### Added
 
 - **`completeX402MerchantCall` can bind delivery to a stored MCP endpoint (#5086).** A new optional `approvedEndpoint`: when given, the URL being called is compared with it (string for string) instead of with the payment's stored resource address, which on the EIP-3009 bridge holds the merchant's declared `resource.url` and may be `mcp://tool/<name>`. The reported `resourceUrl` (the funding evidence report) stays the stored address. Omitted, the comparison is unchanged. The hosted MCP server passes the endpoint it stored; pass only a value Haven stored, never the URL being called. No update needed.

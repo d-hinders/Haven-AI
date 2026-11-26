@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
 ### Added
 
 - **Checkout details on the paid x402 request (#4872).** `haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool` and `haven_resume_x402_payment` reach the SDK seam that answers a merchant's checkout-details request (`docs/architecture/13-checkout-details.md`). A required field this agent cannot share answers `CHECKOUT_DETAILS_UNAVAILABLE` with `missing_fields`, `reason`, `next_action: stop_and_tell_user` and a `next_tool_omitted_reason`, instead of the generic `API_ERROR`; no payment was created (on resume, the funded payment was not delivered). The four descriptions say so, including that a resume by `payment_id` alone carries no challenge extensions and so neither shares nor refuses. No update needed.
@@ -28,6 +30,10 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 - **`haven_quote_x402` no longer skips a stated `expected_amount` silently (#4830).** When the price could not be compared, the local quote used to return the plain quote — no `price_differs_from_expected`, no stop — so an agent read as if no expectation had been stated. It now says so: `price_comparison_made: false` with `price_comparison_not_made_cause` (`agent_read_failed` | `agent_read_refused` | `no_option_selected` | `unknown_decimals`), `safe_to_continue: false`, no prefilled cap and no pay step, with the next step following the cause (`retry_with_explicit_context` for a transient agent-read failure, `stop_and_tell_user` otherwise). The comparison is also decided WITHOUT the agent read wherever the rail cannot change the answer (one option, equal authorization amounts, or a stated price equal to neither), and a stated price finer than the token's scale is now a decided mismatch, as on the hosted surface. Additive result fields only — no input, `next_action` value or signer surface changes. **This half ships with the next `@haven_ai/mcp` release**; the hosted surface carries the same fields from the same change. No update needed.
 
 - **`haven_get_payment_status` no longer names a tool this package does not have (#4808).** The backend's `message` names `haven_report_settlement_evidence` in two states — phase `delivered_unverified` / next action `stop_and_tell_user`, and phase `payment_submitted` / next action `awaiting_settlement_evidence` — and that tool is hosted-only. The local handler now replaces `message` whole in those two states, keyed on the structured fields and never on the backend's sentence, and names no reporting tool: it says the merchant delivered, that Haven's settlement sweep may still attribute the payment, and to tell the user if it stays unverified. Every other state passes the backend message through unchanged. No `phase`, `next_action`, status code or stored value changes, and the local `tools/list` golden is byte-identical. No update needed.
+
+### Removed
+
+- **The package barrel no longer exports `SIGNER_CAPABILITY_KEY`, `TASK_BUDGET_MIN_SIGNER_VERSION` or `taskSignerCompatibilityNotice` (#4825).** They built the local task-budget old-signer notice, which was removed together with `signer-compat.ts`; the hosted MCP keeps its own copy. Breaking only for code that imports one of the three names from `@haven_ai/mcp`; the `haven-mcp` binary and its tools are unaffected. No update needed.
 
 ## 0.14.0-alpha.0 — 2026-11-11
 

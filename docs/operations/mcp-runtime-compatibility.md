@@ -87,7 +87,7 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-25"
+last-verified: "2026-11-26"
 ---
 
 > **Contract change (#4808, 2026-11-11): the local MCP's settlement-evidence
@@ -2176,6 +2176,10 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
   - Text and next-step fields only; no tool, schema, version or consent-hash change. The server instructions and the `haven_pay_x402_quote` description now name `haven_report_settlement_evidence` after an erc7710 retry.
   - The skill text splits the post-retry step by scheme.
   - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
+
+### A stateless MCP server is payable (#5089)
+
+Hosted behaviour, plus additive SDK surface. `haven_quote_mcp_tool`, `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` no longer refuse a merchant whose `initialize` returns a valid JSON-RPC result with no `Mcp-Session-Id`; the unpaid probe and the paid retry of `haven_settle_mcp_tool` / `haven_complete_mcp_tool` to it carry `Accept: application/json, text/event-stream`. A 200 that is not an `initialize` result, a JSON-RPC error and a failed call keep the unchanged refusal ("The merchant did not establish an MCP session before the x402 quote. No payment was created.", 502) and the #1271 discovery retry. SDK: `McpMerchantTransport.handshake()` / `withMcpHeaders()` are new; `initialize()` and the local `fetch()` are unchanged (a stateless server is paid as standard x402 there). No tool, schema, description or consent-hash change; no signer change. Detail: `docs/architecture/04-x402-payment-sequence.md`, *Hosted Paid-MCP-Tool Flow*.
 
 ### An `mcp://tool/<name>` address is payable; delivery is bound to the stored endpoint (#5086)
 

@@ -123,6 +123,18 @@ function redirectedInit(init: RequestInit, status: number): RequestInit {
   return { ...init, method: 'GET', body: null, headers }
 }
 
+/**
+ * #5089: what an MCP `initialize` established. A streamable-HTTP server may
+ * answer with an `Mcp-Session-Id` (stateful) or without one (stateless — common
+ * on serverless hosts, and Haven's own hosted MCP server is one). `undefined`
+ * from {@link McpMerchantTransport.handshake} means neither: the call failed,
+ * answered a JSON-RPC error, or answered something that is not an `initialize`
+ * result (an HTML 200 at a base URL, say).
+ */
+export type McpHandshake =
+  | { stateless: false; sessionId: string }
+  | { stateless: true; sessionId?: undefined }
+
 export interface McpMerchantTransportOptions {
   merchantTimeout?: number
   fetch?: MerchantFetch
@@ -421,14 +433,35 @@ export class McpMerchantTransport {
   }
 
   /**
-   * Establish an MCP Streamable-HTTP session. Any handshake failure degrades
-   * to `undefined`, allowing the caller to fall back to plain x402.
+   * Establish an MCP Streamable-HTTP session and return its id. Any handshake
+   * failure — and, since #5089, a stateless server too (no session id) —
+   * degrades to `undefined`, allowing the caller to fall back to plain x402.
+   * The local SDK `fetch()` and session recovery read this; the hosted quote
+   * and completion read {@link handshake}, which tells a stateless server
+   * apart from a failure.
    */
   async initialize(
     url: string,
     init?: RequestInit,
     wallet?: string,
   ): Promise<string | undefined> {
+    return (await this.handshake(url, init, wallet))?.sessionId
+  }
+
+  /**
+   * #5089: the MCP `initialize` with its outcome made explicit. A 200 with an
+   * `Mcp-Session-Id` is a session; a 200 WITHOUT one is a stateless server only
+   * when its body (JSON or an event stream) is a JSON-RPC 2.0 response with
+   * this request's `id` and a `result.protocolVersion`. Anything else is
+   * `undefined`. `notifications/initialized` follows on both outcomes (the MCP
+   * lifecycle requires it with or without a session), best effort.
+   */
+  async handshake(
+    url: string,
+    init?: RequestInit,
+    wallet?: string,
+  ): Promise<McpHandshake | undefined> {
+    const requestId = ++this.requestId
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
@@ -440,7 +473,7 @@ export class McpMerchantTransport {
         headers,
         body: JSON.stringify({
           jsonrpc: '2.0',
-          id: ++this.requestId,
+          id: requestId,
           method: 'initialize',
           params: {
             protocolVersion: MCP_PROTOCOL_VERSION,
@@ -453,19 +486,40 @@ export class McpMerchantTransport {
       if (!response.ok) return undefined
 
       const sessionId = response.headers.get('mcp-session-id')
-      if (!sessionId) return undefined
-
       const message = await this.readMessage(response)
       if (message && 'error' in message) return undefined
 
+      if (!sessionId) {
+        // #5089: no session id — a stateless server only if the body really
+        // is this request's `initialize` result. An HTML 200 at a base URL,
+        // or any other 200, stays "not an MCP endpoint" (#1271 discovery).
+        if (!isInitializeResult(message, requestId)) return undefined
+        await this.notifyInitialized(url, init, undefined, wallet)
+        return { stateless: true }
+      }
+
       await this.notifyInitialized(url, init, sessionId, wallet)
-      return sessionId
+      return { stateless: false, sessionId }
     } catch (err) {
       // #3747 spec review: a policy REFUSAL is never degraded to "no
       // session" — rethrow it so the caller sees the real refusal.
       if (err instanceof MerchantEgressRefusedError || err instanceof MerchantEgressResponseCapError) throw err
       return undefined
     }
+  }
+
+  /**
+   * #5089: the headers every request to an MCP endpoint carries after its
+   * handshake — the session headers on a stateful server, `Accept` alone on a
+   * stateless one (a streamable-HTTP server may answer a request without it
+   * with 406). Call it only after a {@link handshake} succeeded: a plain-HTTP
+   * request never gains an `Accept` header from here.
+   */
+  withMcpHeaders(init: RequestInit | undefined, handshake: McpHandshake): RequestInit {
+    if (!handshake.stateless) return this.withSessionHeaders(init, handshake.sessionId)
+    const headers = new Headers(init?.headers)
+    headers.set('Accept', MCP_ACCEPT)
+    return { ...init, headers }
   }
 
   /** Add the MCP session and response-content negotiation headers. */
@@ -674,14 +728,14 @@ export class McpMerchantTransport {
   private async notifyInitialized(
     url: string,
     init: RequestInit | undefined,
-    sessionId: string,
+    sessionId: string | undefined,
     wallet?: string,
   ): Promise<void> {
     try {
       const headers = new Headers(init?.headers)
       headers.set('Content-Type', 'application/json')
       headers.set('Accept', MCP_ACCEPT)
-      headers.set('mcp-session-id', sessionId)
+      if (sessionId) headers.set('mcp-session-id', sessionId)
       if (wallet && !headers.has('x402-wallet')) headers.set('x402-wallet', wallet)
 
       await this.fetch(
@@ -984,4 +1038,19 @@ function selectJsonRpcResult(
   messages: Array<Record<string, unknown>>,
 ): Record<string, unknown> | undefined {
   return messages.find((message) => 'result' in message || 'error' in message) ?? messages.at(-1)
+}
+
+/**
+ * #5089: a JSON-RPC 2.0 response to the `initialize` request `id`, carrying
+ * `result.protocolVersion` — the only body that makes a session-less 200 a
+ * stateless MCP server.
+ */
+function isInitializeResult(message: Record<string, unknown> | undefined, id: number): boolean {
+  if (!message || message.jsonrpc !== '2.0' || message.id !== id) return false
+  const result = message.result
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    typeof (result as Record<string, unknown>).protocolVersion === 'string'
+  )
 }

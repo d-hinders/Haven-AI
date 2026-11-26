@@ -1618,8 +1618,11 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
    * MCP merchant that answers the unpaid `tools/call` with the challenge and
    * the paid one with its result and a settlement receipt.
    */
-  async function installWorld(): Promise<World> {
-    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, TOOL_ADDRESS)
+  async function installWorld(
+    opts: { stateless?: boolean; htmlAtBase?: boolean; challenge?: Record<string, unknown> } = {},
+  ): Promise<World> {
+    const challengeFor = opts.challenge ?? MCP_CHALLENGE
+    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, (challengeFor.resource as { url: string }).url)
     const world: World = { calls: [], storedContext: null, paidCalls: 0 }
     let funded = false
     const status = () => ({
@@ -1651,18 +1654,35 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
       world.calls.push({ url, method, body, headers: Object.fromEntries(headers.entries()) })
 
       if (parsed.hostname === 'merchant.test') {
+        // #5089: a base URL that is a web page, not the MCP endpoint — it
+        // answers initialize with an HTML 200, and the discovery document
+        // names the real endpoint.
+        if (opts.htmlAtBase && parsed.pathname === '/' && method === 'POST') {
+          return new Response('<html><body>Welcome</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+        }
+        if (method === 'GET' && parsed.pathname === '/.well-known/haven-demo-merchant') {
+          return new Response(JSON.stringify({ name: 'Merchant', mcp_url: MCP_ENDPOINT }), { status: 200, headers: { 'content-type': 'application/json' } })
+        }
         if (body?.method === 'initialize') {
           return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, result: { protocolVersion: '2025-06-18' } }), {
             status: 200,
-            headers: { 'content-type': 'application/json', 'mcp-session-id': 'sess-5086' },
+            headers: {
+              'content-type': 'application/json',
+              ...(opts.stateless ? {} : { 'mcp-session-id': 'sess-5086' }),
+            },
           })
         }
         if (body?.method === 'notifications/initialized') return new Response(null, { status: 202 })
+        // A strict stateless streamable-HTTP server answers a request that
+        // does not accept both JSON and an event stream with 406.
+        if (opts.stateless && !(headers.get('Accept') ?? '').includes('text/event-stream')) {
+          return new Response('Not Acceptable', { status: 406 })
+        }
         const paid = headers.get('PAYMENT-SIGNATURE') ?? headers.get('X-PAYMENT')
         if (!paid) {
           return new Response(JSON.stringify({ error: 'payment required' }), {
             status: 402,
-            headers: { 'content-type': 'application/json', 'PAYMENT-REQUIRED': btoa(JSON.stringify(MCP_CHALLENGE)) },
+            headers: { 'content-type': 'application/json', 'PAYMENT-REQUIRED': btoa(JSON.stringify(challengeFor)) },
           })
         }
         world.paidCalls += 1
@@ -1727,15 +1747,19 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
   }
 
   /** Sign with the REAL signer core and settle through the hosted tool, rehydrating the stored context. */
-  async function signAndSettle(world: World, hostedHandlers: ReturnType<typeof hosted>) {
+  async function signAndSettle(
+    world: World,
+    hostedHandlers: ReturnType<typeof hosted>,
+    challengeFor: Record<string, unknown> = MCP_CHALLENGE,
+  ) {
     const signerHandlers = createSignerHandlers(createEdgeSigner(DELEGATE_KEY, { x402BindingSigner: BINDING_SIGNER }))
-    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, TOOL_ADDRESS)
+    const expected = await makeX402ExpectedAuth('delegation', TYPED_DATA, (challengeFor.resource as { url: string }).url)
     const signed = ok<{ signature: string; payment_header: string }>(
       await signerHandlers.haven_sign_x402({
         payload_hash: FUNDING_HASH,
         typed_data: TYPED_DATA,
         x402_expected: expected.snake,
-        payment_required: MCP_CHALLENGE,
+        payment_required: challengeFor,
       }),
     )
     const settled = await hostedHandlers.haven_settle_mcp_tool({
@@ -1795,4 +1819,44 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
       expect(resourceUrl === undefined || resourceUrl === TOOL_ADDRESS).toBe(true)
     }
   })
+
+  // ── #5089: a stateless MCP server (no Mcp-Session-Id) ─────────────────────
+  const toolCalls = (world: World) =>
+    world.calls.filter((c) => new URL(c.url).hostname === 'merchant.test' && (c.body as Record<string, unknown> | null)?.method === 'tools/call')
+
+  it('#5089: a stateless server is quoted, paid and delivered end to end; the probe and the paid retry both carry Accept', async () => {
+    const world = await installWorld({ stateless: true })
+    const hostedHandlers = hosted()
+    const pay = await hostedHandlers.haven_pay_mcp_tool({ merchant_url: MCP_ENDPOINT, tool_name: 'haiku', arguments: {}, max_amount: '2000000' })
+    expect(pay.success).toBe(true)
+
+    const { settled } = await signAndSettle(world, hostedHandlers)
+    expect(settled.success).toBe(true)
+    expect(world.paidCalls).toBe(1)
+    const calls = toolCalls(world)
+    // The unpaid probe, then the paid retry.
+    expect(calls).toHaveLength(2)
+    for (const call of calls) {
+      expect(call.headers.accept ?? call.headers.Accept).toBe('application/json, text/event-stream')
+      expect(call.headers['mcp-session-id']).toBeUndefined()
+    }
+    expect(calls[1].headers['payment-signature'] ?? calls[1].headers['x-payment']).toBeTruthy()
+    // The lifecycle notification is sent without a session too.
+    const notified = world.calls.filter((c) => (c.body as Record<string, unknown> | null)?.method === 'notifications/initialized')
+    expect(notified.length).toBeGreaterThanOrEqual(1)
+    for (const n of notified) expect(n.headers['mcp-session-id']).toBeUndefined()
+  })
+
+  it('#5089: a base URL answering initialize with an HTML 200 is still an endpoint miss — the #1271 discovery retry finds the endpoint', async () => {
+    const world = await installWorld({ htmlAtBase: true })
+    const hostedHandlers = hosted()
+    const pay = ok<{ merchant_url: string }>(
+      await hostedHandlers.haven_pay_mcp_tool({ merchant_url: 'https://merchant.test/', tool_name: 'haiku', arguments: {}, max_amount: '2000000' }),
+    )
+    expect(pay.merchant_url).toBe(MCP_ENDPOINT)
+    // No tools/call ever reached the web page.
+    expect(world.calls.some((c) => new URL(c.url).pathname === '/' && (c.body as Record<string, unknown> | null)?.method === 'tools/call')).toBe(false)
+    expect(world.calls.some((c) => new URL(c.url).pathname === '/.well-known/haven-demo-merchant')).toBe(true)
+  })
+
 })

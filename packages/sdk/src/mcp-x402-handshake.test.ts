@@ -480,6 +480,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     // ...but failed, so no MCP headers leak onto the probe or the retry.
     expect(headersOf(fetchMock.mock.calls[1]).has('mcp-session-id')).toBe(false)
     expect(headersOf(fetchMock.mock.calls[6]).has('mcp-session-id')).toBe(false)
+    // #5089: nor the MCP `Accept` — a failed handshake is a plain-HTTP request.
+    expect(headersOf(fetchMock.mock.calls[1]).has('Accept')).toBe(false)
+    expect(headersOf(fetchMock.mock.calls[6]).has('Accept')).toBe(false)
 
     // Standard x402 result passes through untouched (not SSE-collapsed).
     expect(response.status).toBe(200)

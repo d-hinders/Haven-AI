@@ -69,7 +69,7 @@ covers:
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-25"
+last-verified: "2026-11-26"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -255,8 +255,9 @@ HTTP-402-over-MCP layering (including the demo merchant) see one change only:
 their `tools/call` body now carries a `_meta` key they may ignore.
 
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
-`haven_quote_catalog_purchase` are read-only. The MCP variants establish the
-merchant session and send an unpaid `tools/call` probe (and may read the public
+`haven_quote_catalog_purchase` are read-only. The MCP variants complete the
+merchant's MCP handshake (a session, or — #5089 — a stateless server's valid
+`initialize` result) and send an unpaid `tools/call` probe (and may read the public
 agent delegate address to send `x402-wallet`), but none creates a Haven payment,
 approval request, signature, funding operation, paid merchant retry, or
 on-chain transaction. Every quote is informational rather than a price
@@ -746,9 +747,22 @@ a paid authorization.
 
 The recommended three-call fast path for an x402-protected MCP tool is:
 
-1. `haven_pay_mcp_tool` — hosted MCP establishes an MCP session (`initialize`,
-   then `notifications/initialized`) and sends the unpaid, session-bound
-   `tools/call` quote probe. It records the MCP transport context and returns
+1. `haven_pay_mcp_tool` — hosted MCP completes the MCP handshake (`initialize`,
+   then `notifications/initialized`) and sends the unpaid `tools/call` quote
+   probe, session-bound on a stateful server. **A stateless server (#5089)** —
+   one that answers `initialize` with a valid JSON-RPC result (the request's
+   `id`, a `result.protocolVersion`) and no `Mcp-Session-Id` — is accepted too:
+   `McpMerchantTransport.handshake` returns `{ stateless: true }`, and
+   `withMcpHeaders` puts `Accept: application/json, text/event-stream` on every
+   later MCP request (the probe, whose snapshot keeps it, and the paid retry in
+   `completeX402MerchantCall`); a strict stateless server answers a request
+   without it with 406. A 200 that is not an `initialize` result (an HTML page
+   at a base URL), a JSON-RPC error and a failed call stay "not an MCP
+   endpoint" — the unchanged `mcpSessionNotEstablished` 502 and the #1271
+   discovery retry — and a plain-HTTP request never gains `Accept`. The local
+   SDK `fetch()` keeps its published behaviour (it reads `initialize()`, which
+   answers no session for a stateless server, so it pays such a server as
+   standard x402), and session recovery (#3171) acts only on a session. It records the MCP transport context and returns
    the unsigned funding payload plus merchant/tool context.
 2. `haven_sign_x402` — the local signer signs the funding payload and creates the
    merchant-bound payment header.

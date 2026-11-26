@@ -100,8 +100,8 @@ money went; it renders at zero too, because "$0.00 / No transfers between your
 accounts" is a fact about the period and a tile that came and went would move
 the grid under the reader. A period whose only money moved between the owner's
 accounts is not empty: it renders the tiles, with Revenue at zero and the Not
-counted tile carrying the figure. The Revenue tile and the chart's spoken
-total are sums, so they keep a sub-cent part (#5088): a total that is not a
+counted tile carrying the figure. The Revenue tile, the By product rows and the
+chart's spoken total are sums, so they keep a sub-cent part (#5088): a sum that is not a
 whole USDC cent reads with four decimals ("$0.0135"), every other figure keeps
 the cent rule in [`design-system.md`](design-system.md).
 

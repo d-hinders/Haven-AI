@@ -168,7 +168,11 @@ describe('revenueChartDays', () => {
 
 describe('revenueChartLabel', () => {
   it('is revenue wording, with the period’s total and the payments behind it', () => {
-    expect(revenueChartLabel(SUMMARY, usd, 3)).toBe('Revenue over 3 days: $1.68 from 8 payments.')
+    expect(revenueChartLabel(SUMMARY, usd, 3)).toBe('Revenue over 3 days: $1.6750 from 8 payments.')
+  })
+
+  it('keeps a sum’s sub-cent part, as the Revenue tile does (#5088)', () => {
+    expect(revenueChartLabel({ ...SUMMARY, revenue_raw: '13500' }, usd, 3)).toBe('Revenue over 3 days: $0.0135 from 8 payments.')
   })
 })
 

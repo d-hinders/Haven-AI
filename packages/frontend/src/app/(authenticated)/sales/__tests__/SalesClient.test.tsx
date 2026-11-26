@@ -586,7 +586,6 @@ describe('payers', () => {
       `Who paid. ${sentence} Only your contacts and your own agents and accounts are named.`,
     )
     expect(byPayer.textContent).toContain(sentence)
-    expect(sentence).not.toMatch(/haven/i)
   })
 
   it('the Revenue tile and the Payments summary show a sum’s sub-cent part (#5088): 0.0135 is $0.0135', async () => {
@@ -620,6 +619,28 @@ describe('payers', () => {
     const byPayer = await screen.findByTestId('sales-by-payer')
     expect(within(byPayer).getAllByText('$0.0110').length).toBeGreaterThan(0)
     expect(within(byPayer).getAllByText('$0.0025').length).toBeGreaterThan(0)
+  })
+
+  it('every other revenue sum shows its sub-cent part too (#5088): product, Other, no product, Other payers, Several payers, the chart', async () => {
+    serve({
+      summary: {
+        ...SUMMARY,
+        revenue_raw: '13500',
+        revenue_in_account_raw: '13500',
+        by_product: [{ product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '6100' }],
+        by_product_other: { products: 2, sales: 2, amount_raw: '7200' },
+        without_product: { count: 1, amount_raw: '16500' },
+        by_payer_other: { payers: 2, payments: 2, amount_raw: '6300' },
+        unattributed: { payments: 1, amount_raw: '7400' },
+      },
+    })
+    await renderPage()
+    const byProduct = await screen.findByTestId('sales-by-product')
+    for (const figure of ['$0.0061', '$0.0072', '$0.0165']) expect(byProduct.textContent).toContain(figure)
+    const byPayer = screen.getByTestId('sales-by-payer')
+    for (const figure of ['$0.0063', '$0.0074']) expect(byPayer.textContent).toContain(figure)
+    const chart = screen.getAllByRole('img', { name: /Revenue over 30 days/ })[0]
+    expect(chart.getAttribute('aria-label')).toContain('$0.0135 from')
   })
 
   it('never says a payer uses Haven', async () => {

@@ -134,16 +134,31 @@ describe('amounts', () => {
     it('a sum with no sub-cent part keeps 2 decimals: 0.30 + 0.20 is $0.50', () => {
       expect(salesSumText('500000', usd)).toBe('$0.50')
       expect(salesSumAmountText('500000', token)).toBe('0.50 USDC')
-      expect(salesSumNeedsFourDecimals('500000', usd)).toBe(false)
+      expect(salesSumNeedsFourDecimals('500000')).toBe(false)
     })
 
-    it('in a converted currency, the sub-cent part counts only if it is under half a cent there', () => {
-      // 0.001 USDC is 0.0105 kr at 10.5: no part needs 4 decimals in SEK.
-      expect(salesSumNeedsFourDecimals('11000', sek)).toBe(false)
-      expect(salesSumText('11000', sek)).toBe(salesTotalText('11000', sek))
-      // 0.0001 USDC is 0.00105 kr: under half an öre, so it does.
-      expect(salesSumNeedsFourDecimals('1110100', sek)).toBe(true)
+    it('a remainder of half a cent or more keeps its sub-cent part too: 6 x 0.001 is $0.0060, not $0.01', () => {
+      expect(salesSumAmountText('6000', usd)).toBe('$0.0060')
+      expect(salesSumAmountText('7000', usd)).toBe('$0.0070')
+      expect(salesSumText('16500', usd)).toBe('$0.0165')
+      expect(salesSumAmountText('16500', token)).toBe('0.0165 USDC')
+      // The single-amount rule rounds the same figures.
+      expect(salesAmountText('6000', usd)).toBe('$0.01')
+      expect(salesAmountText('16500', usd)).toBe('$0.02')
+    })
+
+    it('an already sub-cent sum keeps the floor: <$0.0001, never $0.0000', () => {
+      expect(salesSumAmountText('30', usd)).toBe('<$0.0001')
+      expect(salesSumAmountText('-13500', usd)).toBe('-$0.0135')
+    })
+
+    it('in a converted currency the same USDC rule applies: a sum that is not a whole USDC cent shows 4 decimals', () => {
+      expect(salesSumNeedsFourDecimals('11000')).toBe(true)
+      expect(salesSumAmountText('11000', sek)).toBe(`0,1155${nbsp}kr`)
       expect(salesSumAmountText('1110100', sek)).toBe(`11,6561${nbsp}kr`)
+      // A whole USDC cent keeps the ordinary rule after conversion.
+      expect(salesSumNeedsFourDecimals('10000')).toBe(false)
+      expect(salesSumText('10000', sek)).toBe(salesTotalText('10000', sek))
     })
 
     it('the split names each part with its sub-cent part', () => {

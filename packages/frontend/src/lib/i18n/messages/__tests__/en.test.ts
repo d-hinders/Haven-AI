@@ -99,7 +99,7 @@ describe('the own-server setup prompt MCP line (#5085)', () => {
   it('points an MCP seller at the MCP section, as one literal line under step 2', () => {
     const lines = prompt.split('\n')
     expect(lines[7]).toBe(
-      "   If you sell MCP tools, follow the worked example's MCP section: your server must issue an MCP session id.",
+      "   If you sell MCP tools, follow the worked example's MCP section: your server must answer initialize as a streamable HTTP MCP server, with sessions or without.",
     )
     expect(lines[8]).toBe('3. After each payment settles, report the sale to Haven:')
   })

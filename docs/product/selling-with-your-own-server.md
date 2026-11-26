@@ -233,14 +233,18 @@ the result for you.
 
 ### Four rules Haven's buyer needs
 
-1. **Issue an MCP session id.** Run the streamable HTTP transport with sessions
-   (`sessionIdGenerator: () => randomUUID()`), so the answer to `initialize`
-   carries an `Mcp-Session-Id` header, and serve `GET` and `DELETE` on the
-   endpoint too. Today Haven's buyer refuses a server without one at the quote,
+1. **Answer `initialize` as a streamable HTTP MCP server.** With sessions
+   (`sessionIdGenerator: () => randomUUID()`, and serve `GET` and `DELETE` on
+   the endpoint too) or without them (a stateless server, common on serverless
+   hosts): since #5089 Haven's buyer accepts both. Without a session id, the
+   answer to `initialize` must be a valid JSON-RPC `initialize` result (the
+   request's `id` and a `result.protocolVersion`); Haven then sends
+   `Accept: application/json, text/event-stream` on every request to your
+   endpoint, the paid retry included. Anything else at the address — an error,
+   or a web page — is not an MCP endpoint, and the buyer refuses at the quote,
    before any payment is made: "The merchant did not establish an MCP session
    before the x402 quote. No payment was created."
-   (`packages/sdk/src/client.ts`). Support for servers without sessions is
-   planned (#5089) and not available yet.
+   (`packages/sdk/src/client.ts`).
 2. **Set `resource.url` to your MCP endpoint**, the https address buyers call,
    for example `https://mcp.example.com/mcp`. If you leave it out, `@x402/mcp`
    fills in an `mcp://tool/…` address. Haven's paid-MCP tools
@@ -453,7 +457,7 @@ function buildServer() {
   return mcp;
 }
 
-// Streamable HTTP with sessions: Haven's buyer needs the Mcp-Session-Id that initialize returns.
+// Streamable HTTP with sessions. Since #5089 a stateless server works with Haven's buyer too; this example keeps sessions.
 const sessions = new Map();
 const app = express();
 app.use(express.json({ limit: "64kb" }));

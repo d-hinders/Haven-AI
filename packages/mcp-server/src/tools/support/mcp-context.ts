@@ -283,8 +283,9 @@ export async function quoteMcpToolCall(
   assertSecureMerchantUrl(merchantUrl)
   // This is an MCP-tool purchase, so always negotiate the Streamable-HTTP
   // lifecycle before its unpaid tools/call — exact MCP endpoints can use any
-  // same-origin path, not only `/mcp`. A base URL that cannot establish a
-  // session is treated as a bounded #1271 discovery miss; it never receives a
+  // same-origin path, not only `/mcp`. A base URL that cannot complete an MCP
+  // handshake (#5089: a session, or a stateless server's valid initialize
+  // result) is treated as a bounded #1271 discovery miss; it never receives a
   // bare tools/call probe.
   const probe = () => haven.quoteMcpX402(merchantUrl, init, { idempotencyKey: input.idempotencyKey })
   try {

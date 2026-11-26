@@ -1394,7 +1394,7 @@ export class HavenClient {
       // like a 402. The transport signal is read exactly as for a 402 (path
       // or Bazaar); a stateless merchant that answered a bare `tools/call`
       // with a tool result has shown it needs no session, so nothing is
-      // forced — `quoteMcpX402` still pins its own established session.
+      // forced — `quoteMcpX402` still pins its own MCP handshake (a session, or #5089 stateless).
       const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response, initialInit)
       if (toolResultChallenge) {
         const mcpTransport = await this.merchantTransport.detect(url, toolResultChallenge, response)
@@ -1438,8 +1438,12 @@ export class HavenClient {
    * Streamable-HTTP MCP lifecycle before sending the unpaid `tools/call`.
    * Hosted MCP uses this path while remaining keyless: it resolves only the
    * agent's public delegate address for `x402-wallet`; signing remains local.
-   * It refuses before the quote when the merchant does not establish a session;
-   * callers that need a plain x402 endpoint must use {@link quoteX402}.
+   * It refuses before the quote when the endpoint does not complete an MCP
+   * `initialize` — with a session, or (#5089) as a stateless server that
+   * answers a valid `initialize` result with no session id; callers that need
+   * a plain x402 endpoint must use {@link quoteX402}. Every MCP request after
+   * the handshake carries `Accept: application/json, text/event-stream`, and
+   * the quote's request snapshot keeps it for the paid retry.
    */
   async quoteMcpX402(
     url: string,
@@ -1447,8 +1451,8 @@ export class HavenClient {
     options: X402AuthorizationOptions = {},
   ): Promise<X402Quote> {
     const wallet = await this.merchantCompletion.resolveWalletForMerchantCall()
-    const sessionId = await this.merchantTransport.initialize(url, init, wallet)
-    if (!sessionId) {
+    const handshake = await this.merchantTransport.handshake(url, init, wallet)
+    if (!handshake) {
       throw new HavenApiError(
         'The merchant did not establish an MCP session before the x402 quote. No payment was created.',
         502,
@@ -1457,10 +1461,12 @@ export class HavenClient {
     }
 
     let requestInit = withX402Wallet(init, wallet)
-    requestInit = this.merchantTransport.withSessionHeaders(requestInit, sessionId)
+    // #5089: session headers on a stateful server, `Accept` alone on a
+    // stateless one — set BEFORE quoteX402, whose snapshot the retry replays.
+    requestInit = this.merchantTransport.withMcpHeaders(requestInit, handshake)
 
     const quote = await this.quoteX402(url, requestInit, options)
-    // This dedicated helper established an MCP session even when the endpoint
+    // This dedicated helper completed an MCP handshake even when the endpoint
     // uses a custom path and does not advertise Bazaar metadata. Preserve that
     // fact for the later, fresh session used by the paid retry.
     return {
@@ -1952,13 +1958,14 @@ export class HavenClient {
       this.merchantTransport.isMcpUrl(input.url) ||
       input.mcpTransport?.handshakeRequired === true
     const x402Wallet = shouldHandshakeMcp ? await this.merchantCompletion.resolveWalletForMerchantCall() : x402PayerAddress(this.delegateAddress, this.x402Wallet)
-    let mcpSessionId: string | undefined
-    if (shouldHandshakeMcp) {
-      mcpSessionId = await this.merchantTransport.initialize(input.url, input.init, x402Wallet)
-    }
+    // #5089: a stateless MCP server (no session id) still gets the MCP request
+    // headers (`Accept`) on the paid call; a failed handshake gets none.
+    const mcpHandshake = shouldHandshakeMcp
+      ? await this.merchantTransport.handshake(input.url, input.init, x402Wallet)
+      : undefined
 
     let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
-    if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
+    if (mcpHandshake) requestInit = this.merchantTransport.withMcpHeaders(requestInit, mcpHandshake)
     if (input.paidRequestHeaders) {
       const paidHeaders = new Headers(requestInit.headers)
       for (const [name, value] of Object.entries(input.paidRequestHeaders)) paidHeaders.set(name, value)

@@ -33,7 +33,7 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ### Removed
 
-- **The package barrel no longer exports `SIGNER_CAPABILITY_KEY`, `TASK_BUDGET_MIN_SIGNER_VERSION` or `taskSignerCompatibilityNotice` (#4825).** They built the local task-budget old-signer notice, which was removed together with `signer-compat.ts`; the hosted MCP keeps its own copy. Breaking only for code that imports one of the three names from `@haven_ai/mcp`; the `haven-mcp` binary and its tools are unaffected. No update needed.
+- **The package barrel no longer exports `SIGNER_CAPABILITY_KEY`, `TASK_BUDGET_MIN_SIGNER_VERSION` or `taskSignerCompatibilityNotice` (#4825).** They built the local task-budget old-signer notice, which was removed together with `signer-compat.ts`; the hosted MCP keeps its own copy. Breaking only for code that imports one of the three names from `@haven_ai/mcp`; the `haven-mcp` binary and its tools are unaffected. `SIGNER_CAPABILITY_KEY` is still exported by `@haven_ai/signer`. No update needed.
 
 ## 0.14.0-alpha.0 — 2026-11-11
 

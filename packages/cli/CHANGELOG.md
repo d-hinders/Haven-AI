@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
 ### Changed
 
 - **The feedback secret check recognises the Sales key (#4896).** A

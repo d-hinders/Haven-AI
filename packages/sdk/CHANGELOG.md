@@ -15,6 +15,8 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
 ### Added
 
 - **`quoteMcpX402` and `completeX402MerchantCall` accept a stateless MCP server (#5089).** A streamable-HTTP server that answers `initialize` with a valid JSON-RPC result (the request's `id` and a `result.protocolVersion`) but no `Mcp-Session-Id` is no longer refused with the 502 "The merchant did not establish an MCP session"; every later MCP request to it carries `Accept: application/json, text/event-stream`, and the quote's request snapshot keeps it. A 200 that is not an `initialize` result, a JSON-RPC error or a failed call is refused as before, with the same message. New on `McpMerchantTransport`: `handshake()` (an explicit `McpHandshake`: a session, or `{ stateless: true }`) and `withMcpHeaders()`; `initialize()` still answers no session for a stateless server, so `fetch()` keeps paying it as standard x402 (it now also sends that server `notifications/initialized`). A session-less answer that is not JSON or an event stream is left unread, so a web page at a base URL still falls through to endpoint discovery whatever its size. No update needed.

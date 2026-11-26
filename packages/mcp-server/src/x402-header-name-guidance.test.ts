@@ -1,6 +1,9 @@
 /**
- * #2330 — every agent-facing mention of the x402 payment header names BOTH
- * wire names, across every surface an agent reads.
+ * #2330 — no agent-facing mention of the x402 payment header names the v1
+ * name (`X-PAYMENT`) without the v2 name (`PAYMENT-SIGNATURE`), across every
+ * surface an agent reads. (It first required BOTH names on every mention; since
+ * #2341 and #4754 a v2 payload goes out under `PAYMENT-SIGNATURE` alone, so a
+ * description may name the v2 name only, or both with v1 marked as v1-only.)
  *
  * ## What this exists to catch
  *
@@ -153,6 +156,18 @@ describe('#2330 — no agent-facing surface names the v1 header alone', () => {
     expect(quote).toContain(V2_NAME)
     expect(quote).toContain(V1_NAME)
     expect(quote).toContain('retry the merchant YOURSELF')
+  })
+
+  it('haven_complete_mcp_tool says X-PAYMENT goes out only for x402 v1 (#5096)', () => {
+    // The whole first sentence, with toBe: a phrase match cannot tell
+    // "X-PAYMENT too only for x402 v1" from the "both x402 wire names" it
+    // replaced, which overclaimed for every v2 payload.
+    const complete = (hostedDescriptions as Record<string, string>).haven_complete_mcp_tool
+    const firstSentence = complete.slice(0, complete.indexOf('. ') + 1)
+    expect(firstSentence).toBe(
+      'Final step of the x402 MCP purchase: deliver the signed payment header (PAYMENT-SIGNATURE; X-PAYMENT too only for x402 v1) and return the tool result.',
+    )
+    expect(complete).not.toContain('both x402 wire names')
   })
 })
 

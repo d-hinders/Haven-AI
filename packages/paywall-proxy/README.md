@@ -799,17 +799,25 @@ call after an idle period waits for the container to start — measured at
 charged for the wait. With Sleep off the service answers immediately and bills
 for the time it is up.
 
-## Paying with a Haven agent
+## Who can pay
 
-Give a Haven agent the URL of one of your product routes and let it pay. For now
-only a Haven agent with an **open budget** can pay: an agent whose budget is
-pinned to one recipient cannot pay an arbitrary merchant, because the pin
-restricts the transfer to that recipient.
+**Any x402 buyer that pays USDC on your `NETWORK` can pay**, with one exception:
+a payment from the merchant's own agent or account is a move between your
+accounts. Haven shows it as "Moved between your accounts" and it is **not a
+sale**, so it does not appear as revenue on the Sales page. The proxy does not
+ask who the buyer is; it accepts any wallet that signs the EIP-3009
+authorization its challenge asks for, and the sale record's `payer` is that
+wallet's address.
 
-**The paying agent must belong to a different Haven user, or be a wallet outside
-Haven.** A payment from the merchant's own agent or account is a move between
-your accounts: Haven shows it as "Moved between your accounts" and it is **not a
-sale**, so it does not appear as revenue on the Sales page.
+What has been tested: every live paid call so far, on Haven's own runs, came
+from a Haven agent. The kit's own tests pay with a plain wallet that signs the
+authorization, against a stand-in for Coinbase's facilitator. A buyer outside
+Haven is expected to work the same way, but no live payment from one has been
+exercised yet.
+
+**A Haven agent needs an open budget.** An agent whose budget is pinned to one
+recipient cannot pay an arbitrary merchant, because the pin restricts the
+transfer to that recipient.
 
 If the upstream call fails after settlement, the buyer gets HTTP 200 with
 `error: "upstream_failed_after_settlement"` and the transaction hash. The
@@ -830,10 +838,10 @@ the same facts.
 
 ## A buyer for the first paid call
 
-The paying agent must belong to a different Haven user: a payment from your own
-agent or account is a move between your accounts, not a sale
-([Paying with a Haven agent](#paying-with-a-haven-agent)). So the first paid
-call needs a second Haven user: a colleague, or a second account of your own on
+This section sets up a Haven agent as the buyer. It must belong to a different
+Haven user: a payment from your own agent or account is a move between your
+accounts, not a sale ([Who can pay](#who-can-pay)). So the first paid call
+with a Haven agent needs a second Haven user: a colleague, or a second account of your own on
 another email address.
 
 1. **A second Haven user on the dev frontend.** Sign up on the dev frontend,

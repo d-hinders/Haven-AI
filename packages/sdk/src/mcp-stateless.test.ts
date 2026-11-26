@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
 import { HavenApiError, type X402PaymentOption } from './types.js'
 import { MCP_ACCEPT, McpMerchantTransport } from './mcp-merchant-transport.js'
+import { HOSTED_EGRESS_TIMEOUTS, HOSTED_MAX_GET_REDIRECTS, HOSTED_RESPONSE_BYTE_CAPS, type MerchantEgressPolicy } from './merchant-egress.js'
 
 /**
  * #5089: a stateless streamable-HTTP MCP server — one that answers
@@ -27,7 +28,17 @@ const delegateAddress = '0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1'
 
 const challenge = { x402Version: 2, error: 'Payment required', resource: { url: mcpUrl }, accepts: [accepted] }
 
-type InitializeAnswer = 'stateless' | 'json-not-initialize' | 'html' | 'jsonrpc-error' | 'wrong-id'
+type InitializeAnswer =
+  | 'stateless'
+  | 'stateless-sse'
+  | 'json-not-initialize'
+  | 'html'
+  | 'jsonrpc-error'
+  | 'wrong-id'
+  | 'wrong-jsonrpc'
+  | 'no-protocol-version'
+  | 'large-html'
+  | 'large-json'
 
 interface Call { url: string; method: string; body: Record<string, any> | null; headers: Headers }
 
@@ -44,15 +55,23 @@ function installMerchant(answer: InitializeAnswer, opts: { require406?: boolean 
     }
     if (url === mcpUrl && body?.method === 'initialize') {
       if (answer === 'html') return new Response('<html>hello</html>', { status: 200, headers: { 'Content-Type': 'text/html' } })
+      // Over the hosted 256 KiB mcpSession cap.
+      if (answer === 'large-html') return new Response(`<html>${'x'.repeat(300_000)}</html>`, { status: 200, headers: { 'Content-Type': 'text/html' } })
+      if (answer === 'large-json') return new Response(JSON.stringify({ pad: 'x'.repeat(300_000) }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       if (answer === 'json-not-initialize') return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       if (answer === 'jsonrpc-error') {
         return new Response(JSON.stringify({ jsonrpc: '2.0', id: body.id, error: { code: -32600, message: 'nope' } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
       }
       const id = answer === 'wrong-id' ? Number(body.id) + 1000 : body.id
-      return new Response(JSON.stringify({ jsonrpc: '2.0', id, result: { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'stateless' } } }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      const jsonrpc = answer === 'wrong-jsonrpc' ? '1.0' : '2.0'
+      const result = answer === 'no-protocol-version'
+        ? { capabilities: {}, serverInfo: { name: 'stateless' } }
+        : { protocolVersion: '2025-06-18', capabilities: {}, serverInfo: { name: 'stateless' } }
+      const message = { jsonrpc, id, result }
+      if (answer === 'stateless-sse') {
+        return new Response(`event: message\ndata: ${JSON.stringify(message)}\n\n`, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+      }
+      return new Response(JSON.stringify(message), { status: 200, headers: { 'Content-Type': 'application/json' } })
     }
     if (url === mcpUrl && body?.method === 'notifications/initialized') return new Response(null, { status: 202 })
     if (url === mcpUrl && body?.method === 'tools/call') {
@@ -87,16 +106,40 @@ describe('#5089 McpMerchantTransport.handshake — a stateless server is told ap
     expect(notifications(calls)[0].headers.has('mcp-session-id')).toBe(false)
   })
 
+  it('a valid initialize result framed as an event stream is stateless too', async () => {
+    installMerchant('stateless-sse')
+    expect(await new McpMerchantTransport().handshake(mcpUrl)).toEqual({ stateless: true })
+  })
+
   it('initialize() still answers undefined for a stateless server (the local fetch() keeps standard x402)', async () => {
     installMerchant('stateless')
     expect(await new McpMerchantTransport().initialize(mcpUrl)).toBeUndefined()
   })
 
-  for (const answer of ['json-not-initialize', 'html', 'jsonrpc-error', 'wrong-id'] as const) {
+  for (const answer of ['json-not-initialize', 'html', 'jsonrpc-error', 'wrong-id', 'wrong-jsonrpc', 'no-protocol-version'] as const) {
     it(`${answer}: not an MCP endpoint (undefined), and no notification`, async () => {
       const calls = installMerchant(answer)
       expect(await new McpMerchantTransport().handshake(mcpUrl)).toBeUndefined()
       expect(notifications(calls)).toHaveLength(0)
+    })
+  }
+
+  // Reviewer finding: under the hosted caps a session-less answer over 256 KiB
+  // must stay "not an MCP endpoint" (so #1271 discovery runs), never a cap
+  // refusal — an HTML page is left unread, a claimed-JSON body that trips
+  // the cap is treated as no initialize result.
+  const hostedCaps = (): MerchantEgressPolicy => ({
+    assertUrl: () => {},
+    maxResponseBytes: HOSTED_RESPONSE_BYTE_CAPS.delivery,
+    responseByteCaps: { ...HOSTED_RESPONSE_BYTE_CAPS },
+    maxGetRedirects: HOSTED_MAX_GET_REDIRECTS,
+    timeouts: { ...HOSTED_EGRESS_TIMEOUTS },
+  })
+  for (const answer of ['large-html', 'large-json'] as const) {
+    it(`${answer} under the hosted response cap: not an MCP endpoint (undefined), never a cap refusal`, async () => {
+      installMerchant(answer)
+      const outcome = await new McpMerchantTransport({ egress: hostedCaps() }).handshake(mcpUrl).catch((e: unknown) => e)
+      expect(outcome).toBeUndefined()
     })
   }
 

@@ -487,17 +487,29 @@ export class McpMerchantTransport {
       if (!response.ok) return undefined
 
       const sessionId = response.headers.get('mcp-session-id')
-      const message = await this.readMessage(response)
-      if (message && 'error' in message) return undefined
-
       if (!sessionId) {
         // #5089: no session id — a stateless server only if the body really
-        // is this request's `initialize` result. An HTML 200 at a base URL,
-        // or any other 200, stays "not an MCP endpoint" (#1271 discovery).
-        if (!isInitializeResult(message, requestId)) return undefined
+        // is this request's `initialize` result. The body is read only when
+        // it claims to be JSON or an event stream: an HTML page at a base URL
+        // is returned unread, as before #5089, so a large page can never trip
+        // the response cap and turn a #1271 discovery miss into a refusal; a
+        // claimed-JSON body over the cap is "not an MCP endpoint" too.
+        const contentType = (response.headers.get('content-type') ?? '').toLowerCase()
+        if (!contentType.includes('application/json') && !contentType.includes('text/event-stream')) return undefined
+        let candidate: Record<string, unknown> | undefined
+        try {
+          candidate = await this.readMessage(response)
+        } catch (err) {
+          if (err instanceof MerchantEgressResponseCapError) return undefined
+          throw err
+        }
+        if (!isInitializeResult(candidate, requestId)) return undefined
         await this.notifyInitialized(url, init, undefined, wallet)
         return { stateless: true }
       }
+
+      const message = await this.readMessage(response)
+      if (message && 'error' in message) return undefined
 
       await this.notifyInitialized(url, init, sessionId, wallet)
       return { stateless: false, sessionId }

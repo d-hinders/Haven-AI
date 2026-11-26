@@ -1658,7 +1658,10 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
         // answers initialize with an HTML 200, and the discovery document
         // names the real endpoint.
         if (opts.htmlAtBase && parsed.pathname === '/' && method === 'POST') {
-          return new Response('<html><body>Welcome</body></html>', { status: 200, headers: { 'content-type': 'text/html' } })
+          // Over the hosted 256 KiB mcpSession cap: the page must be left
+          // unread (reviewer finding on #5089), or the cap would refuse
+          // before discovery could run.
+          return new Response(`<html><body>${'Welcome. '.repeat(40_000)}</body></html>`, { status: 200, headers: { 'content-type': 'text/html' } })
         }
         if (method === 'GET' && parsed.pathname === '/.well-known/haven-demo-merchant') {
           return new Response(JSON.stringify({ name: 'Merchant', mcp_url: MCP_ENDPOINT }), { status: 200, headers: { 'content-type': 'application/json' } })
@@ -1847,7 +1850,7 @@ describe('#5086 — an mcp://tool/<name> address is paid end to end on EIP-3009 
     for (const n of notified) expect(n.headers['mcp-session-id']).toBeUndefined()
   })
 
-  it('#5089: a base URL answering initialize with an HTML 200 is still an endpoint miss — the #1271 discovery retry finds the endpoint', async () => {
+  it('#5089: a base URL answering initialize with a large HTML 200 (over the response cap) is still an endpoint miss — the #1271 discovery retry finds the endpoint', async () => {
     const world = await installWorld({ htmlAtBase: true })
     const hostedHandlers = hosted()
     const pay = ok<{ merchant_url: string }>(

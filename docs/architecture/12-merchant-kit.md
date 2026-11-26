@@ -107,7 +107,8 @@ Neither step needs the kit, and neither is a public developer page: this section
 is the architecture's account of what any seller does.
 
 A worked example of both steps — the `402` answer and the `POST /merchant/sales`
-request, with the answers to expect — is
+request, with the answers to expect, and for an MCP server the tool-result
+challenge and a runnable paid server — is
 [`docs/product/selling-with-your-own-server.md`](../product/selling-with-your-own-server.md).
 
 ## 2. The two new packages

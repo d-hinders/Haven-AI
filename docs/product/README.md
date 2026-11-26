@@ -45,7 +45,7 @@ This is the durable product UX entrypoint for Haven and the index for the `docs/
 - Account recovery (user-facing model): [account-recovery.md](./account-recovery.md)
 - Replacing an agent's signing key: [agent-key-rotation.md](./agent-key-rotation.md) — the sibling to account recovery, and routinely confused with it
 - CLI `--json` casing conventions: [cli-json-conventions.md](./cli-json-conventions.md) — which command returns which convention, and why the split is deliberate
-- Selling with your own server (worked example): [selling-with-your-own-server.md](./selling-with-your-own-server.md) — the x402 challenge and the sale report, for a seller that is not the merchant kit
+- Selling with your own server (worked example): [selling-with-your-own-server.md](./selling-with-your-own-server.md) — the x402 challenge and the sale report, for a seller that is not the merchant kit, with a runnable paid MCP server
 - Redesign implementation history (archived): [../archive/redesign-handoff.md](../archive/redesign-handoff.md)
 
 When these docs overlap, use this order of authority:

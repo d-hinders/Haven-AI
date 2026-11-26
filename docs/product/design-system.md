@@ -1433,11 +1433,14 @@ Revenue tile and its Haven/Stripe split, the Payments summary, each By payer
 and By product row, the charts' spoken totals ("Revenue over N days: …"), and
 Analytics' Revenue tile — must not round its sub-cent
 part away ("$0.01" for 0.0135 USDC hid a quarter of the revenue while its
-parts read "$0.0035" and "$0.01"). A sum that is not a whole USDC cent shows
-4 decimals in every display mode, so the same sum reads alike in $, USDC and a
-converted currency; a sum that is itself under a cent keeps the floor above
-(`<$0.0001`). So 0.0135 reads `$0.0135`, 0.011 reads `$0.0110`, six 0.001
-payments read `$0.0060` (not `$0.01`), and 0.30 + 0.20 still reads `$0.50`. The
+parts read "$0.0035" and "$0.01"). Unconverted — `$` at the USDC peg, or USDC
+mode — a sum that is not a whole USDC cent shows 4 decimals, so `$` and USDC
+agree. In a converted currency ("≈") only a remainder under half a cent after
+conversion does (`isSubCent`), so a figure struck at today's rate never claims
+4 decimals of precision it lacks. A sum that is itself under a cent keeps the
+floor above (`<$0.0001`). So 0.0135 reads `$0.0135`, 0.011 reads `$0.0110`,
+six 0.001 payments read `$0.0060` (not `$0.01`), and 0.30 + 0.20 still reads
+`$0.50`. The
 rule is `salesSumText` / `salesSumAmountText` in `lib/sales.ts`;
 `formatFiatDisplay` and `SUB_CENT_THRESHOLD` are untouched, and a single
 payment's amount, the average sale, the By day bars and every figure outside

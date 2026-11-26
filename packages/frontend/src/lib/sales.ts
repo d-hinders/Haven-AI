@@ -231,17 +231,23 @@ const USDC_CENT_ATOMIC = 10n ** BigInt(USDC_DECIMALS - 2)
 /**
  * #5088 (owner decision 3, 2026-11-25): a revenue SUM must not round its
  * sub-cent part away. "$0.01" for 0.0135 USDC hid a quarter of the revenue
- * while its parts read "$0.0035" and "$0.01". A sum that is not a whole USDC
- * cent shows 4 decimals, in every display mode, so the same sum reads alike in
- * $, USDC and a converted currency. The reads carry sums, not their payments,
- * so the remainder is the signal: no "half a cent" test, which let a remainder
- * of 0.005 or more round up (6 x 0.001 read "$0.01").
+ * while its parts read "$0.0035" and "$0.01". The reads carry sums, not their
+ * payments, so the sum's remainder below a whole USDC cent is the signal:
+ * - unconverted ($ at the USDC peg, or USDC mode): any remainder shows 4
+ *   decimals, so $ and USDC agree and 6 x 0.001 reads $0.0060, not $0.01;
+ * - a converted currency ("≈"): only a remainder under half a cent there
+ *   (`isSubCent`), so a figure struck at today's rate does not claim 4
+ *   decimals of precision it does not have.
  * `formatFiatDisplay` and its threshold are untouched: a single amount and
  * every figure outside these Sales and Analytics revenue sums keep the
  * 2026-10-22 rule (`docs/product/design-system.md`).
  */
-export function salesSumNeedsFourDecimals(raw: string): boolean {
-  return BigInt(raw || '0') % USDC_CENT_ATOMIC !== 0n
+export function salesSumNeedsFourDecimals(raw: string, money: SalesMoney): boolean {
+  const remainder = BigInt(raw || '0') % USDC_CENT_ATOMIC
+  if (remainder === 0n) return false
+  const rate = salesRate(money)
+  if (rate === null || rate === 1) return true
+  return isSubCent((Number(remainder) / 10 ** USDC_DECIMALS) * rate)
 }
 
 /** A revenue sum as text (#5088): `salesAmountText`, with 4 decimals when its sub-cent part needs them. */
@@ -250,7 +256,7 @@ export function salesSumAmountText(raw: string, money: SalesMoney): string {
   const fiat = salesFiatAmount(human, money)
   // Already a sub-cent figure (or a whole-cent sum): the ordinary rule shows it,
   // with its "<0.0001" floor.
-  if (!salesSumNeedsFourDecimals(raw) || (fiat === null ? Math.abs(human) < 0.01 : isSubCent(fiat))) {
+  if (!salesSumNeedsFourDecimals(raw, money) || (fiat === null ? Math.abs(human) < 0.01 : isSubCent(fiat))) {
     return salesAmountText(raw, money)
   }
   const digits = { minimumFractionDigits: 4, maximumFractionDigits: 4 }

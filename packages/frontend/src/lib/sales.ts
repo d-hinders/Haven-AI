@@ -269,6 +269,29 @@ export function salesSumText(raw: string, money: SalesMoney, kind: 'total' | 'de
   return `${salesApprox(money, kind) ? '≈' : ''}${salesSumAmountText(raw, money)}`
 }
 
+/**
+ * #5105 (owner decision 2026-11-26, "Smaller in USDC mode"): the Revenue tile's
+ * figure, shaped so it never wraps in the four-across row (design-system.md
+ * #4400). In USDC mode (no rate for the display currency) the sum can read
+ * `12,345.6789 USDC`, wider than the tile at desktop 1280. So in that mode only:
+ * "USDC" moves to the tile's unit slot, and a figure of four or more integer
+ * digits asks for the `compact` size (one step down). `$`, kr and € figures
+ * fit at the default size and keep it. Used by both Revenue tiles (Sales and
+ * Analytics), so the same total reads the same on both pages.
+ */
+export function salesRevenueTile(
+  raw: string,
+  money: SalesMoney,
+): { value: string; unit?: string; valueSize: 'default' | 'compact' } {
+  const text = salesSumText(raw, money)
+  if (salesRate(money) !== null || !text.endsWith(' USDC')) return { value: text, valueSize: 'default' }
+  return {
+    value: text.slice(0, -' USDC'.length),
+    unit: 'USDC',
+    valueSize: Math.abs(usdcOf(raw)) >= 1000 ? 'compact' : 'default',
+  }
+}
+
 // ── Payers ──────────────────────────────────────────────────────────────────
 
 /**

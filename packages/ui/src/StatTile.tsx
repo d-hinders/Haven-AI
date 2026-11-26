@@ -99,6 +99,14 @@ interface StatTileProps {
   hint?: ReactNode
   /** `card` (default) is the bordered tile; `inline` is the borderless variant. */
   variant?: StatTileVariant
+  /**
+   * #5105: `compact` sets the card value one size down (`text-xl`), for a
+   * caller whose longest realistic figure does not fit the four-across row at
+   * `text-2xl` — a money figure never wraps (design-system.md #4400), so the
+   * caller that knows the figure's width asks for the smaller size. `default`
+   * keeps every existing caller's size. No effect on the inline variant.
+   */
+  valueSize?: 'default' | 'compact'
   className?: string
 }
 
@@ -119,6 +127,7 @@ export function StatTile({
   footnote,
   hint,
   variant = 'card',
+  valueSize = 'default',
   className = '',
 }: StatTileProps) {
   const showDelta = delta != null
@@ -173,7 +182,9 @@ export function StatTile({
         className={
           isInline
             ? 'mt-2 v2-tabular text-base font-semibold leading-tight text-[var(--v2-ink)]'
-            : 'mt-2 v2-tabular text-2xl font-semibold leading-tight text-[var(--v2-ink)]'
+            : valueSize === 'compact'
+              ? 'mt-2 v2-tabular text-xl font-semibold leading-tight text-[var(--v2-ink)]'
+              : 'mt-2 v2-tabular text-2xl font-semibold leading-tight text-[var(--v2-ink)]'
         }
       >
         {value}

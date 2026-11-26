@@ -80,6 +80,16 @@ describe('StatTile — what it renders', () => {
     expect(ownText).toBe('250.00')
   })
 
+  it('sets a compact value one size down, and keeps every other caller at the default size (#5105)', () => {
+    const compact = mount(<StatTile label="Revenue" value="12,345.6789" unit="USDC" valueSize="compact" />)
+    expect(compact.value().className).toContain('text-xl')
+    expect(compact.value().className).not.toContain('text-2xl')
+    compact.unmount()
+    const standard = mount(<StatTile label="Revenue" value="$2.14" />)
+    expect(standard.value().className).toContain('text-2xl')
+    expect(standard.value().className).not.toContain('text-xl')
+  })
+
   it('omits the unit element entirely when the caller passes none', () => {
     // The four Analytics tiles have no unit at all; a stray empty span would
     // put a gap in the figure's line and give the display a second thing to

@@ -8,7 +8,7 @@
  *
  * ── The capture matrix ───────────────────────────────────────────────────────
  *
- * Seven scenarios × two viewports (× the two schemes the projects run) =
+ * Eight scenarios × two viewports (× the two schemes the projects run) =
  * `sales-<scenario>-<viewport>[-dark].png` under
  * `e2e/__screenshots__/sales.visual.spec.ts/`:
  *
@@ -22,6 +22,13 @@
  *     them, the Revenue foot and the list line splitting "in Haven" from "in
  *     Stripe", the two-series chart and the mark on the two Stripe rows
  *     (`salesSummaryWithStripe`).
+ *   - `overview-subcent` (#5105) — a period whose revenue sums are not whole
+ *     USDC cents, for a SEK user with no rate served, so the page is in USDC
+ *     mode: the Revenue tile reads `12,345.6789 USDC`, the widest realistic
+ *     figure the #5088 sum rule prints, and it must stay on ONE line (the
+ *     #4400 rule: a money figure never wraps) at both widths. In USDC mode the
+ *     unit sits in the tile's unit slot and the figure is set compact (owner
+ *     decision 2026-11-26 on #5105).
  *   - `payment-stripe` — one of those sales opened: the mark beside the
  *     status, "to your Stripe address", and the Stripe notice (#4954).
  *   - `first-run` — the account has never been paid: the seller definition,
@@ -60,6 +67,7 @@
  */
 import { expect, test, type Page } from '@playwright/test'
 import { VISUAL_SKIP_REASON, VISUAL_SPECS_ENABLED } from './support/visual-mode'
+import { expectFigureOnOneLine } from './support/money-figure'
 import {
   dismissMobileSidebar,
   mockHavenApi,
@@ -84,7 +92,7 @@ const PIXEL_THRESHOLD = 0.02
 const ANCHOR_TIMEOUT_MS = 60_000
 
 interface Scenario {
-  name: 'overview' | 'overview-sek' | 'overview-stripe' | 'payment-stripe' | 'first-run' | 'first-run-progressed' | 'products'
+  name: 'overview' | 'overview-sek' | 'overview-stripe' | 'overview-subcent' | 'payment-stripe' | 'first-run' | 'first-run-progressed' | 'products'
   serve: SalesScenario
   /** Serve the SEK user (the converted Overview, #4963). */
   sek?: boolean
@@ -144,6 +152,26 @@ const SCENARIOS: Scenario[] = [
       await expect(page.getByTestId('stat-tile-sales')).toContainText('6')
       await expect(page.getByTestId('sales-payments-summary')).toContainText('Revenue $2.17 ($2.14 in Haven \u00b7 $0.03 in Stripe)')
       await expect(page.getByTestId('sales-ledger').getByText('Received in Stripe')).toHaveCount(2)
+    },
+  },
+  {
+    // #5105: the #5088 sum rule's widest realistic figure. A SEK user, but no
+    // rate on any read, so the page is in USDC mode — no conversion, no "≈".
+    // The Revenue figure must render on one line at both widths (#4400).
+    name: 'overview-subcent',
+    serve: 'overview-subcent',
+    sek: true,
+    path: '/sales',
+    async assert(page) {
+      const revenue = page.getByTestId('stat-tile-revenue')
+      // #5105 owner decision: in USDC mode the unit sits in the tile's unit
+      // slot and a 4+ integer-digit figure is set one size down (compact).
+      await expect(revenue.locator('p').nth(1)).toHaveText(/^12,345\.6789\s*USDC$/)
+      await expect(revenue.locator('p').nth(1)).toHaveClass(/text-xl/)
+      await expect(revenue).not.toContainText('\u2248')
+      await expect(revenue).not.toContainText('kr')
+      await expectFigureOnOneLine(revenue, 'Sales Revenue')
+      await expect(page.getByTestId('sales-by-product')).toContainText('8,230.4526 USDC')
     },
   },
   {

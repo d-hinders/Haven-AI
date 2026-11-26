@@ -545,7 +545,8 @@ describe('the display currency (#4963)', () => {
     serve({ summary: withRates({ usd: 0.9998, eur: 0.92, sek: null }) })
     await renderPage()
     const tiles = await screen.findByTestId('sales-tiles')
-    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('2.14 USDC')
+    // #5105: in USDC mode the unit sits in the tile's unit slot, its own element.
+    expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toMatch(/2\.14\s*USDC/)
     expect(within(tiles).getByTestId('stat-tile-revenue').textContent).not.toContain('≈')
   })
 
@@ -555,7 +556,8 @@ describe('the display currency (#4963)', () => {
       serve({ summary })
       const view = render(<SalesClient />)
       const tiles = await screen.findByTestId('sales-tiles')
-      expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toContain('2.14 USDC')
+      // #5105: in USDC mode the unit sits in the tile's unit slot, its own element.
+      expect(within(tiles).getByTestId('stat-tile-revenue').textContent).toMatch(/2\.14\s*USDC/)
       view.unmount()
     }
   })

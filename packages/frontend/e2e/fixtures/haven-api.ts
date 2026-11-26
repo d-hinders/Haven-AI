@@ -1321,6 +1321,51 @@ export const salesPayments = [
 ]
 
 /**
+ * #5105: a period whose revenue sums are NOT whole USDC cents, served with no
+ * rate (`usdc_rates: null` on the summary, the previous period AND the list),
+ * so a SEK or EUR user sees it in USDC mode: no conversion, no "≈". The total
+ * has five integer digits, 12,345.6789 USDC — the widest realistic Revenue
+ * figure the #5088 sum rule prints with four decimals. Every figure adds up:
+ * the two products are the total, the two payers are the total, and the three
+ * days are the total (chat 2,057.61315 twice is 4,115.2263).
+ */
+export const salesSummarySubCent = {
+  ...salesSummary,
+  usdc_rates: null as typeof salesUsdcRates | null,
+  revenue_raw: '12345678900',
+  revenue_in_account_raw: '12345678900',
+  sales: 3,
+  // 12345678900 / 3 sales, exact.
+  average_sale_raw: '4115226300',
+  without_product: { count: 0, amount_raw: '0' },
+  own_moves: { count: 0, amount_raw: '0' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '4115226300' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '8230452600' },
+  ],
+  by_payer: [
+    { payer: salesContact, payments: 2, amount_raw: '4115226300', last_paid_at: '2026-11-16T14:05:00.000Z' },
+    { payer: salesWallet, payments: 1, amount_raw: '8230452600', last_paid_at: '2026-11-12T09:00:00.000Z' },
+  ],
+  by_day: [
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '8230452600', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '8230452600' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '2057613150', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '2057613150' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 1, sales: 1, revenue_raw: '2057613150', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '2057613150' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+}
+
+/** #5105: the period before, also rate-less, a little smaller so the comparison is a modest rise. */
+export const salesPreviousSummarySubCent = { ...salesSummarySubCent, revenue_raw: '11000000000' }
+
+/** #5105: the ledger behind {@link salesSummarySubCent}: the same three sales. */
+export const salesPaymentsSubCent = [
+  { ...salesPayments[0], amount_raw: '2057613150' },
+  { ...salesPayments[3], amount_raw: '2057613150' },
+  { ...salesPayments[4], amount_raw: '8230452600', payer: salesWallet },
+]
+
+/**
  * #4954: the Stripe deposit addresses the owner registered (#4952,
  * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
  * retired. Lower-case on the wire, `verified: false` always. #5028: the
@@ -1467,6 +1512,7 @@ export type SalesScenario =
   | 'products-unreachable'
   | 'products-none'
   | 'overview-stripe'
+  | 'overview-subcent'
 
 /**
  * Turn Sales ON and serve its reads for one scenario. Registered AFTER
@@ -1492,6 +1538,7 @@ export async function serveSales(
     scenario === 'products-ok' ||
     scenario === 'overview' ||
     scenario === 'overview-stripe' ||
+    scenario === 'overview-subcent' ||
     scenario === 'first-run-progressed'
       ? salesCatalogueOk
       : scenario === 'products-mismatch'
@@ -1501,8 +1548,13 @@ export async function serveSales(
           : salesCatalogueNone
   const paid = scenario !== 'first-run' && scenario !== 'first-run-progressed'
   const stripe = scenario === 'overview-stripe'
-  const summary = stripe ? salesSummaryWithStripe : salesSummary
-  const payments = stripe ? salesPaymentsWithStripe : salesPayments
+  const subCent = scenario === 'overview-subcent'
+  const summary = stripe ? salesSummaryWithStripe : subCent ? salesSummarySubCent : salesSummary
+  const previousSummary = subCent ? salesPreviousSummarySubCent : salesPreviousSummary
+  const payments = stripe ? salesPaymentsWithStripe : subCent ? salesPaymentsSubCent : salesPayments
+  // #5105: the sub-cent scenario is rate-less on every read, so a SEK or EUR
+  // user's page falls back to USDC mode (the page also reads the list's rate).
+  const listRates = paid && !subCent ? salesUsdcRates : null
   await page.route(/\/api\/merchant-(services|sales|catalogue|keys|deposit-addresses)/, async (route) => {
     const request = route.request()
     if (request.method() !== 'GET') {
@@ -1532,13 +1584,13 @@ export async function serveSales(
     }
     if (path === '/merchant-sales/summary') {
       const previous = url.searchParams.get('to') === '2026-10-18'
-      return fulfillJson(route, !paid ? salesEmptySummary : previous ? salesPreviousSummary : summary)
+      return fulfillJson(route, !paid ? salesEmptySummary : previous ? previousSummary : summary)
     }
     if (path === '/merchant-sales/payments') {
       // Whole history with `limit=1` is the page's "has it ever been paid" probe.
       const rows = !paid ? [] : url.searchParams.has('from') ? payments : payments.slice(0, 1)
       // #4960: `total` is the read's count for the filter set (here: no filter).
-      return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null, total: rows.length })
+      return fulfillJson(route, { usdc_rates: listRates, payments: rows, next_cursor: null, total: rows.length })
     }
     if (path === '/merchant-sales/facets') {
       // #4960: every product and payer of the period, for the filter menus.
@@ -1551,7 +1603,7 @@ export async function serveSales(
     if (detail) {
       const row = payments.find((p) => p.tx_hash === detail[1])
       if (!row) return fulfillJson(route, { error: 'No such payment on this account.', error_code: 'PAYMENT_NOT_FOUND' }, 404)
-      return fulfillJson(route, { ...row, usdc_rates: salesUsdcRates, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
+      return fulfillJson(route, { ...row, usdc_rates: subCent ? null : salesUsdcRates, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
     }
     await route.fallback()
   })

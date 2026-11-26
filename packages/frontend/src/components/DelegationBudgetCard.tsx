@@ -469,6 +469,13 @@ export default function DelegationBudgetCard({
         // #1085: a dismissed sheet is a decision, not a failure — neutral
         // tone, matching BudgetGrantAction's inline treatment.
         toast.info('Approval was cancelled.')
+      } else if (result.reason === 'unconfirmed') {
+        // #4821: the stop may have landed. Re-read the list before the owner
+        // stops it again — the row above is the only place that can answer it.
+        toast.error(
+          'We could not confirm the stop. It may already be stopped — check the budget above before stopping it again.',
+        )
+        onBudgetChange?.()
       }
       else toast.error('Could not stop the budget. Try again.')
     },
@@ -487,6 +494,12 @@ export default function DelegationBudgetCard({
         onBudgetChange?.()
       } else if (result.reason === 'cancelled') {
         toast.info('Approval was cancelled.')
+      } else if (result.reason === 'unconfirmed') {
+        // #4821: the stop may have landed — re-read before offering it again.
+        toast.error(
+          'We could not confirm the stop. The old budget may already be stopped — check the budget above before stopping it again.',
+        )
+        onBudgetChange?.()
       } else {
         toast.error('Could not stop the old budget. Try again.')
       }

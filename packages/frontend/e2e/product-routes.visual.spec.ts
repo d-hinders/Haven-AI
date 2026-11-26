@@ -802,7 +802,9 @@ test.describe('transaction detail panel visual regression (#4267)', () => {
     {
       slug: 'transaction-panel-needs-attention',
       axis: 'mobile' as const,
-      row: 'api.example.dev',
+      // #4931: the row is named by the server (`recipientName`), so its title
+      // is the name, not the resource host.
+      row: 'Klara Data AB',
       // `x402UnrecordedSettlementTransaction.timestamp` 1778900000 = 2026-05-16T02:53:20Z.
       when: /^Paid by Research agent from Operations · 16 May 2026, 02:53$/,
       needsAttention: true,

@@ -21,6 +21,7 @@ covers:
   - packages/frontend/src/components/LabelsManagerModal.tsx
   - packages/frontend/src/components/agent-panel/ReplaceSigningKeyModal.tsx
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
+  - packages/frontend/src/components/agent-panel/CheckoutDetailsSharingToggle.tsx
   - packages/frontend/src/components/agent-panel/McpServerName.tsx
   - packages/frontend/src/app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx
   - packages/frontend/src/components/DashboardOnboardingGuide.tsx
@@ -37,11 +38,13 @@ covers:
   - packages/frontend/src/components/analytics/AgentsTable.tsx
   - packages/frontend/src/components/ui/FacetMenu.tsx
   - packages/frontend/src/components/ui/PeriodPicker.tsx
+  - packages/frontend/src/components/ui/StackedBarChart.tsx
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/app/(authenticated)/dashboard/NeedsYou.tsx
   - packages/frontend/src/lib/dashboard-attention.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
   - packages/frontend/src/components/settings/CompanyDetailsCard.tsx
+  - packages/frontend/src/components/settings/SalesCard.tsx
   - packages/frontend/src/app/(authenticated)/transactions/TransactionsClient.tsx
   - packages/frontend/src/components/AgentPanel.tsx
   - packages/frontend/src/hooks/useAgentListFilters.ts
@@ -58,7 +61,7 @@ covers:
   - packages/sdk/src/sweep.ts
   - packages/frontend/src/components/ui/SettingsSection.tsx
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-11-08"
+last-verified: "2026-11-18"
 ---
 
 # Haven Screen Recipes
@@ -400,8 +403,26 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
 4. **Cancelled or failed.** Both land back on Review with their message:
    "Approval was cancelled." for a dismissed approval, the server's message (or
    "Haven could not send this payment. Try again.") for a failure, with the Send
-   button reading `Try again`.
-5. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
+   button reading `Try again`. Both mean nothing was sent, so retrying is safe.
+5. **Unconfirmed (#4820).** The submit was rejected and nothing proves the
+   transfer did not go through: the route answered its outcome-unknown code, the
+   request got no answer at all, or a 5xx arrived without the route's code. The
+   Review screen keeps its amount and detail list, drops the "you approve it on
+   the next step" note (the approval already happened), and shows an
+   `InlineAlert`: "We could not confirm this transfer. It may have gone through.
+   Activity shows it if it landed, which can take a few minutes. Check Activity
+   again before sending again." The copy never says an empty Activity proves
+   nothing was sent: the route answers outcome-unknown both for a dispatched
+   send whose answer was lost (the operation may sit in the bundler's mempool)
+   and for a receipt wait that timed out (the operation was accepted and may be
+   included later), so the transfer can land after the owner looks. Activity is
+   built from landed chain transactions, so an empty Activity means "nothing has
+   landed yet", not "nothing was sent". The footer is one action, `Close` — no
+   `Back`, no `Try again`, because the submit carries no idempotency key and a
+   retry would be a second operation with the same recipient and amount. The
+   route's `user_op_hash` is not a transaction hash, so the dialog does not link
+   it to an explorer; Activity is where the owner checks.
+6. **Sent.** A result screen: "<amount> <token> sent", "To <name or short
    address> on <chain>", and **View transaction** linking to the chain explorer
    when the send returned a transaction hash. After a send to a **new address**
    the screen offers "Save this address as a contact?" — a name field and Save,
@@ -412,8 +433,10 @@ Structure (`DelegationSendModal`, titled `Send`, two screens since #4641):
    `/transactions`, the account tab and the dashboard.
    While the save is in flight, Save reads "Saving…" and Done and every close
    path are blocked. Done closes.
-6. Every screen puts its actions in the dialog's footer through the shared
-   action pair — the equal-halves shape, stacking primary-first below `sm`.
+7. Every screen puts its actions in the dialog's footer through the shared
+   action pair — the equal-halves shape, stacking primary-first below `sm`. A
+   screen with one action (Sent, Unconfirmed) renders a full-width button
+   instead.
 
 Money and risk clarity:
 - Show the selected Haven wallet before money moves.
@@ -733,8 +756,9 @@ with a stretched name link:
 - **⋯ menu:** Pause payments or Resume payments, Move to organization (only
   when organizations exist), and Remove; Remove from list for a revoked agent;
   Restore to list for an archived one.
-- **Footer, one line:** "Last paid {age} · {merchant}" — the merchant's name,
-  else the x402 resource host, never an address — else "Connected {age}"
+- **Footer, one line:** "Last paid {age} · {merchant}" — the server's name
+  for the merchant (Haven's one naming order, #4882), else the x402 resource
+  hostname, never an address — else "Connected {age}"
   (`mcp_last_seen_at`; "Last seen {age}" for an agent the overview does not
   cover, which can no longer connect), else "No payments yet". An agent the
   overview does not cover (revoked) never claims "No payments yet". The dashboard rows keep
@@ -1000,7 +1024,22 @@ rule). `?grant=` keeps working alongside `?tab=`. Sections, in order:
       payment. `local_stdio`, `manual` and an unknown setup leave it enabled,
       and an agent whose opt-in is already ON stays interactive so the owner
       can switch it off (#4435).
-   5. **Agent Passport**: `AgentPassportCard` renders the row itself — the
+   5. **Checkout details**: `CheckoutDetailsSharingToggle` (#4871), rendered
+      whenever the company-details feature is on — it does NOT require a
+      VIES-valid VAT number or stored details, because the switch may be on
+      with nothing saved. The row is a title, a one-line description that
+      names what is shared and with whom ("Shares the receipt email and
+      addresses you saved in Business details with merchants that ask."), the
+      `Checkbox` in the action slot, and a closed-by-default **What gets
+      shared** disclosure in the row's full-width slot. The disclosure lists
+      the three fields, says only a merchant that asks receives them, that
+      the agent can read the details once sharing is on, that only a saved
+      receipt email is ever shared (never the sign-in email), and that the
+      owner can switch it off at any time. When none of the three fields is
+      saved, a one-line note in the row says so. The checkbox carries a short
+      visible label ("Allow") and the full accessible name through
+      `aria-label`, and points at the description through `aria-describedby`.
+   6. **Agent Passport**: `AgentPassportCard` renders the row itself — the
       title and status badge, the one-line description, Issue a passport or
       Try again, and the issued state's `dl` grid in the full-width slot. It
       gates Issue a passport on two things: the agent is not revoked (archived
@@ -1151,13 +1190,22 @@ no calendar months. The header sentence, the Needs-attention items that say
 wire's `activityWindowStart` is its boundary). They differ in what they put
 in it, not when it ends: the header counts confirmed agent payments, the
 Transactions card also carries deposits, sweeps, failed and pending rows.
+The "Since your last visit" line (#4709) is compared against that same
+interval: it is hidden when its window `(after, through]` lies inside
+`[activityWindowStart, +7×24h)` and holds the same number of confirmed payments,
+because the 7-day sentence then says the same thing (#4839). The test anchors on
+`activityWindowStart`, which slides with every overview poll, never on the
+Since window's own `through`, which is fixed for the visit.
 
 **The dashboard's activity list is grouped and merchant-first (#3810).** The
 preview renders `GET /dashboard/overview`'s `activity` groups — one row per
 group under user-local day headings, at most eight rows over the rolling
 last seven days. The title is the counterparty through `counterpartyLabel`'s
 no-address mode (merchant site, receipt name, "Deposit" or — for a transfer
-from another of the user's own accounts — "From <account>" (#4099), "New
+from another of the user's own accounts — "From <account>" (#4099), "Sale" or
+"Sale · <product>" for a group of sales into the Sales account (#5000: its own
+group per day, apart from the day's deposits, naming a product only when
+every member shares it), "New
 recipient" — never a truncated address); the subtitle is the agent's name, plus
 "From <account>" — the account the money left — on a send when the user has
 more than one account and a name came back (#4117); a group of N
@@ -1221,12 +1269,18 @@ Structure:
    Direction and Network facets (each hidden while it has a single option)
    and Period (Last 7 / 30 / 90 days, All time, or a custom range), with
    Export CSV in the actions slot (content-width on phone — its own row
-   after search and Filters, #4150). While a filter is active the status row
+   after search and Filters, #4150). Direction offers Incoming, Sales and
+   Outgoing; Sales (#5001) is shown only to a user with a Sales account and
+   narrows the list to the rows carrying the sale marker, sales without a
+   product included. While a filter is active the status row
    carries a removable chip per active filter and Clear filters. The list
    summary line below the card (#4196) carries the standard count on the
    right — "{n} transactions", or "{shown} of {total} transactions" filtered,
    both server figures — and the "In <total> · Out <total>" money totals on
-   the left (per #4266; a Direction filter shows only its half). The next page is "Show N more" as the ledger card's footer row
+   the left (per #4266; a Direction filter shows only its half). Under
+   Direction: Sales the line is one figure, "Sales <total>"; under Direction:
+   Incoming it reads "In <total> · of which sales <total>" when the filtered
+   set holds a sale (#5001). The next page is "Show N more" as the ledger card's footer row
    (the pattern's paging rule); once every page is loaded the footer is gone
    and the card ends with its last row. The URL keeps the keys it had before #4111 except search,
    written as `q` with the old `search` still read; the export request builds its API
@@ -1275,10 +1329,13 @@ Money and risk clarity:
   currency mode).
 - **List rows show no addresses (#3810, #3811).** The counterparty half of
   every row renders through
-  `counterpartyLabel`'s no-address mode: the merchant's hostname, the source
-  title, a resolved name, "Deposit", "From <account>" for a transfer from
+  `counterpartyLabel`'s no-address mode: on an outgoing row the server's
+  name in Haven's one naming order (#4882, #4883; see
+  [`recipient-names.md`](recipient-names.md)), else the merchant's hostname,
+  the source title or a browser-resolved name; "Deposit", "From <account>" for a transfer from
   another of the user's own accounts (#4099 — the dashboard reads the server's
-  name, the ledgers the chain-keyed own-account map), or "New recipient". A raw address never
+  name, the ledgers the chain-keyed own-account map), "Sale · <product>" or
+  "Sale" for a sale into the Sales account (#5000), or "New recipient". A raw address never
   ellipsises into a list row; the detail drawer is where the address
   lives, shortened under Technical details with copy and an explorer link
   (#4267).
@@ -1301,7 +1358,8 @@ Money and risk clarity:
   detection is not exact on every provider, and the reason lives in the code.
 - The ROW leads with the counterparty (above), never "Agent payment by …" (#4266), and so does the detail drawer's title (#4267). "You" is reserved for human-initiated payments only (#2097): a transaction with no attribution never says "you" — the drawer's header line reads "Sent from", "Paid from" or "Attempted from" <account>, naming no actor.
 - For x402 payments, collapse the historical Safe-to-agent funding step into
-  one merchant-facing row titled with the merchant's hostname. On the
+  one merchant-facing row titled with the server's name for the merchant,
+  else its hostname (#4883). On the
   eip3009 bridge the funding leg is REAL and present on every payment (#946):
   the account funds the agent's delegate key first, then the delegate pays
   the merchant from the agent's signed authorization. The row still
@@ -1320,7 +1378,8 @@ Money and risk clarity:
   sit under Technical details: "Transaction" (the funding leg, also the
   footer's "View on explorer") and "Settlement transaction". Scheme-less and
   erc7710 rows are one transaction. Neither the row nor the drawer names the
-  protocol (#2357, #4267): the row title is the resource hostname and the
+  protocol (#2357, #4267): the row title is the server's name for the
+  merchant (#4883), the resource hostname when it named none, and the
   drawer calls it a "Paid request".
 - The row's subline names who acted and, with two or more accounts, the
   account — never a `From … -> To …` line (#4266). Only a move between the
@@ -1366,6 +1425,9 @@ Structure:
    would not fit beside it (#4409).
    A stale or foreign `?agentId=` clears with a one-line notice ("That agent
    isn't available"), never the page error.
+   On the Revenue side (#4901) the facet is replaced by a **View in Sales**
+   link and the subtitle reads "What your Sales account received." — the
+   Sales reads are the merchant account's, not an agent's.
 2. One `PeriodPicker` — the list-controls period control (#4110) — for the
    window (7d / 30d / 90d, default 30d), presets only: Last 7 / 30 / 90 days,
    no All time and no custom range, because the endpoint takes a rolling
@@ -1445,6 +1507,23 @@ of the zero tiles and empty sections: "No agent activity yet", a line on what
 the page will show, and **Connect agent** opening the existing connect flow on
 `/agents` (#4333). An agent-owning user with a quiet window keeps the
 whole-window empty state; a sparse window keeps the tiles and the table.
+
+**The Spending / Revenue switch (#4901).** For a user with merchant services
+on, a `Tabs` row sits under the header — *Spending* / *Revenue* — and swaps the
+page's whole data source (`design-system.md` § Tabs). The side is held in
+`?view=` beside `?period=`, so it survives a reload and a period change; with
+merchant services off the switch is absent and the page renders exactly as it
+shipped. Each side keeps the one-request rule: the side not on screen issues
+nothing. The Revenue side reads the Sales reads from #4897 over the same
+period, so its total equals the Sales page's total for that period by
+construction. Its four tiles are *Revenue* (the period's total), *Sales* (the
+count of every revenue payment: sales, Stripe-held ones included, and payments with no product; #4981), *Average sale*, and *Not counted* (what
+moved between the owner's own accounts and agents — in no total, and said so);
+then the shared `StackedBarChart` stacked by product (five named products, the
+rest folded into "Other" in neutral ink, payments with no sale record in the
+second neutral ink, no Refusals column) and the shared by-product breakdown
+card. A period with nothing in it is one empty state ("No sales in this
+period"), never four tiles asserting zeros.
 
 Money and risk clarity:
 - A value is a reading, never a judgement: the figure is ink in every state.
@@ -1718,8 +1797,9 @@ Money and risk clarity:
 - Use `sign-in method` and `approve actions`, not `signer` or `owner`.
 - Explain recovery limitations plainly without making the user feel at fault.
 - Personal profile details (name, email, member since) live in Settings → General → Profile (#4358); `/profile` redirects there. General also carries Preferences and Your data; Security carries the passkeys/wallets and the recovery sections.
-- Accounting connections and company details are Business-tab sections (#4358, reshaped #4359) whose TAB is visible only when one of them has something to show (a tri-state over the two reads: absent while pending — with an explicit `?tab=business` kept on a skeleton — and a deep link that settles empty falls back to the General body without rewriting the URL). One `SettingsRow` per connector the user can act on — coming-soon and not-configured providers render NO row, and a card with nothing to show renders nothing (#4359) — with a status chip and the one action that resolves the state; the feed settings open inline under the row through `SettingsRow`'s full-width `below` slot (`Card.Section divided`, never a nested filled card); Disconnect confirms and says history in Haven stays; a footer link, *See sent payments on Accounting*, points at the feed page when at least one connector shows; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
-- Company details (`CompanyDetailsCard`, #3332, reshaped #4359) is the same shape of Settings section as Accounting beside it: no frontend-side flag of its own (it reads the API's status alone — 404 hides it; 200 `null` shows "No company details" with **Add company details**, which reveals the blank form; a row renders the filled form), the purpose text shown above the form and the Add button, in the empty state too but not in the error state (not behind a tooltip), Country a native `Select` of ISO 3166-1 names that saves the same alpha-2 code (a stored code outside the list renders as its own option and round-trips unchanged), the VIES state a `StatusBadge` ("Checked against VIES" success / "Not found in VIES" warning / everything else neutral — never "verified"), and "Remove company details" a `ghost` trigger in the footer row left of Save, a confirm dialog before `DELETE`, the same danger-button pattern Accounting's Disconnect uses. See [`docs/product/owner-company-details.md`](owner-company-details.md).
+- Accounting connections and company details are Business-tab sections (#4358, reshaped #4359) whose TAB is visible only when one of them has something to show (a tri-state over the two reads: absent while pending — with an explicit `?tab=business` kept on a skeleton — and a deep link that settles empty falls back to the General body without rewriting the URL). Since #4904 the Sales section always has something to show once its read settles, so the tab is always visible in practice. One `SettingsRow` per connector the user can act on — coming-soon and not-configured providers render NO row, and a card with nothing to show renders nothing (#4359) — with a status chip and the one action that resolves the state; the feed settings open inline under the row through `SettingsRow`'s full-width `below` slot (`Card.Section divided`, never a nested filled card); Disconnect confirms and says history in Haven stays; a footer link, *See sent payments on Accounting*, points at the feed page when at least one connector shows; the section header carries the responsibility line (data tooling, not accounting or tax advice — the accountant remains responsible for coding, correctness and filing); copy follows the accounting guardrail — a payment *appears in the ledger with payment evidence attached; the accountant books it*.
+- Company details (`CompanyDetailsCard`, #3332, reshaped #4359) is the same shape of Settings section as Accounting beside it: no frontend-side flag of its own (it reads the API's status alone — 404 hides it; 200 `null` shows "No company details" with **Add company details**, which reveals the blank form; a row renders the filled form), the purpose text shown above the form and the Add button, in the empty state too but not in the error state (not behind a tooltip), Country a native `Select` of ISO 3166-1 names that saves the same alpha-2 code (a stored code outside the list renders as its own option and round-trips unchanged), the VIES state a `StatusBadge` ("Checked against VIES" success / "Not found in VIES" warning / everything else neutral — never "verified"), and "Remove company details" a `ghost` trigger in the footer row left of Save, a confirm dialog before `DELETE`, the same danger-button pattern Accounting's Disconnect uses. Since #4870 the form also carries an optional receipt email (prefilled from the sign-up email only while no company details are saved — a saved row without one shows the field empty, #4946 — and saved only when the owner saves) and two optional structured addresses — billing and shipping, each a street line, a second line, a postal code, a city and a country — with "Shipping address is the same as billing" as a form convenience (no stored flag); an address with every box blank is saved as cleared. See [`docs/product/owner-company-details.md`](owner-company-details.md).
+- Sales (`SalesCard`, #4904, reshaped #4983) is the third Business-tab section and the only place Sales is turned on: one `SettingsSection` like Accounting, with the product context (what Sales is, and that the seller can be the merchant's own MCP server or API or Haven's merchant kit) while Sales is off or was never on; a `SettingsRow` whose value is the On / Off `StatusBadge` and whose action is Turn on Sales / Turn off Sales; the account as a `LinkChip` and its network; and, off, the "Keys not accepted while off" row. The heading's trailing link, *Open the Sales page*, renders only while Sales is on, because `/sales` answers not found otherwise. Turning off confirms and says the account and its history are kept. Stripe deposit addresses live on Sales → Setup, not here (#4983).
 - "Passkeys and wallets" is a Security-tab section (owner decision 2026-10-09, #3825; tabbed #4358; pills #4472): a signer is its own object, not part of an account, so every passkey and wallet is listed once with the accounts it approves — each account an outline pill link (`LinkChip`, design-system.md § *Account link pill*) to its `/accounts/<id>?tab=security`, in a wrapping row under the signer's label. The pill shows the account name alone; the `(network)` suffix is appended to EVERY pill in the section only when the listed accounts span more than one network, so one account reads the same on every row (owner decision 2026-10-27). A passkey whose credential this device holds carries a neutral "This device" `StatusBadge` beside its label; wallet rows never do. The section speaks in outcomes ("Browser wallet", "Passkey · added {date}", "This device"), never "signer" (`copy-guidelines.md`); the account card's link to it ("Passkeys and wallets", on the "Who can approve" heading row since #4474 — the link text is the owner's 2026-10-30 decision, #4563, superseding the mockup's "All signers in Settings") targets `?tab=security#signers`. No address by default — a wallet row reveals it behind "Show address" — and the browser-wallet connect/disconnect control lives here, as a quiet footer line rather than a row (a row in a list titled Passkeys and wallets reads as one more signer), now that the top bar carries no wallet pill.
 - Avoid duplicating account summary facts already shown on Dashboard, Account details, or the Profile section.
 

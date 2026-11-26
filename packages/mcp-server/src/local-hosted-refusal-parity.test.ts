@@ -2,12 +2,13 @@
  * #4790 (epic #4788 slice 2) — the LOCAL ↔ HOSTED refusal parity test.
  *
  * The hosted MCP's `normalizeError` (`packages/mcp-server/src/tools/support/
- * errors.ts`) types 20 backend `error_code`s: the ten payment-scope codes
- * through `PAYMENT_SCOPE_REFUSAL_ANSWERS`, and ten more through hand-written
+ * errors.ts`) types 22 backend `error_code`s: the ten payment-scope codes
+ * through `PAYMENT_SCOPE_REFUSAL_ANSWERS`, and twelve more through hand-written
  * branches whose answers depend on the body (`submission_outcome_unknown`
  * names the status read only when the body carries a `payment_id`;
  * `prepare_reverted` changes its step on `revert_cause`; `delegation_expired`
- * is guarded on status 403). The local MCP's mapper
+ * is guarded on status 403; `payment_already_submitted` (#4826) requires the
+ * body's `payment_id`). The local MCP's mapper
  * (`packages/mcp/src/tools.ts`) typed none of them: every one reached the
  * agent as `API_ERROR` with no reason.
  *
@@ -29,7 +30,7 @@
  * `haven_get_payment_status`, which the local package has.
  */
 import { describe, expect, it } from 'vitest'
-import { HavenApiError } from '@haven_ai/sdk'
+import { HavenApiError, checkoutDetailsRefusalError } from '@haven_ai/sdk'
 import { PAYMENT_SCOPE_REFUSAL_CODES } from '@haven_ai/core'
 import { createToolHandlers as createLocalToolHandlers } from '@haven_ai/mcp'
 import { normalizeError } from './tools/support/errors.js'
@@ -100,14 +101,15 @@ const TYPED_SITES = REFUSAL_SITES.filter((site) => {
 
 describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
   it('compares a non-empty set of typed fixture sites', () => {
-    // 22 at this commit: the ten payment-scope codes, plus rail_unavailable,
+    // 24 at this commit: the ten payment-scope codes, plus rail_unavailable,
     // task_budget_exceeded, task_budget_exceeds_remaining,
     // delegation_budget_exceeded, delegation_expired, the two
-    // submission_outcome_unknown variants, account_validation_failed,
+    // submission_outcome_unknown variants, payment_already_submitted (#4826),
+    // sweep_outcome_unknown (#5035), account_validation_failed,
     // signature_rejected, the two prepare_reverted variants and
     // onchain_execution_failed.
     expect(TYPED_SITES.length).toBeGreaterThan(0)
-    expect(TYPED_SITES.length).toBe(22)
+    expect(TYPED_SITES.length).toBe(24)
   })
 
   it('agrees on every compared field, or the difference is allowlisted', async () => {
@@ -144,9 +146,9 @@ describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
       hostedCodes.add((normalizeError(site.thrown) as { code: string }).code)
       localCodes.add(String((await localAnswer(site.thrown)).code))
     }
-    // 20 distinct codes at this commit — the ten payment-scope keys and the
-    // ten branch codes.
-    expect(hostedCodes.size).toBe(20)
+    // 22 distinct codes at this commit — the ten payment-scope keys and the
+    // twelve branch codes.
+    expect(hostedCodes.size).toBe(22)
     expect([...hostedCodes].filter((code) => !localCodes.has(code))).toEqual([])
     expect(localCodes.has('API_ERROR')).toBe(false)
   })
@@ -209,5 +211,37 @@ describe('#4790 local ↔ hosted refusal parity on the fixture bodies', () => {
       if (local.code === 'API_ERROR') unanswered.push(code)
     }
     expect(unanswered).toEqual([])
+  })
+})
+
+/**
+ * #5031: the checkout-details refusal per stage. The five compared fields
+ * above use exact equality, and the two surfaces' `funded` reasons rightly
+ * differ (each names its own tools), so this class gets its own assertions:
+ * the same `phase` and code on both, the same `before_payment` reason, and a
+ * local `funded` reason that is NOT the fixed before-payment one — the
+ * fallback this test exists to catch.
+ */
+describe('#5031 checkout-details refusals per stage, local and hosted', () => {
+  const beforePayment = checkoutDetailsRefusalError(['receipt_email'], 'not_shared')
+  const funded = checkoutDetailsRefusalError(['receipt_email'], 'not_shared', { funded: true, paymentId: 'pay_5031' })
+
+  it('agrees on code and phase for each stage the local surface produces', async () => {
+    for (const refusal of [beforePayment, funded]) {
+      const hosted = normalizeError(refusal) as unknown as Record<string, unknown>
+      const local = await localAnswer(refusal)
+      expect(local.code).toBe(hosted.code)
+      expect(local.phase).toBe(hosted.phase)
+      expect(typeof local.phase).toBe('string')
+    }
+  })
+
+  it('gives the same before-payment reason, and a funded reason of its own that names the payment it resumes', async () => {
+    const localBefore = await localAnswer(beforePayment)
+    const localFunded = await localAnswer(funded)
+    expect(localBefore.next_tool_omitted_reason).toBe((normalizeError(beforePayment) as unknown as Record<string, unknown>).next_tool_omitted_reason)
+    expect(localFunded.next_tool_omitted_reason).not.toBe(localBefore.next_tool_omitted_reason)
+    expect(String(localFunded.next_tool_omitted_reason)).toContain('haven_resume_x402_payment')
+    expect(localFunded.paymentId).toBe('pay_5031')
   })
 })

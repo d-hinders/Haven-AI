@@ -21,7 +21,10 @@
  * agent-supplied on every path, and the most common client path does not carry
  * it yet.
  *
- * ## The X-PAYMENT header carries it only when the merchant asked
+ * ## The payment header carries it only when the merchant asked
+ *
+ * That header is `PAYMENT-SIGNATURE` alone: only a v2 402 can advertise the
+ * extension, and since #4754 a v2 payment is not also sent as `X-PAYMENT`.
  *
  * x402 does not guarantee arbitrary-metadata passthrough. The header is parsed
  * by a merchant FACILITATOR we do not control, and an unrecognised key in the
@@ -61,7 +64,7 @@ export interface PassportReference {
    * supported path). The UID and chain id are safe to
    * accept from the agent precisely because they are checkable against a source
    * the agent does not control; the URL is not. Same reasoning as the
-   * `X-PAYMENT` header note above: the trust boundary is what the merchant can
+   * payment-header note above: the trust boundary is what the merchant can
    * verify independently, not what it was handed.
    *
    * Kept because it is genuinely useful for humans and for agents fetching

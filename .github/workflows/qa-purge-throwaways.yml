@@ -16,6 +16,9 @@ name: QA — purge throwaway identities (dev)
 #      target tuple; it is NOT committed, because the repo is public. Required
 #      reviewers on the environment are what make "any of the three maintainers
 #      can approve" true — that is a repository setting, not workflow code.
+#      Create the environment BEFORE the first dispatch
+#      (docs/operations/agent-qa.md § Operator steps, step 1): GitHub creates a
+#      missing environment named by a job, with no protection rules.
 #   3. The credential is the primary guard. The secondary guard identifies the
 #      DATABASE, not only its endpoint: the script compares the URL's exact
 #      host, port and database name with the allowlisted tuple, then — after

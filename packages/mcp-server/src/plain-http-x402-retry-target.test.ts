@@ -22,6 +22,16 @@ import {
 installSharedFixtureLifecycle()
 
 /** A challenge that declares http:// for a public host — the Ampersend sandbox's shape. */
+/**
+ * #5084: the shared fixture names the MCP endpoint (`http://merchant.test/mcp`)
+ * as its resource address; these plain-HTTP cases need a challenge that
+ * declares the quoted https URL itself.
+ */
+const HTTPS_DECLARED = {
+  ...PAYMENT_REQUIRED,
+  resource: { url: 'https://merchant.test/paid', description: 'paid data' },
+}
+
 const HTTP_DECLARED = {
   ...PAYMENT_REQUIRED,
   resource: { url: 'http://merchant.com/paid', description: 'paid data' },
@@ -44,7 +54,7 @@ describe('haven_quote_x402 — request_url / retry_url / the disagreement flag',
 
   it('does not flag a declaration that equals the quoted URL', async () => {
     stubFetch({
-      'GET /paid': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(PAYMENT_REQUIRED)) } },
+      'GET /paid': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': btoa(JSON.stringify(HTTPS_DECLARED)) } },
       'GET /machine-payments/agent': { status: 200, body: AGENT_RESPONSE },
     })
     const result = ok<Record<string, unknown>>(
@@ -95,7 +105,7 @@ describe('haven_pay_x402_quote — the retry target is decided before any intent
       'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
     })
     const result = ok<Record<string, unknown>>(
-      await handlers().haven_pay_x402_quote({ payment_required: PAYMENT_REQUIRED, max_amount: '1500000' }),
+      await handlers().haven_pay_x402_quote({ payment_required: HTTPS_DECLARED, max_amount: '1500000' }),
     )
     expect(result.data.retry_url).toBe('https://merchant.test/paid')
     // Nothing was compared, so the flag is absent rather than a false "false".
@@ -256,7 +266,13 @@ describe('the MCP-merchant family — refused before the unpaid probe (#3097 rev
 
 describe('haven_complete_mcp_tool — the post-funding escape is annotated (#3097 review)', () => {
   it('turns the SDK refusal into a funded_but_unsettled failure with payment_id and sweep guidance', async () => {
-    stubFetch({})
+    stubFetch({
+      // #5086: the endpoint Haven stored is the one this explicit call names.
+      'GET /x402/pay_x402/merchant-call-context': {
+        status: 200,
+        body: { payment_id: 'pay_x402', merchant_url: 'http://merchant.com/mcp', tool_name: 'facts', arguments: {} },
+      },
+    })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     vi.spyOn(haven, 'ensureFundingConfirmed').mockResolvedValue(undefined as never)
     vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(
@@ -285,6 +301,12 @@ describe('haven_complete_mcp_tool — the post-funding escape is annotated (#309
     stubFetch({
       'POST /x402/pay_7710/settle': { status: 200, body: { payment_header: 'HEADER_FROM_HAVEN' } },
       'GET /payments/pay_7710': { status: 200, body: { payment_id: 'pay_7710', status: 'settled' } },
+      // #5086: the endpoint Haven stored is the one this explicit settle
+      // names, so the pre-spend delivery check passes and completion is reached.
+      'GET /x402/pay_7710/merchant-call-context': {
+        status: 200,
+        body: { payment_id: 'pay_7710', merchant_url: 'http://merchant.com/mcp', tool_name: 'facts', arguments: {} },
+      },
     })
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     vi.spyOn(haven, 'completeX402MerchantCall').mockRejectedValue(

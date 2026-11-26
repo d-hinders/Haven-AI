@@ -1459,6 +1459,42 @@ describe('machine payment routes', () => {
     expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())
   })
 
+  // #5030: the required checkout-details field names the merchant's challenge
+  // carried, recorded at authorize, are served on the status read so
+  // `haven_submit` can fail closed when the stored challenge itself cannot be
+  // read (owner decision 2026-11-22, option b).
+  it('serves the recorded required checkout-details field names, and omits the key when none were recorded', async () => {
+    primeDb(
+      AUTH,
+      intentStatusRow({
+        ...confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' }),
+        machine_metadata: JSON.stringify({
+          settlement_scheme: 'eip3009',
+          checkout_details_required_fields: ['receipt_email', 'billing_address'],
+        }),
+      }),
+    )
+    const response = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(response.statusCode).toBe(200)
+    expect(response.json().checkout_details_required_fields).toEqual(['receipt_email', 'billing_address'])
+    expectMatchesSpec('GET', '/machine-payments/{id}/status', response.json())
+
+    // A challenge that asked for nothing (or a row authorized before #5030):
+    // the key is absent, never an empty array.
+    primeDb(AUTH, intentStatusRow(confirmedPayment({ expires_at: '2099-01-02T00:00:00.000Z' })))
+    const none = await app.inject({
+      method: 'GET',
+      url: `/machine-payments/${PAYMENT_ID}/status`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(none.statusCode).toBe(200)
+    expect('checkout_details_required_fields' in none.json()).toBe(false)
+  })
+
   // #2970: a submitted erc7710 intent past its settlement window with no
   // verified evidence answers awaiting_settlement_evidence, not
   // check_status_later, which promised a resolution nothing would produce.

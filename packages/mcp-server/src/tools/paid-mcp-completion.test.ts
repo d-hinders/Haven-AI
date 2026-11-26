@@ -385,7 +385,14 @@ describe('haven_settle_mcp_tool', () => {
       // the settle tool delivers to the merchant.
       'GET /machine-payments/pay_x402/status': {
         status: 200,
-        body: x402PreflightStatus({ status: 'confirmed', phase: 'payment_confirmed', next_action: 'none', tx_hash: '0xfund' }),
+        // #5084: approved for the fake merchant's own endpoint, as a real
+        // merchant's challenge names it (the shared fixture names /mcp).
+        body: x402PreflightStatus({ status: 'confirmed', phase: 'payment_confirmed', next_action: 'none', tx_hash: '0xfund', resource_url: 'https://merchant.test/paid' }),
+      },
+      // #5086: the endpoint Haven stored is the fake merchant's own.
+      'GET /x402/pay_x402/merchant-call-context': {
+        status: 200,
+        body: { payment_id: 'pay_x402', merchant_url: 'https://merchant.test/paid', tool_name: 'create_text', arguments: {} },
       },
       // The fake merchant: HTTP 200, a plain failed tool result, no receipt.
       'POST /paid': {
@@ -1644,7 +1651,7 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
     expect(spy).not.toHaveBeenCalled()
   })
 
-  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — rehydration is never called', async () => {
+  it('haven_complete_mcp_tool: explicit merchant_url/tool_name win OUTRIGHT — the stored context never decides where to call', async () => {
     stubFetch({})
     const haven = new HavenClient({ apiKey: 'sk_agent_test', baseUrl: 'http://haven.test' })
     const rehydrateSpy = vi.spyOn(haven, 'getX402MerchantCallContext')
@@ -1662,7 +1669,10 @@ describe('haven_complete_mcp_tool / haven_settle_mcp_tool merchant-call-context 
       }),
     )
 
-    expect(rehydrateSpy).not.toHaveBeenCalled()
+    // #4872: after the funding wait the stored context IS read — for the
+    // merchant's checkout-details request only, never for where to call. The
+    // call still goes where the explicit merchant_url/tool_name say.
+    expect(rehydrateSpy.mock.calls.length).toBeLessThanOrEqual(1)
     expect(completeSpy.mock.calls[0][0].url).toBe('http://merchant.test/mcp')
     const envelope = JSON.parse(completeSpy.mock.calls[0][0].init!.body as string)
     expect(envelope.params).toEqual({ name: 'create_text', arguments: { prompt: 'explicit' } })

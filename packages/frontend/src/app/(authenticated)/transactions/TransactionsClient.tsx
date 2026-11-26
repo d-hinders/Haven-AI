@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
+import { useMerchantServicesContext } from '@/context/MerchantServicesContext'
 import { usePreferences } from '@/hooks/usePreferences'
 import { useContacts } from '@/hooks/useContacts'
 import { agentFacetOptions } from '@/lib/agent-facet'
@@ -62,7 +63,11 @@ const TRANSACTIONS_PAGE_SIZE = 25
  * written as `q` now, and the old `search` key is still READ, so a link
  * from before the move keeps its search. No facet lists its `values`: the
  * account, agent and token options load asynchronously, and a value read
- * before they arrive must survive. Direction's two values are fixed.
+ * before they arrive must survive. Direction's values are fixed — and
+ * `sales` (#5001) is one of them for EVERY user, even though only a user
+ * with a Sales account is offered the option: the codec drops unknown
+ * values, so a conditional schema would rewrite a valid `?direction=sales`
+ * link away while merchant services are still loading.
  */
 const transactionsUrlSchema: ListUrlSchema = {
   search: { aliases: ['search'] },
@@ -70,7 +75,7 @@ const transactionsUrlSchema: ListUrlSchema = {
     { id: 'accountId' },
     { id: 'agentId' },
     { id: 'tokenKey' },
-    { id: 'direction', values: ['in', 'out'] },
+    { id: 'direction', values: ['in', 'out', 'sales'] },
     { id: 'chainId' },
   ],
   period: { allowCustom: true },
@@ -93,7 +98,8 @@ function listStateToFilters(state: ListState): TransactionFilterState {
     accountId: first('accountId'),
     agentId: first('agentId'),
     tokenKey: first('tokenKey'),
-    direction: direction === 'in' || direction === 'out' ? direction : undefined,
+    direction:
+      direction === 'in' || direction === 'out' || direction === 'sales' ? direction : undefined,
     chainId: Number.isInteger(chainId) && chainId > 0 ? chainId : undefined,
     search: search || undefined,
     period: period.preset,
@@ -122,6 +128,12 @@ export default function TransactionsClient() {
   const { user } = useAuth()
   const { resolveAddress } = useContacts()
   const { currency } = usePreferences()
+  // #5001: the shell's ONE merchant-services read (never a second
+  // `useMerchantServices` call). `merchantAccount` survives turning Sales
+  // off, so past sales stay filterable; the Sales option is offered only
+  // when there is an account to have sold into.
+  const { merchantAccount } = useMerchantServicesContext()
+  const hasSalesAccount = merchantAccount !== null
   const [selectedTx, setSelectedTx] = useState<AggregatedTransaction | null>(null)
   // #4111: every filter dimension lives in the URL through the list-controls
   // codec — a shared link (or a refresh) lands on the same filtered feed the
@@ -223,9 +235,14 @@ export default function TransactionsClient() {
     {
       id: 'direction',
       label: 'Direction',
-      values: ['in', 'out'],
+      values: ['in', 'out', 'sales'],
+      // #5001: Sales sits between Incoming and Outgoing, and only for a user
+      // with a Sales account. The URL value is accepted for everyone (see
+      // `transactionsUrlSchema`), so a shared `?direction=sales` link is
+      // never rewritten — it resolves to the usual no-match state instead.
       options: [
         { value: 'in', label: 'Incoming' },
+        ...(hasSalesAccount ? [{ value: 'sales', label: 'Sales' }] : []),
         { value: 'out', label: 'Outgoing' },
       ],
     },
@@ -362,6 +379,45 @@ export default function TransactionsClient() {
   // With one account, naming it on every row would repeat the page (#4266).
   const showAccountOnRows = userAccounts.length > 1
 
+  // #5001: the summary line's figures. Direction: Sales shows the sales part
+  // alone ("Sales <amount>"); Direction: Incoming shows In and, when the set
+  // holds a sale, the part of it that came from sales ("In <amount> · of
+  // which sales <amount>"). All and Outgoing are unchanged. A Direction
+  // choice already hides the other half, so Sales never shows an Out figure.
+  const totalsParts: ReactNode[] = []
+  if (filters.direction === 'sales') {
+    totalsParts.push(
+      <TotalFigure key="sales" short="Sales" name="Money from sales">
+        <Amount amount={moneyTotals.moneySales} currency={displayCurrency} approx={moneyTotals.approxSales} />
+      </TotalFigure>,
+    )
+  } else {
+    if (filters.direction !== 'out') {
+      totalsParts.push(
+        <TotalFigure key="in" short="In" name="Money in">
+          <Amount amount={moneyTotals.moneyIn} currency={displayCurrency} approx={moneyTotals.approxIn} />
+        </TotalFigure>,
+      )
+      // "Sales present" counts sale rows, unpriced ones included — never a
+      // test for a non-zero sum.
+      if (filters.direction === 'in' && hasSalesAccount && moneyTotals.salesPresent) {
+        totalsParts.push(
+          <span key="of-which-sales">
+            of which sales{' '}
+            <Amount amount={moneyTotals.moneySales} currency={displayCurrency} approx={moneyTotals.approxSales} />
+          </span>,
+        )
+      }
+    }
+    if (filters.direction !== 'in') {
+      totalsParts.push(
+        <TotalFigure key="out" short="Out" name="Money out">
+          <Amount amount={moneyTotals.moneyOut} currency={displayCurrency} approx={moneyTotals.approxOut} />
+        </TotalFigure>,
+      )
+    }
+  }
+
   return (
     <div className="max-w-6xl">
       <PageHeader title="Transactions" subtitle={subtitle} />
@@ -394,22 +450,10 @@ export default function TransactionsClient() {
           // tab's line. Hidden while loading and after a failed read — no
           // figure is better than a wrong one. A Direction filter already
           // fixes one half, so only the other is shown — never "In 0" under
-          // Direction: Outgoing.
+          // Direction: Outgoing. #5001 adds the Sales choice and the sales
+          // part of In; `totalsParts` decides which figures the line carries.
           <span data-testid="transactions-totals">
-            {[
-              filters.direction !== 'out' ? (
-                <TotalFigure key="in" short="In" name="Money in">
-                  <Amount amount={moneyTotals.moneyIn} currency={displayCurrency} approx={moneyTotals.approxIn} />
-                </TotalFigure>
-              ) : null,
-              filters.direction !== 'in' ? (
-                <TotalFigure key="out" short="Out" name="Money out">
-                  <Amount amount={moneyTotals.moneyOut} currency={displayCurrency} approx={moneyTotals.approxOut} />
-                </TotalFigure>
-              ) : null,
-            ]
-              .filter((part) => part !== null)
-              .flatMap((part, i) => (i === 0 ? [part] : [' · ', part]))}
+            {totalsParts.flatMap((part, i) => (i === 0 ? [part] : [' · ', part]))}
           </span>
         ) : undefined}
         searchEpoch={searchEpoch}

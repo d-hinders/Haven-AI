@@ -60,6 +60,18 @@ vi.mock('../../rails/hybrid-account-config.js', () => ({
   loadHybridOwnerConfig: vi.fn(),
 }))
 
+// #4903: the ingest route reads the transaction from the CHAIN. The chain read
+// is mocked at its seam; the route's contract is that it indexes what the chain
+// reports and refuses a caller's description of the transfer.
+const chainRead = vi.hoisted(() => ({ readByHash: vi.fn() }))
+vi.mock('../../modules/transactions/chain-read.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/chain-read.js')>()
+  return {
+    ...actual,
+    readInboundTransfersByTxHash: (...a: unknown[]) => chainRead.readByHash(...a),
+  }
+})
+
 /** Sign the exact drop payload the route verifies (EIP-191, like verifyMessage). */
 async function signDrop(txHash: string, amountRaw: string): Promise<string> {
   const message = `haven:receipt-drop\ntx:${txHash}\namount_raw:${amountRaw}`
@@ -179,6 +191,7 @@ describe('receive routes (#3333)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+    chainRead.readByHash.mockReset()
   })
 
   // ── Topology: the owner surface is behind the dashboard JWT ────────────────
@@ -529,8 +542,39 @@ describe('receive routes (#3333)', () => {
 
   // ── The ingest hook ────────────────────────────────────────────────────────
 
-  it('ingests one inbound transfer for the owner', async () => {
+  it('ingests the legs the chain reports for the owner (#4903)', async () => {
     routeQueries({ ownership: [{ id: ACCOUNT_ID }], insertedInbound: [{ id: '88888888-8888-4888-8888-888888888888' }] })
+    chainRead.readByHash.mockResolvedValue({
+      ok: true,
+      legs: [
+        {
+          txHash: TX_HASH,
+          logIndex: 3,
+          payerAddress: PAYER_WALLET.address.toLowerCase(),
+          tokenAddress: USDC,
+          amountRaw: '1000000',
+          blockNumber: 100,
+          blockTime: new Date('2026-09-27T10:00:00Z'),
+        },
+      ],
+    })
+    const token = signToken({ sub: USER_ID, email: 'test@example.com' })
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/receive/${ACCOUNT_ADDRESS}/ingest?chain_id=8453`,
+      headers: { authorization: `Bearer ${token}` },
+      payload: { tx_hash: TX_HASH },
+    })
+
+    expect(response.statusCode, response.body).toBe(200)
+    expectMatchesSpec('POST', '/receive/{accountAddress}/ingest', response.json())
+    expect(response.json()).toMatchObject({ ingested: true, legs_indexed: 1, tx_hash: TX_HASH })
+    expect(chainRead.readByHash).toHaveBeenCalledWith(8453, ACCOUNT_ADDRESS, TX_HASH)
+  })
+
+  it('refuses a caller-supplied description of the transfer (#4903)', async () => {
+    routeQueries({ ownership: [{ id: ACCOUNT_ID }] })
     const token = signToken({ sub: USER_ID, email: 'test@example.com' })
 
     const response = await app.inject({
@@ -545,9 +589,8 @@ describe('receive routes (#3333)', () => {
       },
     })
 
-    expect(response.statusCode).toBe(200)
-    expectMatchesSpec('POST', '/receive/{accountAddress}/ingest', response.json())
-    expect(response.json().ingested).toBe(true)
+    expect(response.statusCode, response.body).toBe(400)
+    expect(chainRead.readByHash).not.toHaveBeenCalled()
   })
 })
 

@@ -258,8 +258,8 @@ export const x402HostedMcpSigner: Scenario = {
     // failure, which is the intended escalation for an operator who wants the
     // funding path exercised from this entry point (point it at a merchant that
     // does not advertise erc7710).
-    // #1441: this leg buys `vpn_legacy`, the one product advertising eip3009
-    // ALONE, so the funding-leg topology is now REACHABLE and an erc7710 quote
+    // #1441: this leg buys `vpn_legacy`, the one SELF-SETTLED product advertising
+    // eip3009 ALONE (the CDP-settled joke, #4851, is not bought here), so the funding-leg topology is now REACHABLE and an erc7710 quote
     // is a regression rather than an unreachable invariant. It used to skip
     // here — permanently, because every product offered erc7710 and #1450's
     // preference rule always picked it, which under QA_REQUIRE_ALL_LEGS=1 meant

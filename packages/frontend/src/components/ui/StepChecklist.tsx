@@ -12,13 +12,19 @@ import { ACTIVE_STEP_RING_CLASS, DONE_STEP_DISC_CLASS, PENDING_STEP_DISC_CLASS }
  * vertical list in which each row is both an instruction and its status. One
  * marker column, joined by a connector, beside one text column.
  *
- * Two consumers, one stepper family:
+ * Three consumers, one stepper family:
  * - `ConnectSteps`, the connect dialog's copy → paste → approve list. No
  *   numerals: the dialog's `StepProgress` band above it is the flow's one
  *   counter, and a numbered column under a numbered band read as a second
  *   stepper (owner review, 2026-10-16).
  * - the dashboard's first-run guide (`DashboardOnboardingGuide`). Numbered:
  *   there the list IS the counter, beside the card's "N of 3 done".
+ * - the Sales first-run helper (`SalesFirstRun`, #4985). Numbered, with "N of 3
+ *   done" in the card header's actions slot. Its rows come from reads, so a row
+ *   may un-tick when its observed state goes back — a guidance-only checklist
+ *   that gates nothing (design-system.md § Step status checklist, amended by
+ *   #4985). Its third row is optional; the pattern has no optional-row concept,
+ *   so the title carries "(optional)".
  *
  * Marker states — one disc size and StepProgress's marker classes:
  * - `done`    — success-soft disc with a check; plays `Milestone` Step when

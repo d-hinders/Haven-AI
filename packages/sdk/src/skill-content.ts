@@ -400,8 +400,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   method, body and \`Content-Type\` to \`retry_url\`, plus the
   \`payment_header\` under exactly the headers the signer's \`retry_headers\`
   names (\`PAYMENT-SIGNATURE\`; \`X-PAYMENT\` too only for an x402 v1
-  challenge). A retry without the body fails after the funding leg has already
-  moved money.
+  challenge), plus every header in \`haven_submit\`'s
+  \`additional_retry_headers\` when it returns one: the checkout details the
+  merchant asked for, to send unchanged and never log. A retry without the body
+  fails after the funding leg has already moved money.
 - **If you pass \`payment_required\` instead, copy it verbatim.** Hand the
   merchant's \`payment_required\` to \`mcp__haven__haven_pay_x402_quote\`
   exactly as returned — never retyped, trimmed or "corrected". Haven echoes its
@@ -418,8 +420,10 @@ for example, an invoice carrying an \`x402_payment_url\` to POST with its
   remaining budget at quote time, and it can check a price you state
   (\`expected_amount\`). On the local runtime (\`@haven_ai/mcp\`) the quote
   checks only a price you state; the budget is checked when you pay.
-  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, or
-  the price does not match what you expected — it prefills no cap and names no
+  When it returns \`safe_to_continue: false\` — the amount exceeds the budget, the
+  price does not match what you expected, or the price could not be compared at
+  all (\`price_comparison_made: false\`; follow its \`next_action\` — re-quote once
+  when the agent read failed, otherwise stop) — it prefills no cap and names no
   next tool: stop and tell the user. If the x402 challenge itself is wrong (a
   price wildly off the invoice) and NOTHING has been paid via x402, the
   invoice's own deposit address MAY be an alternative, but only with the

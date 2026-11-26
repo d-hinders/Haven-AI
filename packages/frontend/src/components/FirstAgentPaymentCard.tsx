@@ -33,8 +33,8 @@
  *
  * The amount is the booked fiat in the viewer's currency, or the token amount
  * when that fiat would read `0.00` (a sub-cent payment never reads `$0.00`).
- * The counterparty is a contact name, else a receipt name, else the x402
- * resource host — never an address. "just now" comes from the row's own time;
+ * The counterparty is the server's name in the one naming order (#4882),
+ * else the x402 resource hostname — never an address. "just now" comes from the row's own time;
  * an older row says its date.
  */
 

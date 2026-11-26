@@ -70,6 +70,45 @@ export function getResolvedApiBaseUrl(): string {
   return BASE_URL
 }
 
+/**
+ * #4827: the paths whose 401 does NOT mean the session ended.
+ *
+ * A 401 from a session-authenticated call ends the session (owner decision
+ * 2026-11-12). These three answer 401 for a reason that has nothing to do with
+ * the stored token, and the dashboard meets them WITH a session token stored:
+ *
+ * - `POST /auth/login` — a wrong password (`routes/auth.ts:212`). The caller is
+ *   signing in; the session it already holds is not the thing being refused.
+ * - `POST /agent-connection-setups/resolve` and `/register` — the agent's
+ *   setup code is wrong or expired (`routes/agent-connection-setups.ts:387`,
+ *   `:426`, `:462`), called from `hooks/useAgentConnectionSetup.ts:740`, `:748`.
+ *
+ * Matched on the path alone (query stripped), because the refusal is a property
+ * of the route, not of the request.
+ */
+const SESSION_EXEMPT_PATHS = new Set([
+  '/auth/login',
+  '/agent-connection-setups/resolve',
+  '/agent-connection-setups/register',
+])
+
+/**
+ * #4827: the one reaction to a 401 that ends the session. `AuthContext`
+ * registers it; the API client owns the detection so every authenticated call
+ * is covered, not just the hooks that happen to check a status.
+ */
+export type SessionExpiredHandler = () => void
+
+let sessionExpiredHandler: SessionExpiredHandler | null = null
+
+/**
+ * Register (or, with `null`, clear) the session-expired reaction. One handler:
+ * the session is a single thing, and two reactions would be two sign-outs.
+ */
+export function setSessionExpiredHandler(handler: SessionExpiredHandler | null): void {
+  sessionExpiredHandler = handler
+}
+
 class ApiClient {
   private resolveBaseUrl(): string {
     return getResolvedApiBaseUrl()
@@ -78,6 +117,30 @@ class ApiClient {
   private getToken(): string | null {
     if (typeof window === 'undefined') return null
     return localStorage.getItem('haven_token')
+  }
+
+  /**
+   * #4827: tell the auth layer that a 401 ended the session, at the moment the
+   * error is thrown rather than in each caller.
+   *
+   * Three guards, each an acceptance criterion:
+   * - no token was sent → there is no session to end;
+   * - the path is exempt → its 401 is about the request, not the session;
+   * - the stored token is no longer the one this request carried → the answer
+   *   belongs to a session that has already been replaced (a fresh `login()`)
+   *   or ended (an earlier 401), so it changes nothing. That last guard is also
+   *   what makes two in-flight 401s produce exactly one sign-out: the first
+   *   handler call removes the token, and the second finds it gone.
+   */
+  private reportSessionEndingStatus(
+    path: string,
+    status: number,
+    sentToken: string | null,
+  ): void {
+    if (status !== 401 || !sentToken) return
+    if (SESSION_EXEMPT_PATHS.has(path.split('?')[0])) return
+    if (this.getToken() !== sentToken) return
+    sessionExpiredHandler?.()
   }
 
   private async request<T>(
@@ -109,6 +172,7 @@ class ApiClient {
       const body: ApiError = await response.json().catch(() => ({
         error: 'An unexpected error occurred',
       }))
+      this.reportSessionEndingStatus(path, response.status, token)
       throw new ApiRequestError(body.error, response.status, body)
     }
 
@@ -141,6 +205,7 @@ class ApiClient {
       const body: ApiError = await response.json().catch(() => ({
         error: 'An unexpected error occurred',
       }))
+      this.reportSessionEndingStatus(path, response.status, token)
       throw new ApiRequestError(body.error, response.status, body)
     }
     return response.text()

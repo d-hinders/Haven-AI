@@ -5,7 +5,9 @@
  * for the frontend's existing import paths (`AgentActivityTab`,
  * `transaction-presentation.tsx`); its behavior is unchanged.
  */
-export { parseX402Hostname } from '@haven_ai/core'
+import { HAVEN_FALLBACK_NAME, parseX402Hostname } from '@haven_ai/core'
+
+export { parseX402Hostname }
 
 export function isMachinePaymentSource(source?: string | null): boolean {
   return source === 'x402' || source === 'mpp_demo'
@@ -25,8 +27,8 @@ export function isMachinePaymentSource(source?: string | null): boolean {
  * which is exactly where the guidelines allow technical vocabulary.
  *
  * - `x402` → "Agent payment". The row already carries the protocol's useful
- *   half elsewhere: the ledger row's title is the resource hostname
- *   (`counterpartyLabel`, #4266), and the detail panel calls it a "Paid
+ *   half elsewhere: the ledger row's title is the server's name for the
+ *   merchant, else the resource hostname (`counterpartyLabel`, #4266, #4883), and the detail panel calls it a "Paid
  *   request" and keeps the scheme and merchant under Technical details
  *   (#4267).
  * - `mpp_demo` → "Machine payment". "Demo" has no place in the primary title
@@ -40,7 +42,7 @@ export function isMachinePaymentSource(source?: string | null): boolean {
  * Returns null for every other source — the caller supplies the generic copy.
  */
 export function paymentSourceTitle(source?: string | null): string | null {
-  if (source === 'x402') return 'Agent payment'
-  if (source === 'mpp_demo') return 'Machine payment'
+  if (source === 'x402') return HAVEN_FALLBACK_NAME.agentPayment
+  if (source === 'mpp_demo') return HAVEN_FALLBACK_NAME.machinePayment
   return null
 }

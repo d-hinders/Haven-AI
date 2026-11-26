@@ -261,7 +261,51 @@ export function loadAllowlist(path = ALLOWLIST_PATH) {
  * sibling modules move, and it would edit `packages/mcp-server/src`, which
  * `dimensions.md:13-17` allows only in an isolated tree.
  */
-export function joinRefusals({ rows, normalize, allowlist = new Map(), HavenApiError }) {
+/**
+ * #5040: the generic branch's reasons, read from the mapper itself. Untyped
+ * answers — no `error_code` — can only reach the generic branch, so feeding
+ * the mapper one per status class (a 4xx, a 429, a 5xx) yields the reasons a
+ * recorded typed code gets when the mapper has no arm for it. No second copy
+ * of the strings, and nothing exported from `errors.ts` for an instrument's
+ * sake. The two non-JSON probes land in the 4xx reason today: `transportError`
+ * sets no failure cause, so the mapper's cause-based reasons (no answer to a
+ * read or a write, a deterministic refusal) are not in the set — and no census
+ * row can reach them. If `transportError` ever sets a cause, those reasons
+ * must join the set.
+ */
+export function genericReasonsOf(normalize, HavenApiError) {
+  const probes = [
+    { method: 'POST', route: '/payments', status: 400, body: { error: 'probe' } },
+    { method: 'POST', route: '/payments', status: 429, body: { error: 'probe' } },
+    { method: 'POST', route: '/payments', status: 500, body: { error: 'probe' } },
+    { method: 'GET', route: '/payments/:id', status: 200, nonJson: true },
+    { method: 'POST', route: '/payments', status: 200, nonJson: true },
+  ]
+  const reasons = new Set()
+  for (const probe of probes) {
+    const answer = normalize(transportError(probe, HavenApiError))
+    if (answer.code !== 'API_ERROR' || typeof answer.next_tool_omitted_reason !== 'string') {
+      throw new Error(`generic-branch probe (${probe.status}${probe.nonJson ? ', non-JSON' : ''}) did not answer API_ERROR with a reason`)
+    }
+    reasons.add(answer.next_tool_omitted_reason)
+  }
+  return reasons
+}
+
+export function joinRefusals({ rows, normalize, genericReasons, allowlist = new Map(), HavenApiError }) {
+  // #5040: a typed code is unanswered when the mapper gives it the GENERIC
+  // branch's answer: `API_ERROR` with one of that branch's reasons (or none).
+  // `API_ERROR` alone is not enough — the relayer sponsorship budget is a typed
+  // stop answered inside it. The reasons come from the mapper (above) unless a
+  // test passes them, and the seeded control below uses the same predicate, so
+  // neither half can drift alone.
+  genericReasons ??= genericReasonsOf(normalize, HavenApiError)
+  if (!(genericReasons instanceof Set) || genericReasons.size === 0) {
+    throw new Error('joinRefusals needs the generic branch\'s reasons (a non-empty Set)')
+  }
+  const isGenericAnswer = (answer) =>
+    answer.code === 'API_ERROR' &&
+    (typeof answer.next_tool_omitted_reason !== 'string' || genericReasons.has(answer.next_tool_omitted_reason))
   // A non-JSON answer is a non-answer whatever its status: the transport's
   // `res.json()` throws and the catch answers status 0, so a 200 that is not
   // JSON never reaches a mapper as a success.
@@ -280,7 +324,7 @@ export function joinRefusals({ rows, normalize, allowlist = new Map(), HavenApiE
     const code = typeof body.error_code === 'string' ? body.error_code : null
     const answer = normalize(transportError(row, HavenApiError))
     const routeKey = `${row.method} ${row.route}`
-    if (code && answer.code === 'API_ERROR') {
+    if (code && isGenericAnswer(answer)) {
       const mark = allowlist.get(code)
       typed.push({
         route: routeKey,
@@ -306,8 +350,8 @@ export function joinRefusals({ rows, normalize, allowlist = new Map(), HavenApiE
   ]
   const controlAnswers = controlRows.map((row) => normalize(transportError(row, HavenApiError)))
   const control = {
-    mappedAnswered: controlAnswers[0].code !== 'API_ERROR',
-    unmappedReported: controlAnswers[1].code === 'API_ERROR',
+    mappedAnswered: !isGenericAnswer(controlAnswers[0]),
+    unmappedReported: isGenericAnswer(controlAnswers[1]),
   }
   if (!control.mappedAnswered) throw new Error('positive control failed: delegation_expired is not answered by the mapper')
   if (!control.unmappedReported) throw new Error(`positive control failed: ${CONTROL_CODE} is not reported as unmapped`)

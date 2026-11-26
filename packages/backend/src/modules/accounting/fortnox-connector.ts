@@ -22,6 +22,8 @@ import type {
   VerifyOutcome,
 } from './connector.js'
 import type { FeedTransaction } from './feed-transaction.js'
+import { RECEIPT_STATEMENT_LABEL, VAT_NOT_STATED, asciiFold, receiptStatementFrom } from './receipt-statement.js'
+import { PRODUCT_SOURCE_LABEL, printableSources } from './product-sources.js'
 import type { SafeFetchOptions } from '../../infra/http/ssrf-guard.js'
 import { ProviderError, type ProviderCompanyInfo } from './provider.js'
 
@@ -141,15 +143,27 @@ export function supplierNameFor(tx: FeedTransaction): string {
 }
 
 /**
- * Fortnox's Comments field rejects characters outside this set (error 2000359,
- * found live in the sandbox). The #4532 description carries a route with `/`
- * separators, which the field refuses — folded to `-` rather than dropped, so
- * `invoice/pay` still reads as a route instead of two words.
+ * The exact character set Fortnox's `Comments` and supplier `Name` fields
+ * accept (error 2000359, found live in the sandbox). Declared once and
+ * exported so the tests assert THIS set rather than a wider copy of it: a test
+ * regex that admits `:`, `_` or `/` passes while the field refuses them, which
+ * is how #5036's resource host reached a live push.
+ */
+export const FORTNOX_SAFE_TEXT_CHARS = 'A-Za-z0-9 .,()-'
+/** A whole string inside the declared set. */
+export const FORTNOX_SAFE_TEXT = new RegExp(`^[${FORTNOX_SAFE_TEXT_CHARS}]*$`)
+const FORTNOX_UNSAFE_TEXT = new RegExp(`[^${FORTNOX_SAFE_TEXT_CHARS}]`, 'g')
+
+/**
+ * Fold a value to the declared set. The #4532 description carries a route with
+ * `/` separators, which the field refuses — folded to `-` rather than dropped,
+ * so `invoice/pay` still reads as a route instead of two words. Everything
+ * else outside the set becomes a space.
  */
 function fortnoxSafeText(value: string): string {
   return value
     .replace(/\//g, '-')
-    .replace(/[^A-Za-z0-9 .,()-]/g, ' ')
+    .replace(FORTNOX_UNSAFE_TEXT, ' ')
     .replace(/\s+/g, ' ')
     .trim()
 }
@@ -165,37 +179,152 @@ export function feedDescription(tx: FeedTransaction): string {
   const resourceHost = (() => {
     if (!tx.resourceUrl) return null
     try {
-      return new URL(tx.resourceUrl).host
+      // #5036: `URL.host` keeps a non-default port and an IPv6 literal's
+      // brackets, and `URL.hostname` keeps the brackets and an underscore —
+      // none of which the Comments field accepts. Fold the host through the
+      // same sanitiser the kind line uses; a host already inside the set
+      // renders byte-identically. A host that folds to nothing is dropped
+      // rather than sent as a bare `Resource .`.
+      const safe = fortnoxSafeText(new URL(tx.resourceUrl).host)
+      return safe.length > 0 ? safe : null
     } catch {
       return null
     }
   })()
   // #3767: the booked hash — the verified merchant settlement when one is
   // recorded (or pinned at the first claim), else the funding hash labelled
-  // as funding. Placed BEFORE `Resource` on purpose: the 512-character slice
-  // cuts from the end, and the worst-case comment (455 chars today) would
-  // otherwise eat a hash appended after `Haven payment`.
+  // as funding. Placed BEFORE `Resource` on purpose: the parts after it are
+  // the ones the budget below gives up, and the final fallback's
+  // 512-character slice cuts from the end.
   const bookedTx = (() => {
     if (!tx.txHash) return null
     return tx.txHashIsFunding ? `Tx ${tx.txHash} (funding leg).` : `Tx ${tx.txHash}.`
   })()
-  const parts = [
+  const head = [
     'Agent payment, already settled on-chain.',
     // #3917: scaled token amount first, the atomic figure as a labelled
     // annotation — same reasoning as the receipt underlag's Amount line.
+    // #5036: the token symbol is `token_symbol` from the payment row, so it
+    // goes through the sanitiser too — a symbol carrying `_`, `·` or `:` is
+    // outside the declared set just as the resource host was.
     tx.amount != null
-      ? `Amount ${tx.amount} ${tx.token} (${tx.amountAtomic} atomic).`
-      : `Amount ${tx.amountAtomic} ${tx.token} atomic.`,
+      ? `Amount ${tx.amount} ${fortnoxSafeText(tx.token)} (${tx.amountAtomic} atomic).`
+      : `Amount ${tx.amountAtomic} ${fortnoxSafeText(tx.token)} atomic.`,
     // #4532: what KIND of transaction this is — the same line the receipt
     // underlag carries, so the comment and the attached document agree. Placed
     // before the booked hash for the same reason the hash is placed before
     // `Resource`: the 512-character slice cuts from the end.
     tx.description ? `${fortnoxSafeText(tx.description)}.` : null,
-    bookedTx,
-    resourceHost ? `Resource ${resourceHost}.` : null,
-    `Haven payment ${tx.paymentId}.`,
-  ].filter(Boolean)
-  return parts.join(' ').slice(0, 512)
+  ]
+  const resource = resourceHost ? `Resource ${resourceHost}.` : null
+  const reference = `Haven payment ${tx.paymentId}.`
+  // #4876: the receipt part (label, stated VAT, product names) goes after the
+  // kind line and BEFORE the booked hash, and it is the part cut to fit: its
+  // budget is what is left of 512 once everything else is placed, so the
+  // final slice never reaches the booked hash or `Haven payment <id>`. Only
+  // the product names are ever cut; when even the label and the VAT do not
+  // fit, the `Resource` host — which the attached document carries anyway —
+  // gives up its room first.
+  const receipt = fortnoxReceiptText(tx)
+  // #4877: the product sources, each its own labelled part after the receipt
+  // part, capped (the product line 120 characters, every other 80). When the
+  // comment would pass 512 they are dropped in reverse ladder order — the
+  // delivery reference, then the quote description, then the catalog name —
+  // each count tried with the `Resource` host before without it.
+  const sources = fortnoxSourceParts(tx)
+  const build = (withResource: boolean, sourceCount: number): string | null => {
+    const tail = [bookedTx, withResource ? resource : null, reference]
+    const kept = sources.slice(0, sourceCount)
+    const fixed = [...head, ...kept, ...tail].filter(Boolean).join(' ')
+    const fitted = receipt == null ? null : fitReceiptText(receipt, 512 - fixed.length - 1)
+    if (receipt != null && fitted == null) return null
+    // A source never costs the receipt's own product names: until every
+    // source is dropped, the receipt part must fit whole.
+    if (sourceCount > 0 && receipt != null && fitted !== receipt) return null
+    // A protocol payment always has a receipt part (at least "VAT not
+    // stated"), and its budget above already counts the kept sources.
+    return [...head, fitted, ...kept, ...tail].filter(Boolean).join(' ').slice(0, 512)
+  }
+  for (let count = sources.length; count >= 0; count -= 1) {
+    const comment = build(true, count) ?? build(false, count)
+    if (comment) return comment
+  }
+  return [...head, bookedTx, reference].filter(Boolean).join(' ').slice(0, 512)
+}
+
+/** #4877: a source's comment text is capped here, at a word, marked "..". */
+const FORTNOX_PRODUCT_LINE_MAX = 120
+const FORTNOX_EXTRA_SOURCE_MAX = 80
+
+function capText(text: string, max: number): string {
+  if (text.length <= max) return text
+  const cut = text.slice(0, max - 2)
+  const atWord = cut.lastIndexOf(' ')
+  return `${(atWord > max / 2 ? cut.slice(0, atWord) : cut).replace(/[ ,]+$/, '')}..`
+}
+
+/**
+ * #4877: the product sources as comment parts, in ladder order, each under
+ * its label folded to the field's characters. With no receipt lines the first
+ * present source is the product line (`Product`, 120 characters); every other
+ * is its own part (80). A direct payment has none.
+ */
+function fortnoxSourceParts(tx: FeedTransaction): string[] {
+  if (!tx.resourceUrl || !tx.productSources) return []
+  const receiptStatesLines = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null) !== null
+  return printableSources(tx.productSources).map((source, i) => {
+    const text = fortnoxSafeText(asciiFold(source.text))
+    const isProductLine = !receiptStatesLines && i === 0
+    const label = fortnoxSafeText(PRODUCT_SOURCE_LABEL[source.key].replace("merchant's", 'merchants'))
+    const body = capText(text, isProductLine ? FORTNOX_PRODUCT_LINE_MAX : FORTNOX_EXTRA_SOURCE_MAX)
+    return `${isProductLine ? 'Product' : 'Also stated'} (${label}) ${body}.`
+  })
+}
+
+/**
+ * #4876: fit the receipt part into `budget` characters. The label and the VAT
+ * (everything before " Product") are kept whole or not at all; only the
+ * product names are cut, at a word, marked with "..". Null when even the
+ * label and the VAT do not fit.
+ */
+function fitReceiptText(text: string, budget: number): string | null {
+  if (text.length <= budget) return text
+  const productAt = text.indexOf(' Product ')
+  const keep = productAt === -1 ? text.length : productAt
+  if (budget < keep) return null
+  // At least one character of a product name must survive the cut, else the
+  // product part is left out rather than sent as a bare "Product..".
+  const firstName = keep + ' Product '.length
+  const cut = text.slice(0, budget - 2)
+  const atWord = cut.lastIndexOf(' ')
+  const trimmed = (atWord > firstName ? cut.slice(0, atWord) : cut).replace(/[ ,]+$/, '')
+  return trimmed.length > firstName ? `${trimmed}..` : text.slice(0, keep)
+}
+
+/**
+ * #4876: the merchant-receipt part of the comment — the product names and the
+ * stated VAT, under the statement's label (owner decision 3 of 2026-11-17 on
+ * #4874), folded to the characters the field accepts: the apostrophe and `%`
+ * cannot be sent, so "merchant's" reads "merchants" and the rate reads "pct".
+ * Only the MERCHANT's VAT treatment is named. A protocol payment whose receipt
+ * states no lines says "VAT not stated by the merchant"; a direct payment
+ * (no resource URL) says nothing — it is a transfer, not a purchase.
+ */
+function fortnoxReceiptText(tx: FeedTransaction): string | null {
+  if (!tx.resourceUrl) return null
+  const statement = receiptStatementFrom(tx.merchantReceipt?.inlineJson ?? null)
+  if (statement === null) return `${VAT_NOT_STATED}.`
+  const label = fortnoxSafeText(RECEIPT_STATEMENT_LABEL.replace("merchant's", 'merchants'))
+  const products = statement.lines
+    .map((l) => fortnoxSafeText(asciiFold(l.description)))
+    .filter((name) => name.length > 0)
+    .join(', ')
+  const cur = fortnoxSafeText(statement.currency)
+  const vat = `VAT ${statement.totals.vatPercent} pct ${statement.totals.vatAmount} ${cur}`
+  const treatment = statement.merchantVatTreatment
+    ? `, merchant VAT treatment ${fortnoxSafeText(statement.merchantVatTreatment.replace(/_/g, ' '))}`
+    : ''
+  return `${label}. ${vat}${treatment}.${products ? ` Product ${products}.` : ''}`
 }
 
 async function fortnoxGet<T>(accessToken: string, path: string, fetchImpl: typeof fetch): Promise<T> {

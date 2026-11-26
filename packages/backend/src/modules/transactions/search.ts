@@ -2,8 +2,11 @@
  * Server-side search over the transaction feed and export (#4095).
  *
  * The rule: search matches WHAT THE ROW SHOWS — the counterparty's resolved
- * name (address-book contact, receipt merchant, or another of the user's own
- * accounts), the agent name, and the counterparty address itself. Name
+ * names (another of the user's own accounts, an address-book contact, the
+ * catalog merchant, the receipt seller — #4882's naming sources — and, for a
+ * paid API call, the resource host, naming step 5: #5037), the agent
+ * name, the product label of a recorded sale (#5000: the row reads
+ * "Sale · <product>"), and the counterparty address itself. Name
  * resolution therefore happens BEFORE filtering, on the server, for both
  * endpoints: the browser used to resolve names for display only, so a search
  * for a contact's name could never find the row in memory.
@@ -13,56 +16,50 @@
  * Addresses match as case-insensitive SUBSTRINGS, so a pasted partial
  * address finds its row.
  */
+import { parseX402Hostname } from '@haven_ai/core'
 import type { EnrichedTransaction } from './types.js'
+import {
+  EMPTY_RECIPIENT_NAME_INDEX,
+  allRecipientNames,
+  recipientAddressOf,
+  type RecipientNameIndex,
+} from './counterparty-name.js'
 
+/**
+ * #4882: the search index IS the recipient-naming index — one read of each
+ * name source (`loadRecipientNameIndex`), so a row is found by exactly the
+ * names the naming order can show for it.
+ */
 export interface TransactionSearchIndex {
-  /** Address-book contacts, keyed by lowercased address (chain-agnostic). */
-  contactNames: Map<string, string>
-  /** Receipt merchant names, keyed by lowercased address (analytics' label order: contacts win). */
-  receiptNames: Map<string, string>
-  /** The user's own account names, keyed `addrLower:chainId` — internal transfers. */
-  accountNames: Map<string, string>
+  names: RecipientNameIndex
 }
 
-export const EMPTY_SEARCH_INDEX: TransactionSearchIndex = {
-  contactNames: new Map(),
-  receiptNames: new Map(),
-  accountNames: new Map(),
-}
+export const EMPTY_SEARCH_INDEX: TransactionSearchIndex = { names: EMPTY_RECIPIENT_NAME_INDEX }
 
 export function foldForSearch(value: string): string {
   return value.normalize('NFD').replace(/\p{M}+/gu, '').toLowerCase()
 }
 
-/**
- * The address a row NAMES as the other side: where the money went on an
- * outgoing row (the merchant address for an x402 payment), where it came
- * from on an incoming one.
- */
+/** The address a row NAMES as the other side — the naming module's one lookup key. */
 export function counterpartyAddressOf(tx: EnrichedTransaction): string {
-  if (tx.direction === 'in') return tx.from
-  return tx.x402MerchantAddress ?? tx.to
+  return recipientAddressOf(tx)
 }
 
 /**
- * Every name the row can show for its counterparty, in the dashboard's label
- * order: contact, then receipt merchant, then the user's own account (an
- * internal transfer between two of the user's accounts must be findable by
- * the far account's name).
+ * Every name the row can show for its counterparty, in the naming order:
+ * own account, contact, catalog merchant (#4882), receipt seller — every
+ * source with a name, not only the winner, so an internal transfer stays
+ * findable by the far account's name and a merchant by its catalog name.
  */
 export function resolvedCounterpartyNames(
   tx: EnrichedTransaction,
   index: TransactionSearchIndex,
 ): string[] {
-  const key = counterpartyAddressOf(tx).toLowerCase()
-  const names: string[] = []
-  const contact = index.contactNames.get(key)
-  if (contact !== undefined) names.push(contact)
-  const receipt = index.receiptNames.get(key)
-  if (receipt !== undefined) names.push(receipt)
-  const account = index.accountNames.get(`${key}:${tx.chainId}`)
-  if (account !== undefined) names.push(account)
-  return names
+  return allRecipientNames(index.names, {
+    address: counterpartyAddressOf(tx),
+    chainId: tx.chainId,
+    x402ResourceUrl: null,
+  })
 }
 
 export function transactionMatchesSearch(
@@ -72,7 +69,15 @@ export function transactionMatchesSearch(
 ): boolean {
   if (foldedTerm === '') return true
   const haystacks = resolvedCounterpartyNames(tx, index).map(foldForSearch)
+  // #5037: naming step 5 — a paid API call with no other name shows its
+  // resource host, so search must find it by that host. Every source, not only
+  // the winner (as `allRecipientNames` says), so the host is always searchable
+  // when the row has a resource URL. `allRecipientNames` stays steps 1–4: it is
+  // keyed on the counterparty address, and the host is not.
+  const host = parseX402Hostname(tx.x402ResourceUrl)
+  if (host) haystacks.push(foldForSearch(host))
   if (tx.agentName) haystacks.push(foldForSearch(tx.agentName))
+  if (tx.sale?.productName) haystacks.push(foldForSearch(tx.sale.productName))
   haystacks.push(counterpartyAddressOf(tx).toLowerCase())
   return haystacks.some((haystack) => haystack.includes(foldedTerm))
 }

@@ -1,6 +1,12 @@
 import { TransactionMovement } from '@/components/haven'
 import type { AmountCurrency } from '@/components/haven/Amount'
-import { shouldMarkApprox, type ApproxMarkKind } from '@haven_ai/core'
+import {
+  HAVEN_FALLBACK_NAME,
+  HAVEN_FALLBACK_NAME_PREFIX,
+  isAddress,
+  shouldMarkApprox,
+  type ApproxMarkKind,
+} from '@haven_ai/core'
 import type { StatusTone } from '@/components/ui/StatusBadge'
 import { machinePaymentLifecyclePresentation } from '@/lib/machine-payment-lifecycle'
 import { isMachinePaymentSource, parseX402Hostname, paymentSourceTitle } from '@/lib/transaction-labels'
@@ -20,8 +26,14 @@ export function isDelegateSweep(tx: Pick<AggregatedTransaction, 'activityType'>)
  */
 export type CounterpartyFields = Pick<
   AggregatedTransaction,
-  'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId'
->
+  'activityType' | 'agentName' | 'source' | 'x402ResourceUrl' | 'direction' | 'to' | 'from' | 'chainId' | 'recipientName'
+> & {
+  /**
+   * #5000: the sale marker — on a `/transactions` row, and on a dashboard
+   * group of sales (which carries the product name alone).
+   */
+  sale?: Pick<NonNullable<AggregatedTransaction['sale']>, 'productName'>
+}
 
 /**
  * Who initiated the row (#2097). "You" is reserved for human-initiated
@@ -114,6 +126,17 @@ function ownAccountSenderName(
 }
 
 /**
+ * #4883: the server-resolved counterparty name, when it named one. A name
+ * that is itself an address is still an address (the `agentMerchantLabel`
+ * rule): a receipt seller name is merchant-written text, so an address-shaped
+ * one is not a name and the row falls back as if the server named nobody.
+ */
+function serverName(tx: CounterpartyFields, options: { resolvedName?: string | null }): string | null {
+  const name = (options.resolvedName || tx.recipientName || '').trim()
+  return name && !isAddress(name) ? name : null
+}
+
+/**
  * The counterparty half of a movement line. `transactionMovement` renders it
  * inside "From … → To …"; the dashboard (#3810) reads it DIRECTLY as the
  * merchant-first row title.
@@ -124,13 +147,28 @@ function ownAccountSenderName(
  * falls back to its source title ("Agent payment"), an inbound row reads
  * "Deposit" — or "From <account>" when its sender is another of the user's
  * own accounts (the backend's `resolvedName`, else the chain-keyed
- * `accountNamesByAddress` entry, #4099) — and an address
+ * `accountNamesByAddress` entry, #4099), or "Sale · <product>" / "Sale" when
+ * the backend marked it a sale into the Sales account (#5000) — and an address
  * nothing resolves (no own-account name, no
  * contact, no pre-resolved counterparty name) reads "New recipient" rather
  * than `0xA873…DD35`. `options.resolvedName` carries a name resolved
  * server-side for the counterparty (the activity groups' `merchantName`,
  * #3824) — the groups expose no chain-scoped address map, so the client
  * cannot re-run the `accountNamesByAddress` lookup itself.
+ *
+ * #4883: the server names the counterparty in Haven's one naming order
+ * (#4882: own account, contact, catalog merchant, receipt seller, resource
+ * host) — `tx.recipientName` on `/transactions` and agent-ledger payment
+ * rows, `options.resolvedName` on the activity groups (no host step there:
+ * the host rides beside it) and refusal rows. On an outgoing row that name
+ * wins over every browser-side fallback, the resource host included, so the
+ * screens and the API agree on who was paid. The browser's own lookups
+ * (host, source title, own account, contact) only stand in when the server
+ * named nobody. An incoming row keeps its #4099 rule ("From <account>" or
+ * "Deposit"): a server name there is the sender's, and the title names a
+ * sender only when it is another of the user's own accounts. A sale (#5000)
+ * reads "Sale · <product>", or "Sale" with no recorded product; the
+ * own-account rule runs first, since own money is never a sale.
  *
  * The default mode is byte-identical to the pre-#3810 behaviour. The list
  * rows pass `{ noAddress: true }` (#3811), and so does
@@ -147,13 +185,14 @@ export function counterpartyLabel(
     // Sweeps are agent-attributed inbound rows; the sweep check precedes the
     // direction check for the same reason `transactionInitiator`'s does.
     if (isDelegateSweep(tx)) {
-      return `Returned from ${tx.agentName ?? 'agent'}`
+      return `${HAVEN_FALLBACK_NAME_PREFIX.returnedFrom}${tx.agentName ?? 'agent'}`
     }
     if (isMachinePaymentSource(tx.source)) {
       return (
+        serverName(tx, options) ??
         parseX402Hostname(tx.x402ResourceUrl) ??
         paymentSourceTitle(tx.source) ??
-        'Agent payment'
+        HAVEN_FALLBACK_NAME.agentPayment
       )
     }
     // #4099 (owner decision, 2026-10-20): a server-resolved sender name — only
@@ -161,11 +200,18 @@ export function counterpartyLabel(
     // <account>", so the title says the money LEFT that account (a bare name
     // reads as the account that received it). Screens without a server name
     // (the account page, /transactions) look the sender up in the own-account
-    // map — chain-keyed only, never a contact. Every other deposit stays
+    // map — chain-keyed only, never a contact. #5000: a sale into the Sales
+    // account reads "Sale · <product>" (or "Sale"). Every other deposit stays
     // "Deposit".
     if (tx.direction === 'in') {
       const sender = ownAccountSenderName(tx, accountNamesByAddress, options.resolvedName)
-      return sender ? `From ${sender}` : 'Deposit'
+      if (sender) return `${HAVEN_FALLBACK_NAME_PREFIX.from}${sender}`
+      if (tx.sale) {
+        return tx.sale.productName
+          ? `${HAVEN_FALLBACK_NAME_PREFIX.sale}${tx.sale.productName}`
+          : HAVEN_FALLBACK_NAME.sale
+      }
+      return HAVEN_FALLBACK_NAME.deposit
     }
 
     const address = tx.to
@@ -174,10 +220,10 @@ export function counterpartyLabel(
       accountNamesByAddress?.get(`${addressKey}:${tx.chainId}`) ??
       accountNamesByAddress?.get(addressKey)
     return (
-      options.resolvedName ??
+      serverName(tx, options) ??
       accountName ??
       resolveAddress?.(address) ??
-      'New recipient'
+      HAVEN_FALLBACK_NAME.newRecipient
     )
   }
 
@@ -230,6 +276,8 @@ export function activityCounterparty(item: PaymentActivityItem): CounterpartyFie
     to: item.to,
     from: item.account_address ?? '',
     chainId: item.chain_id ?? 0,
+    // #4883: the server's name for the payee (#4882's one order).
+    recipientName: item.counterparty_name ?? null,
   }
 }
 

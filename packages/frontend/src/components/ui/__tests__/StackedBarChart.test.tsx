@@ -1030,4 +1030,22 @@ describe('StackedBarChart — the legend is one wrapping row at every width (#44
     expect(legend.className.split(/\s+/)).toContain('flex-wrap')
     expect(legend.className).not.toContain('flex-col')
   })
+
+  it('hideRefusals drops the Refusals column from the screen-reader table and nothing else (#4900)', () => {
+    const props = { days: THREE_DAYS, currency: 'USD', ariaLabel: 'Revenue', formatValue: fmt }
+    const { unmount } = render(<StackedBarChart {...props} />)
+    const withColumn = screen.getByTestId('chart-data-table')
+    expect(within(withColumn).getByRole('columnheader', { name: 'Refusals' })).toBeTruthy()
+    unmount()
+
+    render(<StackedBarChart {...props} hideRefusals />)
+    const table = screen.getByTestId('chart-data-table')
+    expect(within(table).queryByRole('columnheader', { name: 'Refusals' })).toBeNull()
+    expect(within(table).getByRole('columnheader', { name: 'Total' })).toBeTruthy()
+    // Every row has one cell fewer than the default, in step with the header.
+    const headerCells = table.querySelectorAll('thead th').length
+    for (const row of Array.from(table.querySelectorAll('tbody tr'))) {
+      expect(row.querySelectorAll('th, td').length).toBe(headerCells)
+    }
+  })
 })

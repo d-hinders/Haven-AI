@@ -35,6 +35,7 @@ export type {
 } from './passport.js'
 
 export { toolDescriptions, composeDescription } from './tool-descriptions.js'
+export { replaceSettlementEvidenceMessage } from './payment-status-message.js'
 export { catalogFundingLegExpected, type CatalogFundingLegHint } from './catalog-funding-leg.js'
 export type { ToolDescription, SharedToolKey, McpSurface } from './tool-descriptions.js'
 
@@ -187,6 +188,7 @@ export type {
 
 export type { ClaudeTool, OpenAITool } from './tools.js'
 export type { HavenApiFailureCause } from './types.js'
+export type { CheckoutDetailsRefusalStage } from './types.js'
 
 export {
   HavenError,
@@ -195,6 +197,7 @@ export {
   MerchantTimeoutError,
   FundingConfirmationUnknownError,
   FundingRevertedError,
+  CheckoutDetailsUnavailableError,
   X402Erc7710AlreadySettledError,
   X402UnexpectedStatusError,
   X402AlreadySettledError,
@@ -208,6 +211,39 @@ export {
   SIGNER_UPDATE_FALLBACK,
   signerUpdateFallback,
 } from './types.js'
+
+// #4872: checkout details on the paid x402 request
+// (`docs/architecture/13-checkout-details.md`). The hosted MCP server builds
+// the same answer from the same functions.
+export {
+  CHECKOUT_DETAILS_EXTENSION,
+  CHECKOUT_DETAILS_BUDGET_BYTES,
+  CHECKOUT_DETAIL_FIELDS,
+  HEADER_BLOCK_CEILING_BYTES,
+  actualPaidHeaderBlockBytes,
+  X_CHECKOUT_DETAILS_HEADER,
+  checkoutDetailsRequestOf,
+  decideCheckoutDetails,
+  estimatePaidHeaderBlockBytes,
+  parseCheckoutDetailsRequest,
+  withCheckoutDetailsHeader,
+  withinHeaderBlock,
+} from './checkout-details.js'
+export type {
+  CheckoutAddress,
+  CheckoutDetailField,
+  CheckoutDetailsAvailability,
+  CheckoutDetailsDecision,
+  CheckoutDetailsRefusalReason,
+  CheckoutDetailsRequest,
+  CheckoutDetailsValues,
+} from './checkout-details.js'
+export {
+  checkoutDetailsChallengeUnreadableError,
+  checkoutDetailsRefusalError,
+  readCheckoutDetailsAvailability,
+  resolveCheckoutDetails,
+} from './client-checkout-details.js'
 
 export {
   parsePaymentRequired,

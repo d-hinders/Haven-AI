@@ -800,7 +800,16 @@ export const DEFAULT_KILL_GRACE_MS = 5_000
 
 // The watchdog polls at this interval; a stall is measured within ~POLL_MS of
 // the threshold, and `lastOutputAt` resets on every chunk in either pipe.
+// Both are the DEFAULTS of `runGate`'s injectable `schedulePoll` and `now`
+// (#5055): the self-test drives the clock and the polls itself, so its verdict
+// never depends on how fast a loaded machine schedules the gate or the harness.
 const POLL_MS = 100
+
+/** The default poll scheduler: a real interval; returns its stop function. */
+const realPoll = (fn) => {
+  const handle = setInterval(fn, POLL_MS)
+  return () => clearInterval(handle)
+}
 
 function envMs(name, fallback) {
   const raw = process.env[name]
@@ -911,8 +920,18 @@ export const SIGNAL_EXIT_CODES = Object.freeze({ SIGINT: 130, SIGTERM: 143 })
  * group. POSIX process groups only; accepted residue, like the rest of the
  * battery's POSIX-only surface. A process that LEAVES the group (`setsid`, a
  * detached grandchild) is its own group and is not reached.
+ *
+ * **The clock is injectable (#5055)**, like `runBattery`'s `now`: `now`
+ * (default `Date.now`) is read at spawn, on every output chunk and on every
+ * watchdog poll, and `schedulePoll(fn)` (default: a real `setInterval` at
+ * POLL_MS) starts the polls and returns the function that stops them. The
+ * self-test replaces both, so the silence between outputs is set by the test
+ * rather than by the scheduler. The kill grace stays a real timer.
  */
-export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenceMs, graceMs } = {}) {
+export async function runGate(
+  gate,
+  { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenceMs, graceMs, now = Date.now, schedulePoll = realPoll } = {},
+) {
   const silence = silenceMs ?? envMs('PREFLIGHT_SILENCE_MS', DEFAULT_SILENCE_MS)
   const grace = graceMs ?? envMs('PREFLIGHT_KILL_GRACE_MS', DEFAULT_KILL_GRACE_MS)
   return await new Promise((resolve) => {
@@ -930,7 +949,7 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
     const chunks = []
     let bytes = 0
     let overBuffer = false
-    let lastOutputAt = Date.now()
+    let lastOutputAt = now()
     let exited = false
     // Exactly one outcome — normal exit, ENOBUFS, stall — settles the gate.
     // `killPending` latches a watchdog/buffer kill IN FLIGHT, so the close
@@ -938,12 +957,12 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
     // `signal: 'SIGTERM'` and erase the flag; `settled` makes settle final.
     let killPending = false
     let settled = false
-    let watchdog = null
+    let stopPolling = null
     let killTimer = null
     const settle = (result) => {
       if (settled) return
       settled = true
-      if (watchdog) clearInterval(watchdog)
+      if (stopPolling) stopPolling()
       if (killTimer) clearTimeout(killTimer)
       if (child.pid) runningGroups.delete(child.pid)
       resolve(result)
@@ -978,7 +997,7 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
     // runners write much of their output to stderr) must be just as bound
     // (#4276) — the counter runs on both streams, first past the cap wins.
     const onOutput = (chunk) => {
-      lastOutputAt = Date.now()
+      lastOutputAt = now()
       // The push sits BEHIND the latch: once the cap is hit, retained output
       // stops growing too — the cap bounds the memory the harness holds, not
       // only when the kill fires; the ENOBUFS tail then shows the captured
@@ -1004,10 +1023,11 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
     // The watchdog. POLLED, not a single timer: every chunk resets
     // `lastOutputAt`, so a gate that writes at least once per threshold is
     // never stalled, however long it runs. `exited` keeps a gate that finished
-    // between polls from being killed on its way out.
-    watchdog = setInterval(() => {
+    // between polls from being killed on its way out. The polls and the clock
+    // are `schedulePoll` and `now` (real by default; injected by the self-test).
+    stopPolling = schedulePoll(() => {
       if (settled || killPending || overBuffer || exited) return
-      const silentFor = Date.now() - lastOutputAt
+      const silentFor = now() - lastOutputAt
       if (silentFor <= silence) return
       killPending = true
       killGroup('SIGTERM')
@@ -1015,7 +1035,7 @@ export async function runGate(gate, { maxBuffer = GATE_OUTPUT_MAX_BUFFER, silenc
         killGroup('SIGKILL')
         settle({ ...result(), ok: false, status: null, signal: 'SIGTERM', stalled: true, silentFor })
       }, grace)
-    }, POLL_MS)
+    })
 
     child.on('error', (err) => {
       // The spawn itself failed (ENOENT and friends): spawnSync reported the

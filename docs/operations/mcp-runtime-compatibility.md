@@ -87,8 +87,41 @@ covers:
   - scripts/ci/check-stale-client-compat.mjs
   - packages/mcp-server/src/next-arguments-corpus.json
   - packages/mcp-server/src/tool-contract-snapshot.test.ts
-last-verified: "2026-11-11"
+last-verified: "2026-11-26"
 ---
+
+> **Contract change (#4808, 2026-11-11): the local MCP's settlement-evidence
+> message.** `packages/mcp/src/tools.ts` is on this contract's cover list.
+>
+> The backend's `message` names `haven_report_settlement_evidence` in two
+> states — phase `delivered_unverified` / next action `stop_and_tell_user`, and
+> phase `payment_submitted` / next action `awaiting_settlement_evidence`. That
+> tool is hosted-only, and the local package has no settlement-evidence path at
+> all, so the instruction was unreachable for a local-MCP agent. The local
+> `haven_get_payment_status` handler now replaces `message` whole in those two
+> states, keyed on the structured fields and never on the backend's sentence,
+> and names no reporting tool: it says the merchant delivered, that Haven's
+> settlement sweep may still attribute the payment, and to tell the user if it
+> stays unverified. Every other state passes the backend message through
+> unchanged. No `phase`, `next_action`, status code or stored value changes,
+> and `agent-payment-status.ts` is not edited.
+>
+> **What an installed client sees.** The `message` field of the local
+> `haven_get_payment_status` response changes in exactly those two states;
+> nothing else in the response moves. **What does not:** no tool name,
+> argument, input schema, strict-input list, expected-context version, consent
+> hash, `tools-list.snapshot.json` entry, `local-tool-contract.golden.json`
+> entry or `next-arguments-corpus.json` row changes — both goldens are
+> byte-identical before and after, and the hosted contract fingerprint does not
+> move.
+>
+> **How it is held.** `packages/mcp/src/payment-status-message.test.ts` pins
+> the local replacement with `toBe` in both states, twice per state (the
+> backend's current sentence and an arbitrary string), and proves pass-through
+> elsewhere; an assertion in the MCP server package proves the hosted agent
+> still reads `haven_report_settlement_evidence`, so a replacement moved into
+> the shared SDK read goes red. `last-verified` is not re-stamped: this block
+> is the scope.
 
 > **Contract change (#4790, 2026-11-11): the local MCP's typed refusal answers.**
 > `packages/mcp/src/tools.ts` is on this contract's cover list. The local
@@ -120,6 +153,166 @@ last-verified: "2026-11-11"
 > `next_tool_omitted_reason` that its (empty) allowlist does not name, and on a
 > stale allowlist entry. It also walks `PAYMENT_SCOPE_REFUSAL_CODES` from
 > `@haven_ai/core`, so a new core code cannot go unanswered locally.
+
+> **Contract change (#4872, part 2b, 2026-11-19): checkout details on the
+> hosted plain-HTTP path.** `packages/mcp-server/src/tools/**` is on this
+> contract's cover list. `haven_pay_x402_quote` refuses a required checkout
+> detail the agent cannot share with the part 2a refusal shape
+> (`CHECKOUT_DETAILS_UNAVAILABLE`, `statusCode: 409`, `missing_fields`,
+> `reason`, `phase`, a `stop_and_tell_user` step) before any intent, in both
+> modes. `haven_submit` with a `payment_id` decides before the funding relay
+> (EIP-3009) or the settlement submit (erc7710; the real header block right
+> after it) and returns the answer for the agent's own retry: erc7710's
+> `retry_headers` gains `X-Checkout-Details`, and an EIP-3009 result gains the
+> optional `additional_retry_headers` (`{ "X-Checkout-Details": … }`), present
+> only on a confirmed relay of a payment known to be plain HTTP (absent on the
+> MCP-tool flow, when the flow cannot be read, and whenever nothing was asked); its `reason` then says
+> to set them. A challenge that asks for nothing gets today's result. The
+> `unsent` and `state_unknown` next steps now name both legs (settle or
+> submit) and `haven_pay_x402_quote`. New backend read: `GET
+> /x402/:id/payment-required`.
+>
+> **What an installed client sees.** `haven_pay_x402_quote`, `haven_submit` and
+> `haven_resume_x402_payment` gain one sentence each (`tools-list.snapshot.json`
+> regenerated; the description budget is round 36 in
+> `description-size.test.ts`). No tool name, argument, input schema,
+> strict-input list, expected-context version, consent hash or
+> `next-arguments-corpus.json` row changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-plain-http.test.ts`.
+> `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#5030, 2026-11-22): the submit fails closed on a failed
+> stored-challenge read, and the pay tool's estimate counts the caller's
+> headers.** `packages/mcp-server/src/tools/**` is on this contract's cover
+> list. `haven_submit`'s stored-challenge read (`GET
+> /x402/:id/payment-required`) is rate-limited, so a 429 is realistic; when it
+> fails, the submit now refuses as `CHECKOUT_DETAILS_UNAVAILABLE` with
+> `reason: "challenge_unreadable"` — before the funding relay (EIP-3009) and
+> before the settlement child (erc7710) — ONLY for a payment whose challenge
+> asked for a required checkout detail (owner decision 2026-11-22, option b).
+> Every other payment proceeds as today: a challenge that asked for nothing, a
+> direct payment (a 409), a 200 with no stored challenge, and a payment whose
+> record cannot be read either. The fact is recorded at authorize on the intent
+> (`machine_metadata.checkout_details_required_fields`, field names only) and
+> served on `GET /machine-payments/:id/status` as the optional
+> `checkout_details_required_fields` array — present only when the challenge
+> asked for at least one. `haven_pay_x402_quote`'s 16 KB estimate now counts
+> the caller's own `headers` in both modes, so a 14.5 KB `Cookie` plus a
+> required answer refuses `over_budget` before any intent instead of answering
+> 431 at the merchant. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash or `next-arguments-corpus.json` row
+> changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-plain-http.test.ts`, plus the
+> backend's own status-read and authorize suites.
+> `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#5031, 2026-11-22): the local MCP answers a
+> checkout-details refusal per stage.** `packages/mcp/**` is on this
+> contract's cover list. The local `normalizeError` answered every
+> `CHECKOUT_DETAILS_UNAVAILABLE` with one fixed "…then retry" step and no
+> `phase` or payment id; on `haven_resume_x402_payment` the payment is already
+> funded, so that step could lead an agent to buy again. It now adds `phase`
+> (`not_started` before payment, `funded_but_unsettled` on a funded resume —
+> the hosted MCP's words for the same stages) and, on a funded refusal,
+> `paymentId` and a step naming `haven_resume_x402_payment` with the same
+> `resume_state` — not `payment_id` alone, whose stored state carries no
+> checkout-details request — else `haven_get_payment_status` then
+> `haven_sweep_delegate`. The
+> before-payment step is unchanged and still equals the hosted one. The SDK's
+> `resumeX402Payment` now puts its `paymentId` on the refusal it throws.
+>
+> **What an installed client sees.** Two optional fields and a different
+> `next_tool_omitted_reason` on a funded checkout-details refusal; no tool
+> name, argument, input schema, description, strict-input list,
+> expected-context version or consent hash changes. The payment id reaches an
+> installed local MCP only after an SDK release and the pin bump
+> (`packages/mcp` pins `@haven_ai/sdk` exactly); without it the field is
+> absent. **How it is held.** `packages/mcp/src/checkout-details-refusal.test.ts`
+> (the real SDK resume over a stubbed wire), and a per-stage block in the
+> parity test above: same `code` and `phase` on both surfaces, the same
+> before-payment reason, and a local funded reason that is not the fixed one —
+> the five exact-equality fields could not catch that fallback.
+> `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#4872, part 2a, 2026-11-19): checkout details on the
+> hosted MCP-merchant tools.** `packages/mcp-server/src/tools/**` is on this
+> contract's cover list. `haven_pay_mcp_tool` and
+> `haven_prepare_catalog_purchase` refuse a required checkout detail the agent
+> cannot share with `code: "CHECKOUT_DETAILS_UNAVAILABLE"`, `statusCode: 409`,
+> `missing_fields`, `reason`, a `phase` and a `stop_and_tell_user` step with a
+> stage-specific `next_tool_omitted_reason`, before any intent is created.
+> `haven_settle_mcp_tool` decides before the funding relay (EIP-3009) or the
+> settlement submit (erc7710; the header block after it), and
+> `haven_complete_mcp_tool` after the funding wait; both send the requested
+> fields only on the paid `tools/call` as `X-Checkout-Details`. The failure envelope
+> gains the optional `missing_fields` and `reason`. `GET
+> /x402/:id/merchant-call-context` gains the optional `checkout_details_request`
+> (the merchant's request, verbatim from the stored challenge).
+>
+> **What an installed client sees.** The four descriptions gain one sentence
+> each (`tools-list.snapshot.json` regenerated; the description budget is
+> round 35 in `description-size.test.ts`). No tool name, argument, input
+> schema, strict-input list, expected-context version, consent hash or
+> `next-arguments-corpus.json` row changes. **How it is held.**
+> `packages/mcp-server/src/tools/checkout-details-hosted.test.ts`.
+> `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#4872, part 1, 2026-11-19): checkout details on the
+> local paid tools.** `packages/mcp/src/tools.ts` is on this contract's cover
+> list. `haven_pay_x402`, `haven_pay_x402_quote`, `haven_pay_mcp_tool` and
+> `haven_resume_x402_payment` reach the SDK seam that answers a merchant's
+> checkout-details request (`docs/architecture/13-checkout-details.md`). A
+> required field the agent cannot share is refused by the SDK before the
+> payment is authorised, and `normalizeError` answers it with `code:
+> "CHECKOUT_DETAILS_UNAVAILABLE"`, `statusCode: 409`, `missing_fields`,
+> `reason`, `next_action: "stop_and_tell_user"` and a
+> `next_tool_omitted_reason`, never the generic `API_ERROR`. The failure
+> envelope gains the two optional fields `missing_fields` and `reason`.
+>
+> **What an installed client sees.** The four descriptions gain one sentence
+> each, so their `local-tool-contract.golden.json` entries change (regenerated
+> with `npm run snapshot:regen -w packages/mcp`). A paid request whose merchant
+> asked for checkout details carries `X-Checkout-Details`; one that asked for
+> nothing is byte-identical to before. No tool name, argument, input schema,
+> strict-input list, expected-context version, consent hash,
+> `tools-list.snapshot.json` entry or `next-arguments-corpus.json` row
+> changes, and no hosted runtime file changes: the hosted tools follow in
+> part 2. **How it is held.** `packages/mcp/src/checkout-details-refusal.test.ts`
+> drives the four tools with the real refusal and pins the typed answer.
+> `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#4826, 2026-11-12): one more typed refusal on the local
+> MCP.** `packages/mcp/src/tools.ts` is on this contract's cover list. The
+> backend's x402 authorize replay for an idempotency key whose payment is
+> already `submitted` now answers `409` with `error_code:
+> "payment_already_submitted"`, `payment_id` and `status: "submitted"`. Both
+> mappers answer it with `check_status_later` and
+> `haven_get_payment_status { payment_id }` taken from the body — never a
+> retry, never a new payment. That is the 21st typed code the local mapper
+> answers; the hosted branch requires the body's `payment_id`, and a body
+> without one falls through to the generic `API_ERROR` answer on both
+> surfaces. No tool name, argument, input schema, strict-input list,
+> expected-context version, consent hash or `tools-list.snapshot.json` entry
+> changes; `next-arguments-corpus.json` gains one row for the new fixture site
+> (the same `haven_get_payment_status { payment_id }` step the two
+> `submission_outcome_unknown` rows already carry), and no hosted runtime file
+> changes. `last-verified` is not re-stamped: this block is the scope.
+
+> **Contract change (#5035, 2026-11-22): one more typed refusal on the local
+> MCP.** `packages/mcp/src/tools.ts` is on this contract's cover list. A
+> delegate sweep that was broadcast but whose outcome is not confirmed yet now
+> answers `409` with `error_code: "sweep_outcome_unknown"` and the `tx_hash`.
+> Both mappers answer it with `check_status_later` and
+> `haven_sweep_delegate {}` — a sweep has no `payment_id`, so the status read
+> is the sweep tool itself (called with no arguments it answers the in-flight
+> sweep's state; re-submitting the same authorization answers it too). That is
+> the 22nd typed code the local mapper answers. The hosted
+> `haven_sweep_delegate` description gains three sentences naming the code and
+> that one action, so `tools-list.snapshot.json` changes; no tool name,
+> argument, input schema, strict-input list, expected-context version or
+> consent hash changes, and `next-arguments-corpus.json` gains one row for the
+> new fixture site (the same `haven_sweep_delegate {}` step). `last-verified`
+> is not re-stamped: this block is the scope.
 
 > **Description-only change (#4796, 2026-11-10): four tool descriptions named
 > a tool their own surface does not register.** The shared description text in
@@ -555,9 +748,14 @@ goes to `POST /x402/:id/settle` and the response carries the Haven-assembled
 Haven-submitted transaction on that scheme. Omitting the field, or sending
 `eip3009`, relays the funding signature exactly as before, so **every existing
 caller is unchanged and there is nothing to upgrade**. The local stdio MCP's
-`haven_submit` (added by #3329) relays task-budget and sub-budget signatures
-(`task_budget_id` / `sub_budget_id`) and refuses a `payment_id`, so it takes no
-`settlement_scheme` and nothing here is skew.
+`haven_submit` (added by #3329) relays a signature the
+agent already holds (`task_budget_id` / `sub_budget_id`) and refuses a
+`payment_id`, so it takes no `settlement_scheme` and nothing here is skew.
+Since #4825 that runtime has no signer tool, so it cannot produce a
+task-budget or sub-budget signature at all: the task-budget tools refuse with
+`TASK_BUDGET_SIGNING_UNAVAILABLE` and a pending sub-budget row names no next
+tool (see *Task budgets and sub-budget signing are hosted-plus-signer
+features* below).
 
 An **erc7710-ONLY merchant** — no untagged `accepts[]` entry — is reachable
 through `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` since #2054:
@@ -588,9 +786,10 @@ none can disagree with the others on an identical accepts[]/agent pair.
 Another deliberate local/hosted skew, same shape as the one above: this is
 response shaping specific to the hosted capability modules
 (`buildMcpToolQuoteResponse`, and the hosted `haven_quote_x402` handler
-directly), so the local stdio `haven_quote_x402` passthrough gains none of
-these fields — it has no server-side agent read to predict from, and a local
-caller already holds its own key/rail state.
+directly), so the local stdio `haven_quote_x402` gains none of these fields —
+it predicts no settlement scheme, and a local caller already holds its own
+key/rail state. (It does read the agent since #3967, but only to compare a
+stated `expected_amount`; see the #4830 note below.)
 
 As of #3839, `haven_discover_tools` on BOTH the hosted and the local stdio
 surface returns two additive fields per entry: `asset_transfer_methods` (the
@@ -602,11 +801,12 @@ exactly, so after a release). The description gains one guidance sentence;
 `description-size.test.ts` was re-derived for it (round 26).
 
 One **deliberate local/hosted skew**, recorded because this table exists to
-catch exactly that: the **local stdio** `haven_quote_x402` is a bare
-passthrough of the SDK's `X402Quote`, so it now also QUOTES an erc7710-only
-merchant (it used to throw) — but it returns the SDK's own `acceptedScheme`
-(camelCase) and no `erc7710_only` convenience field, since none of the hosted
-response shaping runs there. The local **pay** paths are unchanged in behavior
+catch exactly that: the **local stdio** `haven_quote_x402` returns the SDK's
+own `X402Quote` plus only the fields its own `expected_amount` comparison adds,
+so it now also QUOTES an erc7710-only merchant (it used to throw) — but it
+returns the SDK's own `acceptedScheme` (camelCase) and no `erc7710_only`
+convenience field, since none of the hosted response shaping runs there. The
+local **pay** paths are unchanged in behavior
 (`HavenClient.fetch` / `authorizeX402` / `payX402Quote` still re-select through
 `selectStandardPaymentOption` and refuse an erc7710-only merchant — a
 key-holding EIP-3009 path cannot settle it); what changed is only the refusal
@@ -620,6 +820,23 @@ the same queue-only submission tool (same `resource_url` + honeypot `website`
 input, same id/verify_token/status output). It writes a submission row only —
 no outbound request, no token reuse, no authority — and domain-ownership proof
 plus the read-only quote probe still gate any listing on the backend.
+
+> **Additive response fields (#4830, 2026-11-12):** a stated `expected_amount`
+> is no longer skipped silently on either surface. When the comparison cannot
+> be made, `haven_quote_x402` (hosted and local) returns
+> `price_comparison_made: false` with `price_comparison_not_made_cause`
+> (`agent_read_failed` | `agent_read_refused` | `no_option_selected` |
+> `unknown_decimals`), `safe_to_continue: false`, no prefilled cap and no pay
+> step; `price_differs_from_expected` is absent because nobody compared the
+> price. The next step follows the cause — `retry_with_explicit_context` for a
+> transient agent-read failure, `stop_and_tell_user` for a refused read, an
+> unselectable option or unknown decimals — and no new `next_action` value is
+> introduced. The comparison is now decided WITHOUT the agent read wherever the
+> rail cannot change the answer (one option, equal authorization amounts, or a
+> stated price equal to neither), and a stated price finer than the token's
+> scale is a decided mismatch on both surfaces (the local surface used to skip
+> it). No input, existing field, or signer surface changed. The local half
+> ships with the next `@haven_ai/mcp` release.
 
 > **Additive response field (#3476, 2026-09-29):** the hosted
 > `haven_pay_x402_quote` gains an optional `allowance` block on its
@@ -672,10 +889,10 @@ doc that carries an argument rather than a number.
 | Component | Supported version |
 | --- | --- |
 | Node.js | >= 22.0.0 (`engines` floor; repo development and CI pin LTS 24 via `.nvmrc`) |
-| `@haven_ai/connect` | `0.14.0-alpha.0` |
-| `@haven_ai/mcp` | `0.14.0-alpha.0` |
-| `@haven_ai/sdk` | `0.14.0-alpha.0` |
-| `@haven_ai/signer` | `0.14.0-alpha.0` |
+| `@haven_ai/connect` | `0.15.0-alpha.0` |
+| `@haven_ai/mcp` | `0.15.0-alpha.0` |
+| `@haven_ai/sdk` | `0.15.0-alpha.0` |
+| `@haven_ai/signer` | `0.15.0-alpha.0` |
 | Codex Desktop / Codex CLI | local stdio MCP via `~/.codex/config.toml` |
 | Claude Code | local stdio MCP via `claude mcp add-json --scope user` |
 
@@ -1572,6 +1789,30 @@ and `haven_submit` (the local relay step task budgets need; its `payment_id`
 branch refuses, because the local runtime signs and submits a payment inline);
 the hosted MCP gains `haven_open_task_budget` and `haven_close_task_budget`,
 and its existing `haven_submit` takes `task_budget_id` XOR `payment_id`.
+
+**#4825 (2026-11-12) corrects where the signature comes from on the local
+runtime.** Task budgets and sub-budget signing are **hosted-plus-signer
+features**: opening a task budget, closing one that is open, and signing a
+sub-budget row all need a signature from the Haven signer, and a `--local`
+install has no signer tool — the connector's local mode removes the signer
+server on every runtime that supports local mode
+(`packages/connect/src/runtime-install.ts`,
+`packages/connect/src/config-writers.ts`). The local tool NAMES do not change,
+so the local consent hash does not move; the behaviour does. `haven_open_task_budget`
+refuses with the typed code `TASK_BUDGET_SIGNING_UNAVAILABLE` before contacting
+anything (no `POST /task-budgets`, so no pending row is created);
+`haven_close_task_budget` still answers `status: "closed"` for a pending or
+expired budget, and refuses with the same code — without calling
+`POST /task-budgets/:id/close`, so the budget is not left `closing` — for one
+that is open or closing; a `pendingSubBudgetSignatures[]` row of
+`haven_get_agent` and both `haven_submit { sub_budget_id }` results carry no
+`next_tool` and a `next_tool_omitted_reason` saying this runtime cannot sign a
+sub-budget and that the owner signs it from a hosted-plus-signer install. No
+local tool description names a signer tool or a signer step any more, and the
+`signer_compatibility` notice is gone from the local handoffs (they no longer
+hand off). Spending through an open sub-budget (`sub_budget_id` on the pay
+tools) needs no signer and is unchanged.
+
 `task_budget_id` is an optional argument on `haven_send`, `haven_pay`,
 `haven_pay_x402_quote` and `haven_pay_x402` where each exists. (#3378
 re-verification: until then the local `haven_pay_x402_quote` and the hosted
@@ -1936,6 +2177,18 @@ These are hosted surface changes. The local runtime has no twins: its `haven_sub
   - The skill text splits the post-retry step by scheme.
   - An older skill still teaches `haven_report_x402_outcome` on erc7710; that call now gets a refusal that names the right tool.
 
+### A stateless MCP server is payable (#5089)
+
+Hosted behaviour, plus additive SDK surface. `haven_quote_mcp_tool`, `haven_quote_catalog_purchase`, `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` no longer refuse a merchant whose `initialize` returns a valid JSON-RPC result with no `Mcp-Session-Id`; the unpaid probe and the paid retry of `haven_settle_mcp_tool` / `haven_complete_mcp_tool` to it carry `Accept: application/json, text/event-stream`. A 200 that is not an `initialize` result, a JSON-RPC error and a failed call keep the unchanged refusal ("The merchant did not establish an MCP session before the x402 quote. No payment was created.", 502) and the #1271 discovery retry. SDK: `McpMerchantTransport.handshake()` / `withMcpHeaders()` are new; `initialize()` still answers no session, so the local `fetch()` pays a stateless server as standard x402; it now also sends `notifications/initialized` to it. No tool, schema, description or consent-hash change; no signer change. Detail: `docs/architecture/04-x402-payment-sequence.md`, *Hosted Paid-MCP-Tool Flow*.
+
+### An `mcp://tool/<name>` address is payable; delivery is bound to the stored endpoint (#5086)
+
+Hosted behaviour, plus one additive SDK option. On the EIP-3009 bridge, `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` no longer refuse a challenge whose `resource.url` is not the discovered MCP endpoint (the #5084 pay-time `MERCHANT_RESOURCE_MISMATCH` below is gone): the payment keeps the merchant's declared address, and `haven_settle_mcp_tool` / `haven_complete_mcp_tool` deliver only to the endpoint Haven stored with the call context. An explicit `merchant_url` that is not that endpoint is refused with `MERCHANT_RESOURCE_MISMATCH` (`retry_with_explicit_context`) — before funding on settle, before delivery on complete (complete used to reach the merchant with it when the address matched). A payment with no stored context keeps the address comparison. `completeX402MerchantCall` takes an optional `approvedEndpoint`; omitted, it compares as before, so the local SDK path and older callers are unaffected. No tool, schema, description or consent-hash change; no signer change — an installed signer builds the same header. Detail: `docs/architecture/04-x402-payment-sequence.md`, *Hosted Paid-MCP-Tool Flow*.
+
+### Resource-address mismatch refused before funding (#5084)
+
+Hosted behaviour, refusals only. `haven_pay_mcp_tool` and `haven_prepare_catalog_purchase` on the EIP-3009 branch refuse a challenge whose `resource.url` is not the discovered MCP endpoint, before any intent or budget pre-check, with `MERCHANT_RESOURCE_MISMATCH` (`stop_and_tell_user`). `haven_settle_mcp_tool` with an explicit `merchant_url` that is not the payment's approved address refuses the same code (`retry_with_explicit_context`) before the funding relay or the erc7710 submit, and answers `PAYMENT_STATE_UNAVAILABLE` (`haven_get_payment_status`) when it cannot read that address. Each mismatch used to surface as the 409 "x402 merchant completion does not match the approved resource URL" after funding (EIP-3009) or after the settlement submit (erc7710); `PAYMENT_STATE_UNAVAILABLE` is new. No tool, schema, description or consent-hash change; an older client sees the new codes as ordinary refusals with their next-step fields. Detail: `docs/architecture/04-x402-payment-sequence.md`, *Hosted Paid-MCP-Tool Flow*.
+
 ### erc7710 refusal wording on settle/complete (#3784)
 
 Hosted text only. The `haven_settle_mcp_tool` description and the server instructions no longer say an erc7710 merchant refusal moved nothing; they say there is nothing to sweep, check `haven_get_payment_status` after the payment window, and re-quote only if unsettled — the next step the settle refusal returns for a generic merchant refusal (a merchant that reported it is not ready gets stop-and-tell-user, and the served text is the more cautious of the two). The `haven_complete_mcp_tool` description drops its erc7710 clause for "erc7710 settles via `haven_settle_mcp_tool`". No tool, schema, refusal code or consent-hash change; a connected client sees the new text on its next `tools/list` / initialize.
@@ -2203,7 +2456,12 @@ caught the PR's first pass conflating them into one wrong trigger): (1) any
 code — a currently-published `@haven_ai/signer` (0.5.0-alpha.1 through
 current) sets that field only on `SIGN_CONTEXT_TIMEOUT` /
 `SIGN_CONTEXT_UNREACHABLE` / `SIGN_CONTEXT_MALFORMED`, or
-`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend; (2)
+`SIGN_CONTEXT_REFUSED` with `http_status: 404` against an older backend.
+Since #4829 `SIGN_CONTEXT_UNREACHABLE` is the NON-ANSWER class as well as a
+transport failure: a body that is not a JSON object at any non-2xx status, any
+5xx, and a 429 all report it (with `http_status`), so a gateway's HTML 502 and
+the money-path rate limit's 429 route here rather than to
+`SIGN_CONTEXT_REFUSED`; (2)
 `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
 and NO `fallback` field, which only a signer predating #3271 produces (no
 direct-fetch fallback of its own to try). Guidance never suggests a
@@ -2273,10 +2531,14 @@ The notice says instead: close the pending budget with
 the deployment's upgrade command (`npx -y @haven_ai/connect@<channel>
 --doctor`, #3412) and then the repair line it prints, then open the budget
 again. The handoff `reason` points at the notice rather than restating the
-steps. The local `@haven_ai/mcp` handoffs carry the same notice from the same
+steps. The local `@haven_ai/mcp` handoffs carried the same notice from the same
 builder shape (local `mcp` has no dependency on the hosted package, so the
-fields are built from the same SDK constant; the cross-package pins in
-`hosted-signer-integration.test.ts` hold them together). The historic refusal
+fields were built from the same SDK constant; the cross-package pins in
+`hosted-signer-integration.test.ts` held them together). **Since #4825 the
+local handoffs are gone** — that runtime has no signer tool, so it refuses
+instead of handing off (see *Task budgets and sub-budget signing are
+hosted-plus-signer features* below), and the local builder was deleted with
+them. The historic refusal
 strings the trigger matches on are pinned verbatim in that test, with their
 release-commit provenance (`9c548158`, `f6bd8a63`), so rewording either
 historic message fails the build instead of silently disarming the recovery.
@@ -2414,7 +2676,12 @@ to call next in structured fields, and those fields are typed end to end
   `next_tool` is absent — never null — and `next_tool_omitted_reason` says why.
   A refusal carries the same fields a success does. Discovery entries carry
   `suggested_tool` + `suggested_arguments` under the same rule, or
-  `suggested_tool_omitted_reason`.
+  `suggested_tool_omitted_reason`. Provenance decides which tool an MCP row
+  names on the hosted surface (#4823): an operator row points at
+  `haven_quote_catalog_purchase { catalog_id }`, while a self-submitted
+  (`source: 'ingestion'`) row — listed to agents but answered 404 by the agent
+  detail read — points at `haven_quote_mcp_tool { merchant_url, tool_name }`,
+  the same by-URL path the local runtime names.
 - **Where it is built.** The SDK's `createNextStepBuilder`
   (`packages/sdk/src/next-step.ts`) over a target map; the hosted server, the
   signer and the local runtime each declare the shapes they hand off to, and a
@@ -2448,6 +2715,57 @@ to call next in structured fields, and those fields are typed end to end
   package's changes) and in `backend_checks` beside the request-schema
   ratchet, and is self-tested (`lint:next-steps:test`). It is a step inside
   those required contexts, not a new required context.
+
+## A 429 is a rate limit, not a refusal as made (#4828, 2026-11-12)
+
+The hosted mapper (`packages/mcp-server/src/tools/support/errors.ts`) used to
+split an upstream `HavenApiError` on the status alone: below 500 was
+`stop_and_tell_user` with "the upstream call was refused as made (4xx);
+re-calling it the same way cannot succeed". A 429 is below 500, so a rate
+limit reached the agent as a permanent refusal and any stated wait was
+dropped. Two branches now sit ahead of that split, both keeping
+`code: 'API_ERROR'`:
+
+- **A 429 is the transient step.** `next_action: retry_with_explicit_context`
+  (the value the 5xx branch already uses — no new `next_action` value), with a
+  reason that says the upstream call was rate-limited, to wait, then re-call
+  the same tool with the same arguments (and the same `idempotency_key` where
+  the tool has one) **once** before telling the user. The reason names neither
+  Haven nor the merchant as the limiter, because both reach this branch: the
+  plugin's per-route limit, the hourly x402 cap and the catalog submission
+  queue are Haven's, while a merchant's 429 on the unpaid MCP probe arrives as
+  a status-only `HavenApiError` (the discovered-endpoint rebuild in
+  `tools/support/mcp-context.ts` drops the body). No payment exists at the
+  probe, so the re-call is safe there too.
+- **The sponsorship budget is the one 429 that stops.** The relayer's
+  per-identity window cap (`hybrid_deploy` for an account deploy, `sweep` for
+  a sweep) now carries a typed `error_code: 'relayer_budget_exceeded'` on both
+  bodies, so the mapper answers `stop_and_tell_user` from the code rather than
+  from English. Its reason names the budget and the window: a slot frees when
+  the oldest counted operation ages out, up to 24 hours for an account deploy
+  and up to 60 minutes for a sweep. The sign route's 429 carries the same code
+  as a defensive case; it is unreachable in production, because
+  `RelayerBudgetExceededError` is thrown only by `assertRelayerBudget`, whose
+  callers are the account-deploy and sweep paths.
+
+**The additive field.** A rate-limit answer carries `retry_after_seconds`
+(the number the limiter stated) when its body has one — the hourly x402 cap
+sends `retry_after_seconds: 60`. It is absent on every other answer, and no
+existing field changes meaning. The plugin states its wait only in a
+`retry-after` header, which `HavenApiError` does not carry
+(`packages/sdk/src/types.ts`), so that wait stays unread here; carrying it is
+a change to the published SDK transport, not to this mapper.
+
+**The local runtime diverges, deliberately.** The local MCP's mapper
+(`packages/mcp/src/tools.ts`) answers a 429 `stop_and_tell_user` and relays
+the whole `body`, so the wait is not dropped there — the agent reads
+`retry_after_seconds` from `body` instead of a top-level field. The
+`next_action` therefore differs between the two runtimes for a 429 (hosted:
+`retry_with_explicit_context`; local: `stop_and_tell_user`), and the local
+answer has no top-level `retry_after_seconds`. `local-hosted-refusal-parity.test.ts`
+does not compare these rows: it walks only the fixtures whose hosted answer is
+a typed code, and both 429 branches keep `API_ERROR`. Bringing the local
+mapper onto the same step is its own change.
 
 ## Troubleshooting
 

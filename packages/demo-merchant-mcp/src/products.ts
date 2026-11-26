@@ -9,6 +9,12 @@
  * it is tracked per chain here, not hardcoded.
  */
 import { getAddress, isAddress, type Address } from 'viem'
+import {
+  CHECKOUT_DETAILS_FIELDS,
+  isCheckoutDetailsField,
+  type CheckoutDetailsField,
+  type CheckoutDetailsRequest,
+} from '@haven_ai/merchant-payments'
 
 interface MerchantChainConfig {
   /** The ONE home of the network's display name (#3834). */
@@ -122,6 +128,8 @@ export type ProductId =
   | 'storage_50gb'
   | 'storage_200gb'
   | 'storage_1tb'
+  | 'joke'
+  | 'field_notes'
 
 export interface Product {
   id: ProductId
@@ -129,18 +137,235 @@ export interface Product {
   /** English display description (#1550 — the demo default is English). */
   description: string
   /**
-   * Swedish display description, and the text that feeds the invoice JSON's
-   * `beskrivning` row: the invoice document is a Swedish bookkeeping artifact
-   * by design (see invoice.ts) and stays Swedish regardless of display locale.
+   * Swedish display description, and the text of the invoice JSON's
+   * `beskrivning` row on a Swedish receipt (`locale: 'sv'`); an English
+   * receipt uses `description` (#4980, see invoice.ts).
    */
   description_sv: string
   /** Price in USDC base units (6 decimals). E.g. $1.00 = 1_000_000n */
   price_usdc: bigint
-  category: 'vpn' | 'storage'
+  category: 'vpn' | 'storage' | 'joke' | 'field_notes'
+  /**
+   * #4851: what one purchase buys. Absent, `monthly` — every subscription
+   * product. Read through `productBillingPeriod`.
+   */
+  billing?: BillingPeriod
   x402: {
     settlementMethods: readonly SettlementMethod[]
     defaultSettlementMethod: SettlementMethod
   }
+  /**
+   * #4850: the address this product's payment is made out to — the 402's
+   * `payTo`, the EIP-3009 `to` it verifies, the ERC-7710 transfer target and
+   * the invoice's recipient address. Absent, the merchant's default receiving
+   * address (`MERCHANT_ADDRESS`): read it through `productReceivingAddress`,
+   * never off this field, so the default lives in one place.
+   */
+  receivingAddress?: Address
+  /**
+   * #4850: who verifies and settles this product's payment. Absent, `self`.
+   * Read it through `productSettlementKind`.
+   */
+  settlement?: SettlementKind
+  /**
+   * #4853: this product's payments are recorded in Stripe as PaymentIntents,
+   * and its receiving address is the Stripe deposit address when one is
+   * configured. Read the address through `productReceivingAddress`, never off
+   * this field. Only the CDP-settled joke sets it: Stripe records what CDP
+   * settled, and no other product is settled by CDP.
+   */
+  stripeRecording?: boolean
+  /**
+   * #4873: the checkout details this product's challenge asks for, in the
+   * shape `docs/architecture/13-checkout-details.md` §2 decided. Absent, the
+   * challenge is unchanged. Read it through `checkoutDetailsForProduct`, never
+   * off this field, so the dev-only required-field hook lives in one place.
+   */
+  checkoutDetails?: CheckoutDetailsRequest
+  /**
+   * #4950: this product is paid into the merchant's Haven Sales account
+   * (`MERCHANT_SALES_ADDRESS`) and each settled sale is reported to Haven with
+   * the Sales key. Read the address through `productReceivingAddress`, never
+   * off this field. The product is offered only when the Sales settings are
+   * set (`isProductOffered`).
+   */
+  salesAccount?: boolean
+}
+
+/**
+ * #4850: how a product's payment is verified and settled.
+ * - `self`: the merchant verifies the payment itself and settles it with its
+ *   own gas-funded key (`SETTLEMENT_PRIVATE_KEY`).
+ * - `cdp` (#4851): Coinbase's hosted facilitator (CDP) verifies the payment
+ *   and settles it on-chain, paying the gas. The merchant still runs its own
+ *   pre-verification checks first, and reads the chain itself after any
+ *   failure. A `cdp` product is offered only when CDP credentials are set.
+ */
+export const SETTLEMENT_KINDS = ['self', 'cdp'] as const
+export type SettlementKind = (typeof SETTLEMENT_KINDS)[number]
+export const DEFAULT_SETTLEMENT_KIND: SettlementKind = 'self'
+
+/**
+ * #4850: the address a payment for `product` must be made out to.
+ *
+ * #4853: a product whose payments Stripe records (`stripeRecording`) is paid
+ * to the Stripe deposit address when one is configured — the deposit address
+ * IS that product's receiving address, and no other product can name it. The
+ * caller passes the deposit address only when Stripe is on; absent, the
+ * product keeps `MERCHANT_ADDRESS` exactly as before.
+ */
+export function productReceivingAddress(
+  product: Product,
+  merchantDefault: Address,
+  opts?: { stripeDepositAddress?: Address; salesAddress?: Address },
+): Address {
+  if (product.stripeRecording && opts?.stripeDepositAddress) return opts.stripeDepositAddress
+  // #4950: the Sales product is paid into the Sales account. It is offered only
+  // when that address is configured, so the fallback below is never quoted.
+  if (product.salesAccount && opts?.salesAddress) return opts.salesAddress
+  return product.receivingAddress ?? merchantDefault
+}
+
+/**
+ * #5091: why a product's sales appear on the merchant's Haven Sales account,
+ * or `null` when they do not.
+ * - `paid_into_sales_account`: its receiving address IS the Sales account.
+ * - `stripe_recorded`: Stripe records it (the joke, #4953), so its settled
+ *   sales are reported to Haven though its money lands on the deposit address.
+ */
+export type SalesAccountRoute = 'paid_into_sales_account' | 'stripe_recorded'
+
+/**
+ * #5091: the ONE rule for "this product's sales appear on the Sales account",
+ * read by both the sale reporter (`createSalesReporting`, which also needs the
+ * Stripe recorder's per-payment decision) and the kit discovery document
+ * (`buildKitDiscovery`, which lists exactly these products). Two copies of it
+ * drifted once: routing more of the catalogue into the Sales account moved the
+ * reporter and not the document, so Sales → Products showed one product of
+ * eleven.
+ *
+ * "Paid into the Sales account" is read through `productReceivingAddress`
+ * with the same options the 402 is quoted with, never off `salesAccount`, so a
+ * change to which products pay the Sales account changes both readers at once.
+ */
+export function salesAccountRoute(
+  product: Product,
+  merchantDefault: Address,
+  opts: { stripeDepositAddress?: Address; salesAddress?: Address },
+): SalesAccountRoute | null {
+  // The deposit address wins in `productReceivingAddress` too: a
+  // Stripe-recorded product with Stripe on is paid there, not into Sales.
+  if (product.stripeRecording && opts.stripeDepositAddress) return 'stripe_recorded'
+  if (!opts.salesAddress) return null
+  // Only the products that name the Sales account answer yes here, because
+  // `resolveSalesConfig` refuses a Sales address equal to MERCHANT_ADDRESS.
+  // Callers pass the same MERCHANT_ADDRESS the 402 is quoted with (index.ts
+  // feeds both `SalesConfig.merchantAddress` and the server's).
+  const receiving = productReceivingAddress(product, merchantDefault, opts)
+  return receiving.toLowerCase() === opts.salesAddress.toLowerCase() ? 'paid_into_sales_account' : null
+}
+
+/** #4850: who verifies and settles a payment for `product`. */
+export function productSettlementKind(product: Product): SettlementKind {
+  return product.settlement ?? DEFAULT_SETTLEMENT_KIND
+}
+
+/** #4851: what one purchase of `product` buys. */
+export function productBillingPeriod(product: Product): BillingPeriod {
+  return product.billing ?? 'monthly'
+}
+
+// ── Checkout details (#4873) ─────────────────────────────────────────────────
+// The demo merchant is the first merchant that asks for checkout details. One
+// product asks (`vpn_pro`), and the request rides its 402 challenge as the
+// `haven-checkout-details` extension (docs/architecture/13-checkout-details.md
+// §2). The answer is the `X-Checkout-Details` header on the paid request, read
+// by `acceptCheckoutDetails` in the shared payment core.
+
+/**
+ * #4873: the checkout-details request a product's challenge carries, or
+ * `undefined` when it asks for none.
+ *
+ * `requiredField` is the dev-only hook that turns one of the product's
+ * optional fields into a required one, so the "stopped before paying"
+ * behaviour (#4872) can be exercised on dev. It is off by default: with it
+ * unset, every product's challenge is exactly what it was.
+ */
+export function checkoutDetailsForProduct(
+  product: Product,
+  opts?: { requiredField?: CheckoutDetailsField | null },
+): CheckoutDetailsRequest | undefined {
+  const request = product.checkoutDetails
+  if (!request) return undefined
+  const requiredField = opts?.requiredField
+  if (!requiredField || !request.fields[requiredField]) return request
+  return {
+    fields: {
+      ...request.fields,
+      [requiredField]: { required: true },
+    },
+  }
+}
+
+/** #4873: the env var that exposes the required-field case on dev. */
+export const CHECKOUT_DETAILS_REQUIRED_FIELD_ENV = 'MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD'
+
+/**
+ * #4873: the dev-only required-field hook, read from
+ * `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD`.
+ *
+ * **Testnet-only, enforced in code**, like `MERCHANT_SKIP_SETTLE_PRODUCT`: on
+ * any other chain the merchant refuses to start rather than silently ignore
+ * the flag. A required field changes what a purchase needs before it can be
+ * paid — that is a test hook, not something to leave reachable on a real
+ * chain.
+ *
+ * Unset (the default) means no field is required, so the QA scenarios see the
+ * optional shape the issue asks for.
+ */
+export function requiredCheckoutFieldFromEnv(
+  env: Record<string, string | undefined> = process.env,
+  chainId: number = CHAIN_ID,
+): CheckoutDetailsField | null {
+  const raw = env[CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]?.trim()
+  if (!raw) return null
+  if (!isCheckoutDetailsField(raw)) {
+    throw new Error(
+      `${CHECKOUT_DETAILS_REQUIRED_FIELD_ENV} must be one of ${CHECKOUT_DETAILS_FIELDS.join(', ')}; got "${raw}".`,
+    )
+  }
+  if (chainId !== 84532) {
+    throw new Error(
+      `${CHECKOUT_DETAILS_REQUIRED_FIELD_ENV} is a dev-only hook that makes a checkout field required, ` +
+        'so the "stopped before paying" behaviour can be exercised. ' +
+        `Set MERCHANT_CHAIN_ID=84532 (Base Sepolia) to use it, or unset the flag. Got chain ${chainId}.`,
+    )
+  }
+  return raw
+}
+
+/**
+ * #4851: whether this merchant offers `product`. A `cdp` product needs CDP
+ * credentials; without them it is absent from every surface — `list_products`,
+ * the discovery document, the tool list and the payment gate — so a merchant
+ * without the key is byte-identical to one built before the product existed.
+ *
+ * #4950: the Sales product needs the Sales settings (`salesConfigured`), on
+ * the same terms: absent, it is on no surface.
+ */
+export interface ProductOfferOptions {
+  cdpConfigured: boolean
+  salesConfigured?: boolean
+}
+
+export function isProductOffered(product: Product, opts: ProductOfferOptions): boolean {
+  if (product.salesAccount && !opts.salesConfigured) return false
+  return productSettlementKind(product) !== 'cdp' || opts.cdpConfigured
+}
+
+/** #4851: the offered products, in catalogue order. */
+export function offeredProducts(opts: ProductOfferOptions): Product[] {
+  return Object.values(PRODUCTS).filter((product) => isProductOffered(product, opts))
 }
 
 export const PRODUCTS: Record<ProductId, Product> = {
@@ -154,7 +379,8 @@ export const PRODUCTS: Record<ProductId, Product> = {
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   /**
-   * The ONLY EIP-3009-only product (#1441). Everything else advertises both
+   * The ONLY self-settled EIP-3009-only product (#1441; the CDP-settled joke,
+   * #4851, is EIP-3009-only too). Everything else advertises both
    * methods, and the #1450 preference rule then picks erc7710 — which has no
    * funding leg, so it makes the funding-leg topology unreachable from the
    * `haven_pay_mcp_tool` entry point that `x402-hosted-mcp-signer` exists to
@@ -185,6 +411,20 @@ export const PRODUCTS: Record<ProductId, Product> = {
     description_sv: 'Premium VPN. Obegränsade enheter. Höghastighetsservrar. Dubbel-VPN. 90+ länder.',
     price_usdc: 3_000n,
     category: 'vpn',
+    /**
+     * #4873: the demo merchant's checkout-details product. It asks for a
+     * receipt email and a billing address, both optional, so a paid request
+     * that carries them shows them on the receipt and one that does not is
+     * served exactly as today. `vpn_pro` rather than a product the QA
+     * scenarios buy (`vpn_basic`, `storage_50gb`, the CDP joke): the challenge
+     * of every other product stays byte-identical.
+     */
+    checkoutDetails: {
+      fields: {
+        receipt_email: { required: false },
+        billing_address: { required: false },
+      },
+    },
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
   vpn_ultra: {
@@ -223,6 +463,70 @@ export const PRODUCTS: Record<ProductId, Product> = {
     category: 'storage',
     x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
   },
+  /**
+   * #4851: the one product Coinbase's hosted facilitator (CDP) verifies and
+   * settles — the setup Haven recommends to merchants, run here first.
+   *
+   * EIP-3009 only, on purpose: Haven agents prefer ERC-7710 whenever it is
+   * advertised, and CDP does not settle ERC-7710, so offering it would route
+   * almost nothing through CDP. That also makes it unavailable to an agent
+   * whose budget is pinned to one recipient (EIP-3009 needs an open budget).
+   *
+   * Not in Haven's catalog (#4852): the demo store's funding target is
+   * computed over all its catalog rows, and one EIP-3009-only row would make
+   * merchant-locked budgets for the store refuse. Like `vpn_legacy`, it is
+   * paid at this merchant's endpoint directly.
+   *
+   * 10,000 atomic USDC = 0.01 USDC: a whole number of US cents, which Stripe's
+   * machine-payments recording needs in M2 (#4853).
+   *
+   * #4853: the one product Stripe records. With `STRIPE_DEPOSIT_ADDRESS` and
+   * `STRIPE_SECRET_KEY` both set, its receiving address is the Stripe deposit
+   * address and each settled payment becomes a PaymentIntent.
+   */
+  joke: {
+    id: 'joke',
+    name: 'Haven Joke',
+    description: 'One joke, delivered at once. Verified and settled by Coinbase\'s hosted x402 facilitator (CDP).',
+    description_sv:
+      'Ett skämt, levererat direkt. Verifieras och avräknas av Coinbases x402-facilitator (CDP).',
+    price_usdc: 10_000n,
+    category: 'joke',
+    billing: 'one_time',
+    settlement: 'cdp',
+    stripeRecording: true,
+    x402: { settlementMethods: ['eip3009'], defaultSettlementMethod: 'eip3009' },
+  },
+  /**
+   * #4950: the merchant-services demo product. It is paid into the merchant's
+   * Haven Sales account, not `MERCHANT_ADDRESS`, and each settled sale is
+   * reported to Haven, so it shows on the Sales page.
+   *
+   * Offered only with `MERCHANT_SALES_ADDRESS`, `MERCHANT_SALES_KEY` and
+   * `MERCHANT_HAVEN_BASE_URL` set. Its own category and one-product tool
+   * (`buy_field_notes`), like the joke: a new plan or tier on an existing tool
+   * would change every existing product's argument schema.
+   *
+   * Self-settled with both methods, like the VPN and storage products. Not in
+   * Haven's catalog: the demo store's catalog rows share one `pay_to`, so an
+   * agent buys it at this merchant's endpoint (`haven_quote_mcp_tool`).
+   *
+   * 2,500 atomic USDC = 0.0025 USDC, a one-time purchase. A price no other
+   * erc7710 product has: the already-redeemed bind identifies a purchase by
+   * its exact-amount cap (the price-uniqueness guard in erc7710.test.ts).
+   */
+  field_notes: {
+    id: 'field_notes',
+    name: 'Haven Field Notes',
+    description: 'One field note on running agent payments, delivered at once. Paid into a Haven Sales account.',
+    description_sv:
+      'En fältanteckning om agentbetalningar, levererad direkt. Betalas till ett Haven-försäljningskonto.',
+    price_usdc: 2_500n,
+    category: 'field_notes',
+    billing: 'one_time',
+    salesAccount: true,
+    x402: { settlementMethods: SUPPORTED_SETTLEMENT_METHODS, defaultSettlementMethod: DEFAULT_SETTLEMENT_METHOD },
+  },
 }
 
 export function isSettlementMethod(value: unknown): value is SettlementMethod {
@@ -232,12 +536,16 @@ export function isSettlementMethod(value: unknown): value is SettlementMethod {
 // ── Display locale (#1550) ───────────────────────────────────────────────────
 // English is the demo default — this merchant is Haven's own showcase and its
 // transcripts are read mostly by English-speaking developers. Swedish stays a
-// first-class option, and the invoice JSON (a Swedish bookkeeping artifact —
-// see invoice.ts) is deliberately NOT localized by this switch.
+// first-class option. #4980: the invoice JSON's human-readable values follow
+// this switch too; its keys and codes never do (see invoice.ts).
 
 export const MERCHANT_LOCALES = ['en', 'sv'] as const
 export type MerchantLocale = (typeof MERCHANT_LOCALES)[number]
 export const DEFAULT_MERCHANT_LOCALE: MerchantLocale = 'en'
+
+export function isMerchantLocale(value: unknown): value is MerchantLocale {
+  return value === 'en' || value === 'sv'
+}
 
 export function productDescription(product: Product, locale: MerchantLocale): string {
   return locale === 'sv' ? product.description_sv : product.description
@@ -256,34 +564,82 @@ const VPN_PLAN_VALUES = ['basic', 'legacy', 'pro', 'ultra'] as const
 const STORAGE_TIER_VALUES = ['50gb', '200gb', '1tb'] as const
 
 interface ProductToolArgs {
-  toolName: 'buy_vpn' | 'buy_cloud_storage'
-  argumentName: 'plan' | 'tier'
-  argumentValue: string
-  argumentEnum: readonly string[]
+  toolName: 'buy_vpn' | 'buy_cloud_storage' | 'buy_joke' | 'buy_field_notes'
+  /** #4851: absent for a tool that sells exactly one product (`buy_joke`, `buy_field_notes`). */
+  argumentName?: 'plan' | 'tier'
+  argumentValue?: string
+  argumentEnum?: readonly string[]
 }
 
 /** Derives the exact buy-tool call (tool name + fixed argument) for a product. */
 export function productToolArgs(product: Product): ProductToolArgs {
-  if (product.category === 'vpn') {
-    return {
-      toolName: 'buy_vpn',
-      argumentName: 'plan',
-      argumentValue: product.id.slice('vpn_'.length),
-      argumentEnum: VPN_PLAN_VALUES,
+  // #5069: exhaustive over the category, so a new category is a compile error
+  // here instead of silently resolving to another product's tool.
+  switch (product.category) {
+    case 'joke':
+      return { toolName: 'buy_joke' }
+    case 'field_notes':
+      return { toolName: 'buy_field_notes' }
+    case 'vpn':
+      return {
+        toolName: 'buy_vpn',
+        argumentName: 'plan',
+        argumentValue: product.id.slice('vpn_'.length),
+        argumentEnum: VPN_PLAN_VALUES,
+      }
+    case 'storage':
+      return {
+        toolName: 'buy_cloud_storage',
+        argumentName: 'tier',
+        argumentValue: product.id.slice('storage_'.length),
+        argumentEnum: STORAGE_TIER_VALUES,
+      }
+    default: {
+      const unknown: never = product.category
+      throw new Error(`productToolArgs: no buy tool for category ${String(unknown)}`)
     }
   }
-  return {
-    toolName: 'buy_cloud_storage',
-    argumentName: 'tier',
-    argumentValue: product.id.slice('storage_'.length),
-    argumentEnum: STORAGE_TIER_VALUES,
-  }
+}
+
+/**
+ * #5069: the MCP tools this merchant serves without payment. Every other tool
+ * the server registers is a buy tool, and the HTTP payment gate resolves it to
+ * a product through `productForToolCall`. A `tools/call` naming a tool in
+ * neither set is refused by the gate before it reaches the MCP server, and a
+ * batched `tools/call` is refused outright, so a buy tool registered without a
+ * product never reaches its handler past the gate. To add a tool, add it here
+ * (free) or give its product a branch in `productToolArgs` (paid).
+ */
+export const FREE_TOOL_NAMES: ReadonlySet<string> = new Set(['list_products'])
+
+/** #5069: every buy tool name the product registry knows, offered or not. */
+export function paidToolNames(): ReadonlySet<string> {
+  return new Set(Object.values(PRODUCTS).map((product) => productToolArgs(product).toolName))
+}
+
+/**
+ * #5069: the product a buy-tool call selects, read from the registry — the
+ * same `productToolArgs` the tool schemas and the test helpers use — instead of
+ * a second hand-kept list. `undefined` when the arguments select no product
+ * (the tool's own schema then refuses them).
+ */
+export function productForToolCall(toolName: string, args: Record<string, unknown>): Product | undefined {
+  return Object.values(PRODUCTS).find((product) => {
+    const call = productToolArgs(product)
+    if (call.toolName !== toolName) return false
+    return call.argumentName === undefined || args[call.argumentName] === call.argumentValue
+  })
 }
 
 /** JSON-schema-ish description of the buy tool's arguments for this exact product
  *  (the fixed `const` pins the value an agent must send to select it). */
 export function productArgumentsSchema(product: Product): Record<string, unknown> {
   const { argumentName, argumentValue, argumentEnum, toolName } = productToolArgs(product)
+  if (!argumentName || !argumentEnum) {
+    // #4851: a one-product tool (`buy_joke`) takes no selector, and its one
+    // settlement method needs no override — the schema says so exactly.
+    return { type: 'object', properties: {}, required: [], additionalProperties: false }
+  }
   return {
     type: 'object',
     properties: {
@@ -320,7 +676,7 @@ export function settlementMethodsForProduct(
   return unique
 }
 
-export type BillingPeriod = 'monthly'
+export type BillingPeriod = 'monthly' | 'one_time'
 
 // ── QA fixture marker (#2989) ────────────────────────────────────────────────
 // The verify-without-settle QA hook (`MERCHANT_SKIP_SETTLE_PRODUCT`, see
@@ -392,7 +748,7 @@ export function buildProductMetadata(
     price_atomic: product.price_usdc.toString(),
     asset: 'USDC',
     network: `eip155:${chainId}`,
-    billing_period: 'monthly',
+    billing_period: productBillingPeriod(product),
     tool_name: productToolArgs(product).toolName,
     arguments_schema: productArgumentsSchema(product),
     supported_settlement_methods: supportedSettlementMethods,

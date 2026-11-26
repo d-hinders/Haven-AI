@@ -15,6 +15,17 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
+### Changed
+
+- **The feedback secret check recognises the Sales key (#4896).** A
+  `sk_merchant_…` credential — the receive-only key a merchant's server uses to
+  report sales to Haven — is refused by `haven feedback submit` before any
+  request carrying it is sent, with the reason `merchant_api_key`. It is a live
+  credential until the owner revokes it, so it belongs in the same layer as an
+  agent key. No update needed.
+
 ## 0.14.0-alpha.0 — 2026-11-11
 
 ### Changed

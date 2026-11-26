@@ -464,7 +464,7 @@ export type paths = {
         get: operations["getCompanyDetails"];
         /**
          * Create or replace the company details.
-         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Full replacement, not a patch. Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off. Setting a `vat_number` that is new or different from the stored one moves `vies_status` to `pending` and starts a VIES check asynchronously; the response returns before that check completes. Clearing `vat_number` (omit or null) clears both `vies_status` and `vies_checked_at`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         put: operations["putCompanyDetails"];
         post?: never;
@@ -489,7 +489,7 @@ export type paths = {
         put?: never;
         /**
          * Re-run the VIES check for the saved VAT number.
-         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per session credential (`ownerProfileRateLimit`).
+         * @description Behind `HAVEN_OWNER_COMPANY_DETAILS` — 404 when the feature is off, and 404 when no details (or no VAT number) are saved. Moves `vies_status` to `pending` (and clears `vies_checked_at`, since a check now in flight has no completion time yet) and starts a fresh check asynchronously; the response reflects `pending`, not the eventual outcome — poll `GET /user/company-details`. Rate-limited per owner (`ownerProfileRateLimit`).
          */
         post: operations["recheckCompanyDetailsVies"];
         delete?: never;
@@ -561,6 +561,46 @@ export type paths = {
          * @description The OWNER's per-agent opt-in (#3426, wg-tax #5 §2.1). Opting IN is refused with a structured 409 unless the deployment has `HAVEN_OWNER_COMPANY_DETAILS` on and the owner's saved company details carry a VAT number whose VIES status is `valid` AT THE MOMENT of the write — the refusal names the reason (`feature_disabled`, `no_company_details` or `vies_not_valid`) and writes nothing. Opting OUT always succeeds: an owner whose VIES result dropped is exactly the owner who needs to withdraw the opt-in. The toggle changes only this agent's own opt-in bit — it grants no spending authority and sends nothing; the declaration itself is only ever carried on EIP-3009 payments (#3427). An agent API key is refused with a named 403: this is an owner-session surface, the same as the company-details routes.
          */
         put: operations["putAgentTaxDeclaration"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/checkout-details-sharing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Turn this agent’s checkout-details sharing on or off.
+         * @description The OWNER's per-agent switch (#4871, epic #4868). When it is on, this agent may share the owner's saved checkout details — the receipt email, billing address and shipping address stored in business details (#4870) — with merchants that ask for them in their x402 payment challenge (`docs/architecture/13-checkout-details.md`). Switching ON is refused with a structured 409 (`reason: 'feature_disabled'`) when the deployment's `HAVEN_OWNER_COMPANY_DETAILS` is off; switching OFF always succeeds, so an owner can always withdraw sharing. Unlike the tax-declaration toggle there is NO requirement that details are stored: the switch may be on with nothing saved, and the agent's read then answers `no_details`. The switch is independent of `tax_declaration_enabled` — either can be on while the other is off. It grants no spending authority and sends nothing by itself; #4872 attaches the answer to the paid request. An agent API key is refused with a named 403: this is an owner-session surface.
+         */
+        put: operations["putAgentCheckoutDetailsSharing"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{id}/checkout-details": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the checkout details this agent may share with a merchant.
+         * @description The AGENT's own read (#4871, epic #4868) — authenticated by this agent's API key. Answers 200 with the stored details when the deployment flag is on, the owner has turned sharing on for THIS agent, and at least one of the three fields is saved: `receipt_email`, `billing_address` and `shipping_address`, under the names and address shape `docs/architecture/13-checkout-details.md` §2 decides (`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`). A field the owner has not saved is OMITTED, never `null` — in particular the read NEVER falls back to the sign-up email (owner decision 2026-11-17): with sharing on and no receipt email saved, the content has no `receipt_email`. Answers 200 with `{ available: false, reason }` otherwise — `feature_disabled` (flag off), `disabled` (sharing off for this agent, or a foreign agent id) or `no_details` (sharing on, nothing saved). Availability is the body, not the status code: a temporarily unavailable answer is a state to poll, not an error. This slice sends nothing to any merchant; #4872 attaches the answer to the paid request.
+         */
+        get: operations["getAgentCheckoutDetails"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -1414,7 +1454,7 @@ export type paths = {
         post?: never;
         /**
          * Unlink an account from the Haven account.
-         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes another one. Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key.
+         * @description Removes the link and its Haven-side metadata. **The account itself is untouched on-chain** — the user still owns it and can re-link it later. Unlinking the default account promotes the oldest remaining account that is not the merchant account; when none remains the user has no default account (#4895). Unlinking is refused while an agent has a live budget delegation (pending, active or replaced), an in-flight recovery, or an in-flight re-key, and for the merchant account (#4895).
          */
         delete: operations["unlinkUserAccount"];
         options?: never;
@@ -1432,7 +1472,7 @@ export type paths = {
         get?: never;
         /**
          * Make a linked account the default.
-         * @description Exactly one account is default per user; setting one clears the previous.
+         * @description At most one account is default per user; setting one clears the previous. The merchant account cannot be made the default (#4895).
          */
         put: operations["setDefaultUserAccount"];
         post?: never;
@@ -1769,7 +1809,7 @@ export type paths = {
         put?: never;
         /**
          * PUBLIC Accounted webhook callback — authenticated by the capability token + the HMAC signature, not by a session.
-         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (a webhook carries no credential header).
+         * @description Hit by Accounted's dispatcher (#3019). `<token>` is the per-connection capability token (32 random bytes base64url, generated at connect — the URL's first credential); the body is HMAC-verified against the connection's stored subscription secret (`X-Gnubok-Signature`, `t=<unix>,v1=<hex>`, over `${t}.${rawBody}` — the second credential, checked BEFORE any JSON parse on the raw bytes; `t` older than 5 minutes is refused). **400** on a bad signature or stale timestamp, **404** on an unknown token, **200** for everything else: feature off, `webhook.test`, unknown event types, duplicates (the `(provider, delivery_id)` row is written before the 2xx), and success — **never 410 and never any 3xx** (either would auto-disable the subscription or hand the provider a URL it did not register). Rate-limited at 600/min keyed per IP (the webhook route has no auth hook, #4955).
          */
         post: operations["accountedWebhookCallback"];
         delete?: never;
@@ -2233,7 +2273,7 @@ export type paths = {
          * One agent's Activity ledger as a CSV file (#4327).
          * @description The agent page's Activity tab AS SHOWN, as a file: the agent's own `payment_intents` — failed and pending included — under the tab's filters (`status`, `token`, `from`/`to`, `q`, with the same meaning as on `GET /agent-activity/{id}/activity?kind=payments`), or, with `status=refused`, the agent's refused attempts (the `kind=refusals` population; `token` is ignored there). Newest first, unpaged. This is NOT the wallet-scoped `/transactions/export.csv`, which writes the fixed-SEK accounting book and has no payment-status filter.
          *
-         *     Columns: `date` (ISO), `status` (the tab's words: Sent, Pending, Failed, Expired, Needs attention, Refused), `reason` (the refusal reason or the needs-attention reason code; empty otherwise), `counterparty_name` (a machine payment's resource host, else the user's own account or contact name; empty when none resolves), `counterparty_address`, `amount` (human units), `token`, `approx_value` and `approx_currency` (SERVE-TIME: re-priced at today's rate in the user's display currency; empty, never 0, when the token has no usable quote), `tx_hash` (the merchant settlement when recorded, else the funding leg; empty for a refusal or an unsent payment) and `payment_id` (empty for a refusal).
+         *     Columns: `date` (ISO), `status` (the tab's words: Sent, Pending, Failed, Expired, Needs attention, Refused), `reason` (the refusal reason or the needs-attention reason code; empty otherwise), `counterparty_name` (Haven's one recipient-naming order, #4882: the user's own account, contact, Haven-curated catalog merchant, receipt seller name, then a machine payment's resource host; empty when none resolves), `counterparty_address`, `amount` (human units), `token`, `approx_value` and `approx_currency` (SERVE-TIME: re-priced at today's rate in the user's display currency; empty, never 0, when the token has no usable quote), `tx_hash` (the merchant settlement when recorded, else the funding leg; empty for a refusal or an unsent payment) and `payment_id` (empty for a refusal).
          *
          *     Capped at 10,000 rows. The read takes one row more than the cap, so an export over it is refused with a 413 that says 'more than 10,000 rows' and names the tab's filters — a refusal, never a truncated file.
          */
@@ -2968,7 +3008,7 @@ export type paths = {
         };
         /**
          * Fetch a verifiable receipt for a settled payment.
-         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle.
+         * @description Returns a self-contained proof bundle (payment facts, the delegate authorization signature, and the on-chain tx) plus a self-verification. verification checks the delegate signature over the hash named by its verifiedOver field: on erc7710 payments the EIP-712 delegation digest (verifiedOver delegation_digest), on retired-rail history the raw sign_hash. verification is NOT proof the payment settled and does not bind the payment block: amount and recipient are Haven-asserted, and settlement is proven only by the on-chain transaction (settlementTxHash / onChain.txHash, check on an explorer). Direct-payment and eip3009-funding bundles carry authorization.signatureScheme eip712_userop and their verification returns not_verifiable_offline — the signed user operation is not part of the bundle. Which leg each field names: on an eip3009 payment the intent row is the funding leg, so payment.recipient and onChain.txHash name the agent's own delegate and the funding transaction, while payment.parties.merchant names the merchant recorded at authorize and settlementTxHash names the merchant's settlement transaction — null until Haven has verified it on-chain. On erc7710 and direct payments the one transaction settles the payment, so settlementTxHash equals onChain.txHash.
          */
         get: operations["getPaymentReceipt"];
         put?: never;
@@ -3071,6 +3111,26 @@ export type paths = {
          * @description Read-only settle-leg handoff (#1307): re-serves the merchant_url, tool_name, arguments, and mcp_transport recorded on the intent at quote time (haven_pay_mcp_tool), so haven_settle_mcp_tool / haven_complete_mcp_tool can omit them and let Haven rehydrate by payment_id instead of the caller re-threading them. Convenience metadata for retrying the MERCHANT's own call — never payment authority.
          */
         get: operations["getX402MerchantCallContext"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/x402/{id}/payment-required": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Fetch the merchant x402 challenge stored for an x402 intent.
+         * @description Read-only (#4872): re-serves the merchant's x402 PaymentRequired exactly as Haven stored it at authorize (#1355), for any x402 intent of the calling agent. The hosted haven_submit reads the merchant's checkout-details request from it before it relays a plain-HTTP payment, which stores no merchant call context. Merchant content, untrusted, never payment authority, and never the owner's details. payment_required is null on a row stored before #1355 and on a challenge too large to store. Writes nothing. Not-found and not-yours are the same 404; a non-x402 intent is a 409.
+         */
+        get: operations["getX402StoredPaymentRequired"];
         put?: never;
         post?: never;
         delete?: never;
@@ -3534,8 +3594,8 @@ export type paths = {
         get?: never;
         put?: never;
         /**
-         * Record one inbound USDC transfer in the account receive index.
-         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the production indexer feeds the same repository). Idempotent per (chain, tx hash): a re-ingest returns `ingested: false` rather than double-counting.
+         * Index the USDC transfers one transaction actually carried to this account.
+         * @description Owner-scoped ingestion hook (tests and the eventual indexer tick; the merchant index pass, run while the owner views Sales since #5012, feeds the same repository). Since #4903 the route VERIFIES AGAINST THE CHAIN: it takes only `tx_hash`, reads the transaction receipt, and indexes the settlement-token transfers whose `to` is this account. A caller-supplied payer, amount, token or block time is refused with 400, so a row for a hash that did not pay the account cannot be created through any route. Idempotent per (chain, tx hash, log index): a re-ingest returns `ingested: false` rather than double-counting. 404 means the chain says the transaction carried no USDC transfer to this account; 503 means the chain could not be read and nothing was written.
          */
         post: operations["ingestInboundTransfer"];
         delete?: never;
@@ -3800,6 +3860,302 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/merchant-services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the merchant-services setting and the merchant account.
+         * @description The dashboard read (#4895): the setting and the merchant account in one authenticated call. Both reads are scoped to the caller, so another user's setting is never returned. `enabled` is false and `merchant_account` is null for a user who never turned merchant services on.
+         */
+        get: operations["getMerchantServices"];
+        put?: never;
+        /**
+         * Turn merchant services on: record the setting and create the merchant account.
+         * @description One request, one transaction (#4895, epic #4885). Records the per-user setting, creates a dedicated account through the SAME create-additional path the New account dialog uses (the owner passkey is copied SERVER-SIDE from `source_account_id`; the server receives no passkey assertion and the session is the authentication), and marks that account as the merchant account. The request names NO account to mark — the account is the one this request creates, and a body carrying any other property is refused by this schema (`additionalProperties: false`). The account is created with the name "Sales", set on the server (the owner can rename it later), is never the default, has no agents or budgets, and counts toward the existing per-network account limit. There is ONE merchant account per user, enforced by a partial unique index on the marker; the network chosen when merchant services are first turned on is permanent for the pilot, so a turn-on naming a different chain is refused with `MERCHANT_ACCOUNT_ON_OTHER_NETWORK`. The three body fields are required the FIRST time, when the account is created (`MERCHANT_SETUP_DETAILS_REQUIRED` names the missing ones), and none is needed once the merchant account exists: turning merchant services back on sends no body, or an empty one. A repeat, a retry or a second tab answers the existing account (200) instead of creating a second one: the route derives its idempotency key in the `merchant-service:` namespace, which `POST /accounts/hybrid` refuses from clients.
+         */
+        post: operations["turnOnMerchantServices"];
+        /**
+         * Turn merchant services off.
+         * @description Records the setting as off and KEEPS the merchant account and its history (#4895). The account is not unlinked and the marker stays, so turning merchant services back on reuses the same account. Idempotent: turning off when it was never on answers the same body.
+         */
+        delete: operations["turnOffMerchantServices"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the merchant account's Sales keys by prefix.
+         * @description The caller's keys, newest first (#4896). Returns the display prefix only — never the secret, never the hash — plus who created each key and when, who revoked it and when, and when it was last used to make an accepted request. Revoked keys stay in the list with their revocation time.
+         */
+        get: operations["listMerchantKeys"];
+        put?: never;
+        /**
+         * Create a receive-only Sales key for the merchant account.
+         * @description Mints a merchant key (`sk_merchant_…`) bound to the caller's merchant account (#4896, epic #4885). The secret is returned by THIS call only: only its SHA-256 hash and its display prefix are stored, and no later read can produce it. The request carries no body — the account is the caller's merchant account, never one named by the caller, so a key cannot be minted for another account, including the same user's other accounts. With no merchant account yet the route refuses with `MERCHANT_ACCOUNT_REQUIRED` (409) rather than minting a credential that could never authenticate. The key authenticates only the merchant routes (sales ingest, #4897); it is refused at every agent, payment and dashboard route, and it cannot move funds, sign, or change signers, budgets or agents.
+         */
+        post: operations["createMerchantKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-keys/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke a Sales key.
+         * @description Records who revoked the key and when, and the key is refused on the next request (#4896). Idempotent: revoking an already-revoked key answers the row unchanged, so a retry cannot rewrite `revoked_by` / `revoked_at`. A key that is not the caller's answers 404 — never 403 — so the URL does not confirm another user's key exists.
+         */
+        delete: operations["revokeMerchantKey"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-catalogue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read the merchant account's catalogue and the last read.
+         * @description The catalogue as the owner's screens read it (#4899, epic #4885): the deployment address, the outcome of the last read, a mismatch if the document is not this account's deployment, and the product list. Scoped to the caller's merchant account, so another user's catalogue is never returned. A user with no merchant account, or one who has not saved an address, gets `deployment_url: null`, `last_read_status: 'never'` and an empty list. Read-only: nothing here charges a price, creates a sale or names a recipient.
+         */
+        get: operations["getMerchantCatalogue"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-catalogue/deployment": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save the kit deployment's address and read its discovery document.
+         * @description Stores the public address of the owner's kit deployment for the merchant account and reads `/.well-known/x402` from it immediately, so the answer to the save is the catalogue the document produced (#4899, epic #4885). The address is stored as the deployment's ORIGIN — path, query and fragment are dropped — because the kit serves the discovery document at `/.well-known/x402` and nowhere else, so the read is always `<origin>/.well-known/x402` and a pasted path cannot become the path Haven reads. The address is checked by the outbound guard's own policy before it is stored — https only, default port, no embedded credentials, no IP literal, no locally-bound name — and refused with `MERCHANT_CATALOGUE_URL_REFUSED` and the guard's `reason`; the read itself refuses a host that resolves into private or local space and a redirect that leaves the host. A read that fails does not fail the save: the address is stored, the outcome is recorded in `last_read_status`, and the last good product list stays in place. A CHANGED address retires the list the old one produced (its products are marked no longer offered, not deleted, so past sales keep their names). The product list is stored in its own table, never `merchant_catalog`.
+         */
+        put: operations["saveMerchantCatalogueDeployment"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-catalogue/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Read the deployment again, on request.
+         * @description Reads the saved deployment's discovery document again and answers the catalogue (#4899, epic #4885). The scheduled refresh reads every configured deployment every 15 minutes (`background-jobs.ts`), so this is the owner's "read it now". A failed read records its outcome and leaves the last good list in place; a document whose receiving address or network is not this account's is recorded as a mismatch and its products are not used. The request carries no body.
+         */
+        post: operations["refreshMerchantCatalogue"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant/sales": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Report a sale: one record, accepted only against a transfer Haven read from the chain.
+         * @description The merchant key's one write (#4897, epic #4885). The body is the sale record of `docs/architecture/12-merchant-kit.md` section 5. Haven reads the transaction itself and stores the sale only when it finds a USDC transfer into the key's account; the account comes from the key and nowhere else. `amount` and `payer` are validated and stored nowhere: the sale's amount, payer, token and time are copied from the chain read, so a record that states a different amount changes nothing. When one transaction carries several USDC transfers into the account the record attaches to the transaction as a whole: its amount is the sum of the transfers that do not come from the owner's own addresses, and its payer is the single sender when all transfers share one, else "several payers". One record per transaction per account: an identical resend answers 200 with the stored sale and writes nothing, a different record for the same transaction answers 409 and the first stands. The retry answer (425 `transaction_not_visible`) is distinct from every refusal: the receipt is not found yet or has fewer than 3 confirmations, so the same record may be sent again after `Retry-After` seconds. A transaction that paid another Haven account and one that paid nobody get the same 422, so a key cannot test whether a hash paid another account. Every refusal carries `error` and `error_code` with the same machine-readable code, and `message` in words. Stripe-held sales (#4952, dev and Stripe sandbox only): when the transaction pays the key's account nothing, a USDC transfer to an address the owner registered to the account, active at the transfer's block time, is accepted as a sale with `held_by` `stripe` and `receiving_address` from the registry; no transfer is indexed and no balance moves. When legs go to several registered addresses, only the legs to the first one by log index count, so the row's address and amount agree.
+         */
+        post: operations["ingestMerchantSale"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The merchant account's sales for one period: totals and breakdowns.
+         * @description The owner's totals for the Sales page (#4897, epic #4885). Day boundaries are UTC: `from` and `to` are calendar days, both inclusive, so `from=2026-11-01&to=2026-11-30` is [2026-11-01T00:00Z, 2026-12-01T00:00Z); either may be omitted. EVERY figure is computed from all indexed transfers into the account, never from the receive balance or a match kind, and excludes zero-value transfers and transfers from the owner's own addresses. A transaction with a sale record counts once, with the sale's amount (its transfers are not added on top); a payment with no sale record is revenue `without_product`; a transaction paid only from the owner's own addresses is an `own_move` and is in no revenue figure. `own_moves` counts those account-held TRANSACTIONS (not transfers) and sums what moved, so it matches the `own_move` rows of the list (an own-only transfer to a Stripe deposit address is refused at ingest); an own transfer inside a mixed transaction is left out of revenue and is not counted there. `revenue_raw` is the sum of the sales and the payments without a product; `sales` counts sales; `average_sale_raw` is `revenue_raw` divided by `sales` plus `without_product.count`, the total over every payment counted (rounded down; 0 with none). `by_product` lists sales only, `by_payer` and `unattributed` partition the revenue payments by payer (a payment from several payers is `unattributed`), so by_product + without_product and by_payer + by_payer_other + unattributed each add up to `revenue_raw`; `by_day` names only days with revenue. Sales received at a registered Stripe deposit address (#4952) count in `revenue_raw`, `sales`, `by_product`, `by_payer` and `by_day` like any other sale, wherever the money landed (#4981); they are in no Haven balance. The split stays on the wire: `revenue_in_account_raw` plus `received_in_stripe.amount_raw` is `revenue_raw`, and each `by_day` row carries `in_stripe_raw`. A Stripe-held sale from several payers stores no individual payers, so it is `unattributed`. `without_product` and `own_moves` are about payments into the account and are unchanged by it. Breakdowns name the top 100 by amount and fold the rest into `*_other`; `by_payer[].last_paid_at` is the newest of that payer's revenue payments in the period, and each `by_day` row splits its sales by the products `by_product` names (the rest in `other_products_raw`) beside its `without_product_raw`. The filters (`kind`, `product_id`, `payer`, `q`, #4959) cut the same relation the list reads, so for one filter set every figure here agrees with the rows of `GET /merchant-sales/payments`; `revenue_in_account_raw`, `received_in_stripe` and `by_day[].in_stripe_raw` honour them too. A payer is one of the caller's contacts, one of the caller's own addresses, or a wallet; nothing says whether a wallet belongs to another Haven user or agent. Amounts are atomic USDC units (strings). With merchant services off or no merchant account the answer is the zero summary. Read-only.
+         */
+        get: operations["getMerchantSalesSummary"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/facets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The period's products and payers, for the Sales filters.
+         * @description Every product with a sale and every payer of the period (#4959), unfiltered and not capped, for the option lists of the Sales page's filters. A payer is every address the `payer` filter can match: the payer of each payment from one payer, and each transfer's payer of a payment from several payers. Products carry the label the reads show; payers are classified as in the other reads. Period as in `GET /merchant-sales/summary`. With merchant services off or no merchant account both lists are empty. Read-only.
+         */
+        get: operations["getMerchantSalesFacets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The merchant account's payments, newest first, one row per transaction.
+         * @description The paged list for the Sales page (#4897, epic #4885): one row per transaction into the account, or per sale received at a registered Stripe deposit address (#4952), in the period (UTC days, both inclusive), newest first, keyset-paged on (block time, transaction hash) with an opaque `cursor`, never an offset. Default 50 rows, at most 200. Each row is a `sale`, a payment with `no_product`, or an `own_move` (a transfer between the owner's own accounts, in no revenue figure; its amount is what moved). `amount_raw` is the sale's amount, or the sum of the transaction's transfers that are not the owner's own for a payment with no sale record. `product_label` is the catalogue's name when the product id is known there, else the name in the record, else the product id. `receipt_number` and `vat_treatment` are the merchant's own statement, unchecked. `held_by` is `account` for a payment into the account and `stripe` for a sale received at a registered Stripe deposit address (#4952), which carries `receiving_address`, has no transfers of its own, and counts in the summary's revenue figures (#4981) though it is in no Haven balance. A transfer to a registered deposit address from the owner's own addresses only is refused at ingest, so it is never stored and never listed. `payer` is a contact, one of the caller's own addresses, or a wallet, and null when `several_payers`. Nothing says whether a wallet belongs to another Haven user or agent. The filters (`kind`, `product_id`, `payer`, `q`, #4959) are those of `GET /merchant-sales/summary`, and `total` counts the payments the filter set has in the period, every page included. With merchant services off or no merchant account the list is empty. The answer is read-only, but the read also starts a background refresh of the caller's own Sales account's index (#5012): at most once per 30 s per account, never awaited, so it never delays or changes this answer. A transfer it finds appears on the next read.
+         */
+        get: operations["listMerchantSalesPayments"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments/{txHash}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * One payment: its sale record fields and its transfer legs.
+         * @description One payment into the merchant account (#4897, epic #4885): the list row's fields, the merchant's reference, and the indexed transfers of the transaction (`log_index`, payer, amount; zero-value transfers are not listed). A Stripe-held sale has no indexed transfers: its chain facts come from the sale row, as one leg with a null `log_index`. 404 PAYMENT_NOT_FOUND when the account has no such payment, the same answer for a transaction that paid another account. Read-only.
+         */
+        get: operations["getMerchantSalesPayment"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-sales/payments/{txHash}/record": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Clear a payment's sale record.
+         * @description The owner clears a wrong sale record (#4897, epic #4885). The merchant's record is deleted; the payment stays, shown with no product, and a new record for the transaction is then accepted by `POST /merchant/sales`. A cleared Stripe-held sale has no transfers to remain, so it leaves the list entirely. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
+         */
+        delete: operations["clearMerchantSaleRecord"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-deposit-addresses": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * The Sales account's registered Stripe deposit addresses, active and retired.
+         * @description The owner's registry of Stripe deposit addresses (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY`). Every registration, active and retired, newest first. Each carries `verified: false` and a `verification` note: the screens render it as "registered by you, not verified by Haven", because the address is Stripe-controlled and Haven cannot check it is the owner's. A sale paid to an active registered address is stored as a Stripe-held sale and never counts in a Haven balance. With merchant services off or no merchant account the list is empty. Owner session only: a Sales key cannot call it. Read-only.
+         */
+        get: operations["listMerchantDepositAddresses"];
+        put?: never;
+        /**
+         * Register a Stripe deposit address for the Sales account.
+         * @description The owner registers the address a payment processor receives on their behalf (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). The chain is the Sales account's own. The registration is the owner's word: it is labelled "registered by you, not verified by Haven" (`verified: false`), and a proof of address ownership is required before any production use. Refused: `INVALID_DEPOSIT_ADDRESS` (400, not a 0x-prefixed 20-byte hex address); `DEPOSIT_ADDRESS_IS_OWN` (409, one of the owner's own smart accounts on any network, or a current or past delegate address of one of their agents); `DEPOSIT_ADDRESS_ALREADY_REGISTERED` (409, an active registration on any account on this chain); `MERCHANT_ACCOUNT_REQUIRED` (409, merchant services are off or there is no merchant account). A retired address can be registered again. Owner session only: a Sales key cannot call it, and it is on the device-login must-refuse list. Rate limited as a money-path write.
+         */
+        post: operations["registerMerchantDepositAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/merchant-deposit-addresses/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Retire a registered Stripe deposit address.
+         * @description The owner retires a registration (#4952, epic #4886; dev and Stripe sandbox only, enforced per Sales account by #5028: a Sales account whose chain is not a testnet answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` and writes nothing). `retired_at` is set and nothing is deleted: new sales stop being attributed to the address, and the sales already attributed stay. The address can be registered again afterwards, by this account or another. Owner session only, on the device-login must-refuse list, rate limited as a money-path write.
+         */
+        post: operations["retireMerchantDepositAddress"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/merchants": {
         parameters: {
             query?: never;
@@ -3878,6 +4234,13 @@ export type components = {
             merchant_to: string | null;
             /** @description The x402 resource the agent tried to pay, when the attempt was resource-scoped. */
             resource_url: string | null;
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
+            counterparty_name?: string | null;
+            /**
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @enum {string|null}
+             */
+            counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
             /**
              * @description The closed refusal vocabulary — mirrors the payment_refusals CHECK exactly. The plain words are the frontend's one reason-word map, not a wire field.
              * @enum {string}
@@ -4832,6 +5195,341 @@ export type components = {
         SuccessResponse: {
             success: boolean;
         };
+        MerchantServicesState: {
+            enabled: boolean;
+            /** @description POST only: true when this request created the merchant account, false when it answered an existing one. */
+            created?: boolean;
+            /**
+             * Format: date-time
+             * @description GET only: when merchant services were FIRST turned on. Turning them off and on again does not move it.
+             */
+            enabled_at?: string | null;
+            /**
+             * Format: date-time
+             * @description GET only: when merchant services were last turned off. Null when they were never on.
+             */
+            disabled_at?: string | null;
+            merchant_account: {
+                /** Format: uuid */
+                id: string;
+                /** @example 0x1111111111111111111111111111111111111111 */
+                account_address: string;
+                chain_id: number;
+                name: string;
+                /** Format: date-time */
+                created_at: string;
+            } | null;
+        };
+        MerchantKey: {
+            /** Format: uuid */
+            id: string;
+            /** @description The display prefix: `sk_merchant_` plus the first twelve hex characters of the secret. Never enough to authenticate. */
+            key_prefix: string;
+            /**
+             * Format: uuid
+             * @description The user who created the key.
+             */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /**
+             * Format: uuid
+             * @description The user who revoked the key, or null while it is live.
+             */
+            revoked_by: string | null;
+            /**
+             * Format: date-time
+             * @description When the key was revoked, or null while it is live.
+             */
+            revoked_at: string | null;
+            /**
+             * Format: date-time
+             * @description When the key last made an ACCEPTED request, or null. Updated at most once a minute per key.
+             */
+            last_used_at: string | null;
+        };
+        MerchantSaleRecord: {
+            /** @description The sale-record schema version. 1 is the only version; absent means 1. */
+            version?: number;
+            /** @description The settlement transaction hash. */
+            tx_hash: string;
+            /** @description CAIP-2 identifier. Must be `eip155:<the key account's chain id>`. */
+            chain: string;
+            product_id: string;
+            product_name?: string;
+            /** @description Validated and stored nowhere: the sale's amount is read from the chain. */
+            amount: string;
+            /** @description Validated and stored nowhere: the sale's payer is read from the chain. */
+            payer: string;
+            merchant_reference: string;
+            receipt_number?: string;
+            /** @enum {string} */
+            vat_treatment?: "SE_25" | "REVERSE_CHARGE";
+        };
+        MerchantSale: {
+            /** Format: uuid */
+            id: string;
+            tx_hash: string;
+            chain: string;
+            record_version: number;
+            product_id: string;
+            product_name: string | null;
+            merchant_reference: string;
+            receipt_number: string | null;
+            /** @enum {string|null} */
+            vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
+            /** @description Atomic USDC units: the sum of the chain transfers that count as revenue (not from the owner's own addresses). Read from the chain, never from the record. */
+            amount_raw: string;
+            token_address: string;
+            /** @description The single sender when every transfer shares one; null otherwise. */
+            payer_address: string | null;
+            several_payers: boolean;
+            /** @description Every transfer in the transaction came from one of the owner's own addresses. */
+            sender_is_own_address: boolean;
+            /**
+             * @description `stripe` when the transaction paid a deposit address registered to the account and not the account itself (#4952); taken from the registry, never from the record.
+             * @enum {string}
+             */
+            held_by: "account" | "stripe";
+            /** @description The registered deposit address a Stripe-held sale was received at; null for a sale into the account. */
+            receiving_address: string | null;
+            block_number: number;
+            /** Format: date-time */
+            block_time: string;
+            /** Format: date-time */
+            created_at: string;
+        };
+        MerchantDepositAddress: {
+            /** Format: uuid */
+            id: string;
+            /** @description Lower-case. */
+            address: string;
+            /** @description CAIP-2: the Sales account's network. */
+            chain: string;
+            /** Format: date-time */
+            registered_at: string;
+            /** Format: date-time */
+            retired_at: string | null;
+            active: boolean;
+            /**
+             * @description Always false: Haven cannot verify a Stripe-controlled address is the owner's.
+             * @enum {boolean}
+             */
+            verified: false;
+            /** @description The label the screens render: "Registered by you, not verified by Haven." */
+            verification: string;
+        };
+        MerchantDepositAddressList: {
+            /** @description The same label, once for the list. */
+            verification: string;
+            addresses: components["schemas"]["MerchantDepositAddress"][];
+        };
+        MerchantSalesPayer: {
+            /**
+             * @description `contact`: one of the caller's contacts; `own`: one of the caller's own accounts or agents (current or replaced delegate addresses); `wallet`: any other address, never labelled as a Haven user.
+             * @enum {string}
+             */
+            kind: "contact" | "own" | "wallet";
+            /** @description The contact, account or agent name; null for a wallet. */
+            name: string | null;
+            address: string;
+        };
+        MerchantSalesAmount: {
+            count: number;
+            amount_raw: string;
+        };
+        /** @description Today's USDC price in each display currency (a display rate, not the rate at the time of sale). A currency is null when it has no usable quote; the whole field is null when the read failed or Sales is off. */
+        MerchantSalesUsdcRates: {
+            usd: number | null;
+            eur: number | null;
+            sek: number | null;
+        } | null;
+        MerchantSalesSummary: {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
+            /** @description Atomic USDC units: sales plus payments without a product, wherever the money landed (Stripe-held sales included, #4981). Own moves are not in it. */
+            revenue_raw: string;
+            /** @description The part of `revenue_raw` received in the Haven account (#4981): `revenue_in_account_raw` plus `received_in_stripe.amount_raw` is `revenue_raw`. Under the active filters. */
+            revenue_in_account_raw: string;
+            sales: number;
+            /** @description `revenue_raw` divided by `sales` plus `without_product.count`, the total over every payment counted, rounded down; 0 when none (#4981). */
+            average_sale_raw: string;
+            without_product: components["schemas"]["MerchantSalesAmount"];
+            own_moves: components["schemas"]["MerchantSalesAmount"];
+            by_product: {
+                product_id: string;
+                label: string;
+                sales: number;
+                amount_raw: string;
+            }[];
+            by_product_other: {
+                products: number;
+                sales: number;
+                amount_raw: string;
+            };
+            by_payer: {
+                payer: components["schemas"]["MerchantSalesPayer"];
+                payments: number;
+                amount_raw: string;
+                /**
+                 * Format: date-time
+                 * @description The newest of this payer's revenue payments in the period (#4959).
+                 */
+                last_paid_at: string;
+            }[];
+            by_payer_other: {
+                payers: number;
+                payments: number;
+                amount_raw: string;
+            };
+            /** @description Revenue payments from several payers: not attributed in `by_payer`. */
+            unattributed: {
+                payments: number;
+                amount_raw: string;
+            };
+            /** @description The Stripe-held part of `revenue_raw` (#4952, #4981): sales received at a registered Stripe deposit address, in no Haven balance. Own moves are left out. Counts transactions. Under the active filters. */
+            received_in_stripe: components["schemas"]["MerchantSalesAmount"];
+            by_day: {
+                /** @description UTC calendar day, YYYY-MM-DD. */
+                day: string;
+                payments: number;
+                sales: number;
+                revenue_raw: string;
+                /** @description The day's payments without a product (#4959). */
+                without_product_raw: string;
+                /** @description The part of the day's `revenue_raw` received in Stripe (#4981); the rest was received in the Haven account. */
+                in_stripe_raw: string;
+                /** @description The day's sales by product, for the products `by_product` names, largest first (#4959). With `other_products_raw` and `without_product_raw` it adds up to `revenue_raw`. */
+                by_product: {
+                    product_id: string;
+                    amount_raw: string;
+                }[];
+                /** @description The day's sales of the products folded into `by_product_other`. */
+                other_products_raw: string;
+            }[];
+        };
+        MerchantSalesPayment: {
+            tx_hash: string;
+            /** Format: date-time */
+            block_time: string;
+            /** @enum {string} */
+            kind: "sale" | "no_product" | "own_move";
+            /** @description The sale's amount, or the non-own transfers' sum; for an own move, what moved (no revenue). */
+            amount_raw: string;
+            product_id: string | null;
+            /** @description Catalogue name, else the record name, else the product id. */
+            product_label: string | null;
+            payer: components["schemas"]["MerchantSalesPayer"] | null;
+            several_payers: boolean;
+            receipt_number: string | null;
+            /** @enum {string|null} */
+            vat_treatment: "SE_25" | "REVERSE_CHARGE" | null;
+            /**
+             * @description `account` for a payment into the Sales account; `stripe` for a sale received at a registered Stripe deposit address (#4952): it counts in the summary revenue figures, split by where received (#4981), and never in a balance.
+             * @enum {string}
+             */
+            held_by: "account" | "stripe";
+            /** @description The registered deposit address of a Stripe-held sale; null for an account payment. */
+            receiving_address: string | null;
+        };
+        MerchantSalesPaymentsPage: {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
+            payments: components["schemas"]["MerchantSalesPayment"][];
+            /** @description Pass as `cursor` for the next page; null on the last page. */
+            next_cursor: string | null;
+            /** @description How many payments the filter set has in the period, every page included (#4959). */
+            total: number;
+        };
+        MerchantSalesFacets: {
+            products: {
+                product_id: string;
+                label: string;
+            }[];
+            payers: components["schemas"]["MerchantSalesPayer"][];
+        };
+        MerchantSalesPaymentDetail: components["schemas"]["MerchantSalesPayment"] & {
+            usdc_rates: components["schemas"]["MerchantSalesUsdcRates"];
+            merchant_reference: string | null;
+            legs: {
+                log_index: number | null;
+                payer: components["schemas"]["MerchantSalesPayer"];
+                amount_raw: string;
+            }[];
+        };
+        MerchantKeyListResponse: {
+            keys: components["schemas"]["MerchantKey"][];
+        };
+        CreatedMerchantKey: {
+            /** Format: uuid */
+            id: string;
+            /** @description The display prefix the list returns. */
+            key_prefix: string;
+            /**
+             * Format: uuid
+             * @description The user who created the key.
+             */
+            created_by: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            revoked_by: string | null;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** Format: date-time */
+            last_used_at: string | null;
+            /** @description The secret. Returned by this call only; it is never stored and no later read can produce it. */
+            secret: string;
+        };
+        MerchantCatalogueProduct: {
+            /** @description The kit's stable product id (the products file's `id`), which a sale record also carries. */
+            product_id: string;
+            /** @description The human name, or null when the document has none. */
+            name: string | null;
+            description: string | null;
+            /** @description `METHOD /path`, as the document spells it. */
+            route: string | null;
+            model: string | null;
+            /** @description The price in whole atomic USDC units, as a decimal string. Display only: this slice never charges it. */
+            price_atomic: string;
+            /** @description CAIP-2 identifier of the document's network. */
+            network: string;
+            output_token_cap: number | null;
+            /** @description False when the document no longer lists the product. The row is kept so a past sale keeps its name. */
+            offered: boolean;
+            /**
+             * Format: date-time
+             * @description When the product stopped being offered, or null while it is offered.
+             */
+            removed_at: string | null;
+        };
+        MerchantCatalogueState: {
+            /** @description The public address of the kit deployment the owner saved, or null when none is saved. */
+            deployment_url: string | null;
+            /**
+             * Format: date-time
+             * @description When Haven last TRIED to read the document, or null when it never has.
+             */
+            last_read_at: string | null;
+            /**
+             * @description The outcome of the last read: `ok` (the list matches the document), `unreachable` (no answer), `malformed` (not a kit document), `mismatch` (not this account's deployment), `refused` (the address is not one Haven reads), `never` (no read yet).
+             * @enum {string}
+             */
+            last_read_status: "never" | "ok" | "unreachable" | "malformed" | "mismatch" | "refused";
+            /** @description The machine reason and detail of the last read, for the owner and for support. */
+            last_read_detail: string | null;
+            /** @description True when the document's receiving address or network is not the merchant account's. */
+            mismatch: boolean;
+            mismatch_reason: string | null;
+            /** @description What the last GOOD document called the endpoint. */
+            document_name: string | null;
+            document_operator_name: string | null;
+            /** @description The CAIP-2 network the last good document named. */
+            document_network: string | null;
+            /** @description The receiving address the last good document named. A LABEL: it is compared against the account's own address and never used as a payment destination. */
+            document_pay_to: string | null;
+            document_updated: string | null;
+            /** @description The product list, offered products first. */
+            products: components["schemas"]["MerchantCatalogueProduct"][];
+        };
         Label: {
             /** Format: uuid */
             id: string;
@@ -4893,16 +5591,36 @@ export type components = {
             vies_status: "pending" | "valid" | "invalid" | "not_verifiable" | null;
             /** Format: date-time */
             vies_checked_at: string | null;
+            /** @description Where a merchant should send the receipt. Null when not saved. */
+            receipt_email: string | null;
+            /** @description Structured billing address. Null when not saved. */
+            billing_address: components["schemas"]["OwnerAddress"] | null;
+            /** @description Structured shipping address. Null when not saved. */
+            shipping_address: components["schemas"]["OwnerAddress"] | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        OwnerAddress: {
+            line1: string;
+            line2?: string;
+            line3?: string;
+            city: string;
+            postCode?: string;
+            /** @description ISO 3166-2 subdivision code, e.g. "SE-AB". */
+            subdivision?: string;
+            /** @description ISO 3166-1 alpha-2, uppercase. */
+            country: string;
         };
         UpsertCompanyDetailsRequest: {
             legal_name: string;
             country: string;
             org_number: string;
             vat_number?: string | null;
+            receipt_email?: string | null;
+            billing_address?: components["schemas"]["OwnerAddress"] | null;
+            shipping_address?: components["schemas"]["OwnerAddress"] | null;
         };
         DeleteCompanyDetailsResponse: {
             ok: boolean;
@@ -4944,6 +5662,35 @@ export type components = {
             /** @enum {boolean} */
             available: false;
             reason: components["schemas"]["AgentTaxDeclarationUnavailableReason"];
+        };
+        UpsertAgentCheckoutDetailsSharingRequest: {
+            /** @description True lets THIS agent share the owner’s saved checkout details; false withdraws sharing (never refused). */
+            checkout_details_sharing_enabled: boolean;
+        };
+        AgentCheckoutDetailsSharingState: {
+            /** Format: uuid */
+            id: string;
+            checkout_details_sharing_enabled: boolean;
+        };
+        /**
+         * @description Why no checkout details are available: the deployment flag is off, sharing is off for this agent, or the owner has saved none of the three fields.
+         * @enum {string}
+         */
+        AgentCheckoutDetailsUnavailableReason: "feature_disabled" | "disabled" | "no_details";
+        AgentCheckoutDetails: {
+            /** @description The receipt email the owner saved. Absent when none is saved — never the sign-up email. */
+            receipt_email?: string;
+            billing_address?: components["schemas"]["OwnerAddress"];
+            shipping_address?: components["schemas"]["OwnerAddress"];
+        };
+        AgentCheckoutDetailsContent: {
+            /** @enum {boolean} */
+            available: true;
+            checkout_details: components["schemas"]["AgentCheckoutDetails"];
+        } | {
+            /** @enum {boolean} */
+            available: false;
+            reason: components["schemas"]["AgentCheckoutDetailsUnavailableReason"];
         };
         ReplaceAgentLabelsRequest: {
             label_ids: string[];
@@ -5248,6 +5995,7 @@ export type components = {
             labels: components["schemas"]["Label"][];
             organization_id: string | null;
             tax_declaration_enabled: boolean;
+            checkout_details_sharing_enabled: boolean;
             avatar_tint: number;
             runtime_mcp_mode?: string | null;
             mcp_last_seen_at?: string | null;
@@ -5497,6 +6245,8 @@ export type components = {
             submission_outcome_pending?: boolean;
             /** @description Which settlement branch this x402 payment runs (#946), from machine_metadata. Null on the legacy rail, on any x402 intent whose scheme metadata predates #946, or any stored value outside this enum. */
             settlement_scheme?: ("eip3009" | "erc7710") | null;
+            /** @description The required checkout-details field names the merchant challenge carried, recorded at authorize (#5030). Field names only, never the owner's values. Omitted when the challenge asked for no required field, and on rows authorized before #5030. */
+            checkout_details_required_fields?: ("receipt_email" | "billing_address" | "shipping_address")[];
             /** @description True only when an eip3009 payment's merchant settlement transaction is already recorded and on-chain-verified (#3475). Always omitted on erc7710, whose one settlement transaction IS the confirmed intent rather than a separately recorded hash. Omitted — never false — when unknown. */
             merchant_settlement_recorded?: boolean;
             /** @description The merchant settlement transaction Haven recorded and verified on-chain (#4530) — the transaction `merchant_settlement_recorded` reports, named so a status read can confirm WHICH one was recorded (the settlement sweep records one the agent never reported). Present only when `merchant_settlement_recorded` is; omitted otherwise, and never the merchant's unverified echo. A public on-chain transaction id, not a secret. */
@@ -5628,6 +6378,8 @@ export type components = {
                 [key: string]: unknown;
             };
             catalog_name?: string;
+            /** @description The merchant's checkout-details request from the stored payment challenge (`extensions["haven-checkout-details"]`), verbatim and unvalidated; absent when it asked for nothing. Field names and required flags only, never the owner's values (#4872). */
+            checkout_details_request?: unknown;
             mcp_transport?: {
                 handshake_required?: boolean;
                 /** @enum {string} */
@@ -6194,6 +6946,13 @@ export type components = {
             source?: string;
             x402ResourceUrl?: string | null;
             x402MerchantAddress?: string | null;
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
+            recipientName?: string | null;
+            /**
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @enum {string|null}
+             */
+            recipientNameSource?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
             paymentId?: string;
             paymentProofStatus?: string | null;
             /** @enum {string|null} */
@@ -6303,6 +7062,13 @@ export type components = {
             source?: string;
             x402ResourceUrl?: string | null;
             x402MerchantAddress?: string | null;
+            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
+            recipientName?: string | null;
+            /**
+             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+             * @enum {string|null}
+             */
+            recipientNameSource?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
             paymentId?: string;
             paymentProofStatus?: string | null;
             /** @enum {string|null} */
@@ -6373,6 +7139,13 @@ export type components = {
                 toAccountName: string;
                 /** @example 0x1111111111111111111111111111111111111111 */
                 toAccountAddress: string;
+            };
+            /** @description #5000: present only on an inbound row into the user's Sales account that the Sales page counts as a sale (its own per-transaction rule, `account`-held sales only): a recorded sale, or a payment from anyone other than the owner's own accounts or agents without a product. Only while merchant services are on. Never on a folded move (`ownTransfer`) or on a transfer from another of the user's own accounts. A Stripe-held sale is never a feed row. Each field is null when not recorded. */
+            sale?: {
+                /** @description The Sales page's product label: the catalogue name, else the recorded product name, else the product id. Null on a payment without a product. */
+                productName: string | null;
+                receiptNumber: string | null;
+                merchantReference: string | null;
             };
             /** Format: uuid */
             agentId?: string;
@@ -6851,7 +7624,7 @@ export type components = {
                     x402ResourceUrl: string | null;
                     /** @description One representative recipient address. */
                     to: string | null;
-                    /** @description Contact name, else receipt name, for the merchant address; null when neither exists. */
+                    /** @description The merchant name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name, for the merchant address; null when none exists. The host rides beside it as `x402ResourceUrl`. */
                     merchantName: string | null;
                 } | null;
                 /** @description Payment intents with status failed in the 7-day window. */
@@ -6897,7 +7670,7 @@ export type components = {
             x402ResourceUrl: string | null;
             /** @description The newest member’s raw `to` field — the merchant address on outbound payments, the account’s own address on deposits, and the receiving own account’s address on a folded move (`ownTransfer`, #4268). */
             to: string;
-            /** @description Contact or receipt-merchant name resolved for the counterparty, else the name of the user's own account on the other side of a transfer between two of their accounts (#4099); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
+            /** @description The counterparty name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name (it replaced #4099's contact-and-receipt-first order); null otherwise. On a deposit it is set only for a transfer from another of the user's own accounts, and that deposit is its own group. A folded move (`ownTransfer`, #4268) keeps the value an unfolded send would carry, so a client that predates `ownTransfer` still renders a readable out row. */
             merchantName: string | null;
             /** @description Outbound groups only (#4117): the label of the user's own account the money left — a contact name saved for it first, else the account's own name. Every member of the group left that one account. Absent on deposits and when no name resolves. */
             fromAccountName?: string;
@@ -6907,6 +7680,11 @@ export type components = {
                 fromAccountName: string;
                 /** @description The own Haven name of the account the money reached; "Unnamed account" when it has none, never an address. */
                 toAccountName: string;
+            };
+            /** @description #5000: present only on a group of sales into the user's Sales account (the rows `GET /transactions` marks with `sale`). Sales group apart from the day's other deposits, one group per day whichever products they name. */
+            sale?: {
+                /** @description The Sales page's product label when every member has the same recorded product; null when the members name different products or none. */
+                productName: string | null;
             };
             /** @description The activity class, e.g. `delegate_sweep`; null for plain transfers and x402 payments. */
             activityType: string | null;
@@ -6994,7 +7772,7 @@ export type components = {
             eurValue: number | null;
             /** @description Booked SEK at settle time; null when the row was never priced. */
             sekValue: number | null;
-            /** @description Contact name, else receipt-merchant name, for the counterparty. Null when neither exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4). */
+            /** @description The counterparty name in the one recipient-naming order without the host step (#4882): one of the user's own accounts, else the contact name, else the Haven-curated catalog merchant, else the receipt seller name. Null when none exists — the client then falls back to the x402 resource host, and renders no name at all rather than an address (#3810 rule 4). */
             merchantName: string | null;
             /** @description The x402 resource URL, whose HOST is the last displayable counterparty name. Null on a non-x402 payment. */
             x402ResourceUrl: string | null;
@@ -7137,6 +7915,8 @@ export type components = {
         };
         ReceiveLedgerTransfer: {
             tx_hash: string;
+            /** @description The transfer log index in its transaction — the on-chain half of the row identity (#4903). Null when the source that wrote the row reported none. */
+            log_index: number | null;
             payer_address: string;
             /** @description Atomic units, numeric string. */
             amount_raw: string;
@@ -7152,6 +7932,8 @@ export type components = {
             matched_receipt_id: string | null;
             /** @description True once the row counts in balance_atomic. */
             balance_consumed: boolean;
+            /** @description Whether the payer is one of the owner own addresses, decided at INDEX time (#4903). Recorded, not derived at read time, so a later change to the account set cannot rewrite history. */
+            sender_is_own_address: boolean;
             /** @description match_kind !== null. Unmatched = unearned; nothing is delivered on an unearned row. */
             earned: boolean;
         };
@@ -7231,30 +8013,13 @@ export type components = {
         };
         InboundIngestInput: {
             tx_hash: string;
-            /** @example 0x1111111111111111111111111111111111111111 */
-            payer_address: string;
-            /** @description Atomic units. */
-            amount_raw: string;
-            /**
-             * @description Optional; defaults to the chain registry USDC — the receive index tracks USDC only.
-             * @example 0x1111111111111111111111111111111111111111
-             */
-            token_address?: string;
-            /**
-             * Format: date-time
-             * @description Defaults to now.
-             */
-            block_time?: string;
-            block_number?: string;
         };
         InboundIngestResponse: {
-            /** @description false when the (chain, tx hash) was already indexed — idempotent re-ingest. */
+            /** @description false when every leg of the transaction was already indexed — idempotent re-ingest. */
             ingested: boolean;
-            /**
-             * Format: uuid
-             * @description The row id, or null when it already existed.
-             */
-            id: string | null;
+            /** @description How many USDC legs to this account were newly indexed. */
+            legs_indexed: number;
+            tx_hash: string;
         };
         TransactionsResponse: {
             transactions: components["schemas"]["Transaction"][];
@@ -8787,7 +9552,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -8917,7 +9682,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Rate limited: 20/min per session credential (`ownerProfileRateLimit`, #3332 review M3). The count is shared with every other rate-limited route the same credential calls. */
+            /** @description Rate limited: 20/min per owner (`ownerProfileRateLimit`, #3332 review M3; keyed on the verified session owner, #4955). The count is shared with every other rate-limited owner route keyed by the shared generator (not `/feedback`, which has its own), from any session. */
             429: {
                 headers: {
                     [name: string]: unknown;
@@ -9351,6 +10116,159 @@ export interface operations {
             };
             /** @description The opt-in is not currently possible. The body carries `reason` (`feature_disabled`, `no_company_details` or `vies_not_valid`) and `available: false`; nothing was written. */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    putAgentCheckoutDetailsSharing: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpsertAgentCheckoutDetailsSharingRequest"];
+            };
+        };
+        responses: {
+            /** @description The new state of the switch. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCheckoutDetailsSharingState"];
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Switching ON is not currently possible. The body carries `reason` (`feature_disabled`) and `available: false`; nothing was written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getAgentCheckoutDetails: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: components["parameters"]["AgentId"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored checkout details, or the structured not-available answer. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentCheckoutDetailsContent"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -10577,7 +11495,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -11518,7 +12436,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12094,7 +13012,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -12435,7 +13353,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -13517,7 +14435,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description The account remains linked while a delegation, recovery, or re-key is in progress. */
+            /** @description The account remains linked while a delegation, recovery, or re-key is in progress. Also (#4895) the account is the merchant account: error_code MERCHANT_ACCOUNT_UNLINK_REFUSED — unlinking deletes the account row and its indexed payments. Turning merchant services off stops receiving and keeps the account. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -13587,6 +14505,21 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account is the merchant account (#4895): error_code MERCHANT_ACCOUNT_DEFAULT_REFUSED — the merchant account receives merchant payments and cannot also be the default spending account. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -15853,7 +16786,7 @@ export interface operations {
                     source_account_id?: string;
                     /** @description #4023 create-additional: the WebAuthn credential the user authenticated the dialog with. Must be a passkey on the source account; the new account derives from it alone (no backups, no EOA). */
                     key_id?: string;
-                    /** @description #4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account's chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED. */
+                    /** @description #4023: retried-create dedup (the send_idempotency_key pattern). A retried create returns the FIRST account it created instead of minting a second — checked first, before the source, key and cap checks (#4024), and answered with the stored account's chain_id. A key reused with a different chain_id or key_id is refused with 409 IDEMPOTENCY_KEY_REUSED. Keys in the reserved `merchant-service:` namespace are refused (#4895). */
                     idempotency_key?: string;
                     /** @description Accepted and recorded as history, but REQUIRED FOR NOTHING (#1153) — sending it changes no outcome and omitting it changes no outcome. Kept on the request shape so existing clients keep working. */
                     single_signer_waiver?: {
@@ -15887,7 +16820,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Bad owner configuration, a chain the delegation rail does not serve, or a mixed/ambiguous request shape. */
+            /** @description Bad owner configuration, a chain the delegation rail does not serve (error_code UNSUPPORTED_NETWORK, with `supported` — #4895), a mixed/ambiguous request shape, or an idempotency_key in the reserved `merchant-service:` namespace (error_code RESERVED_IDEMPOTENCY_KEY when the handler refuses it — #4895). */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -16315,7 +17248,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4821). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have landed; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not sign the same operation again: re-read the account state first. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` keeps the route's existing sentence and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -16598,7 +17531,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The submit did not confirm. TWO shapes, told apart by `error_code` (#4820). `submission_outcome_unknown` — the operation was SENT and its answer or its receipt was lost, so it may have moved the funds; `error` says so and `user_op_hash` names the operation the bundler received (a 4337 operation hash, NOT a transaction hash). Do not submit the transfer again: check Activity for the transfer. `onchain_execution_failed` — a KNOWN failure (an explicit pre-send rejection, or an operation that landed and reverted, so nothing moved); `error` is "Transfer failed" and retrying is safe. */
             502: {
                 headers: {
                     [name: string]: unknown;
@@ -17027,6 +17960,13 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
+                            counterparty_name?: string | null;
+                            /**
+                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+                             * @enum {string|null}
+                             */
+                            counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
                             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
                             delivery_reference?: string | null;
                             chain_id?: number | null;
@@ -17374,6 +18314,13 @@ export interface operations {
                             source?: string;
                             x402_resource_url?: string | null;
                             x402_merchant_address?: string | null;
+                            /** @description The counterparty name in the one naming order (#4882): own account, contact, Haven-curated catalog merchant, receipt seller, resource host. On an incoming row it names the sender. Null when nothing named the counterparty — the client renders its own fallback. */
+                            counterparty_name?: string | null;
+                            /**
+                             * @description Which step of the one recipient-naming order produced the name (#4882, epic #4879): own_account → contact → catalog (the agreed, verified receiving address of exactly one Haven-curated catalog merchant on this chain) → receipt (the merchant receipt's seller name, unless it borrows a catalog merchant's name) → x402 (the resource host). Null when nothing named the recipient.
+                             * @enum {string|null}
+                             */
+                            counterparty_name_source?: "own_account" | "contact" | "catalog" | "receipt" | "x402" | null;
                             /** @description #3778: the non-secret delivery pointer reported with an accepted x402 outcome (merchant, product, value, order id); null when none was reported. Never a redemption code or other credential — those are refused at write. */
                             delivery_reference?: string | null;
                             chain_id?: number | null;
@@ -17648,7 +18595,7 @@ export interface operations {
                                 chain_id?: number;
                             }[];
                             top_merchant: {
-                                /** @description The five-step naming order (x402 resource host → own account → contact → receipt → none, #4332); null when nothing resolved — the client renders "Unknown recipient". */
+                                /** @description The one recipient-naming order (#4882, replacing #4332's host-first order): own account → contact → Haven-curated catalog merchant (across chains only when every chain names the same merchant) → receipt seller name → x402 resource host → none; null when nothing resolved — the client renders "Unknown recipient". */
                                 label: string | null;
                                 /** @example 0x1111111111111111111111111111111111111111 */
                                 address: string;
@@ -17658,13 +18605,13 @@ export interface operations {
                         }[];
                         /** @description Top 10 by spend. */
                         merchants: {
-                            /** @description The five-step naming order (#4332, the /transactions order plus one analytics-only step): the x402 resource host of the merchant's most recent payment IN THE WINDOW → one of the user's own accounts (address-only across chains; the oldest account wins a shared address) → the contact name → the receipt's merchant_name (the analytics-only extension) → null. Null means the client renders "Unknown recipient". */
+                            /** @description The one recipient-naming order (#4882, epic #4879; replaces #4332's host-first order): one of the user's own accounts (the oldest account wins a shared address) → the contact name → the catalog merchant's name (the receiving address of exactly one Haven-curated catalog merchant; a merchant group spans chains, so only when every chain names the same merchant) → the receipt's seller name (top-level `saljare.name`, else the flat `merchant_name`; never one that borrows a catalog merchant's name at another address) → the x402 resource host of the merchant's most recent payment IN THE WINDOW → null. Null means the client renders "Unknown recipient". */
                             label: string | null;
                             /**
-                             * @description Which naming step produced `label`.
+                             * @description Which naming step produced `label` (#4882 adds `catalog`: a Haven-curated catalog merchant's name).
                              * @enum {string}
                              */
-                            kind: "x402" | "own_account" | "contact" | "receipt" | "unknown";
+                            kind: "own_account" | "contact" | "catalog" | "receipt" | "x402" | "unknown";
                             /** @description The address /transactions' search matches (`x402MerchantAddress ?? to`) — the "View in Transactions" link target. One merchant group (keyed on `COALESCE(merchant_address, x402_merchant_address, to_address)`) can hold DIFFERENT filter addresses; this is the most FREQUENT one in the group, ties to the most recent payment. */
                             filter_address: string;
                             /** @example 0x1111111111111111111111111111111111111111 */
@@ -20827,7 +21774,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The idempotency key already belongs to a payment. A `submitted` row (#4826) answers `error_code: "payment_already_submitted"` with `payment_id` and `status: "submitted"` — read that payment's status and do not authorize again; the answer is produced at the first replay lookup, before the hourly cap, scope resolution, the remaining-budget read and the funding prepare / deploy check. A replay naming a different resource, payee, amount, asset, network, facilitator set, task budget or sub-budget answers the key-collision 409 (`error` names the field, with `payment_id` and `status`). A conflict whose winner cannot be replayed answers the untyped "Idempotent replay in progress" 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -21237,6 +22184,95 @@ export interface operations {
             };
         };
     };
+    getX402StoredPaymentRequired: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Payment intent id from the quote/authorize response. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The stored challenge, or null when none was stored. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        payment_id: string;
+                        /** @description The merchant's x402 PaymentRequired, verbatim. Untrusted merchant content. */
+                        payment_required: {
+                            [key: string]: unknown;
+                        } | null;
+                    };
+                };
+            };
+            /** @description Error response */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
     authorizeX402PaymentLegacy: {
         parameters: {
             query?: never;
@@ -21316,7 +22352,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description Same as POST /x402/authorize: a `submitted` row answers the typed `payment_already_submitted` 409 with `payment_id` and `status`, and a key collision answers the mismatch 409. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22716,7 +23752,7 @@ export interface operations {
                     };
                 };
             };
-            /** @description Error response */
+            /** @description The sweep is not in a state that can be relayed. `error_code: sweep_outcome_unknown` means the transaction was broadcast but its receipt was not confirmed within the synchronous wait (or the broadcast answer was lost): the body carries `tx_hash` and the sweep may still land. Do not prepare a new sweep — re-submit the SAME authorization and signature (or call /sweep/prepare with no authorization) to read the current state; a background confirmer resolves the row from the token's authorization state. `error_code: sweep_expired` means the authorization expired unused. Other 409s name the row's current status. */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -22724,10 +23760,26 @@ export interface operations {
                 content: {
                     "application/json": {
                         error: string;
-                        statusCode?: number;
-                        details?: string;
-                    } & {
-                        [key: string]: unknown;
+                        /**
+                         * @example sweep_outcome_unknown
+                         * @example sweep_expired
+                         */
+                        error_code?: string;
+                        /** @description Present on sweep_outcome_unknown: the hash the sweep was broadcast under. */
+                        tx_hash?: string;
+                        /** @example USDC */
+                        asset?: string;
+                        amount?: string;
+                        amount_atomic?: string;
+                        /** @example 0x1111111111111111111111111111111111111111 */
+                        from_address?: string;
+                        /** @example 0x1111111111111111111111111111111111111111 */
+                        to_address?: string;
+                        /** @example 8453 */
+                        chain_id?: number;
+                        explorer_url?: string;
+                        next_step?: string;
+                        status?: string;
                     };
                 };
             };
@@ -22757,11 +23809,11 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
-                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). */
-                direction?: "in" | "out";
+                /** @description #4095: filter by transfer direction server-side (was a browser-side filter over the loaded page only). #5001: `sales` narrows Incoming to the rows carrying the sale marker — money from sales, including sales without a product; a row’s own direction stays `in` or `out`. */
+                direction?: "in" | "out" | "sales";
                 /** @description #4095: filter to one supported network server-side. Whether Haven serves the chain is checked by the handler. */
                 chainId?: number;
-                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved name (contact, receipt merchant, or another of the user's accounts), the agent name, and the counterparty address (partial match). */
+                /** @description #4095: free text matched case- and accent-insensitively against what a row shows — the counterparty's resolved names (every name source of the one naming order, #4882: another of the user's accounts, a contact, the Haven-curated catalog merchant, the receipt seller name), the agent name, and the counterparty address (partial match). */
                 search?: string;
                 /** @description #4095: a rolling window `[now − N×24h, now)` (owner rule, epic #3801: rolling days, no calendar month). Mutually exclusive with `from`/`to`. */
                 period?: "7d" | "30d" | "90d";
@@ -22834,7 +23886,7 @@ export interface operations {
                 agentId?: string;
                 /** @description `<chainId>:<token address>`, or `<chainId>:native`. Whether Haven serves that chain is checked by the handler. */
                 tokenKey?: string;
-                direction?: "in" | "out";
+                direction?: "in" | "out" | "sales";
                 chainId?: number;
                 /** @description #4095: the same search term `GET /transactions` applies, matched against the resolved counterparty names. */
                 search?: string;
@@ -23360,7 +24412,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Recorded (`ingested: false` when the hash was already indexed). */
+            /** @description Recorded (`ingested: false` when every leg was already indexed). */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -23401,6 +24453,36 @@ export interface operations {
             };
             /** @description Error response */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -24284,6 +25366,1239 @@ export interface operations {
             };
             /** @description Error response */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantServices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's merchant-services state. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantServicesState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    turnOnMerchantServices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description The network the merchant account is created on. Required the first time; permanent for the pilot once merchant services are on. Optional afterwards, and refused with MERCHANT_ACCOUNT_ON_OTHER_NETWORK when it differs from the merchant account's network. */
+                    chain_id?: number;
+                    /**
+                     * Format: uuid
+                     * @description An account the caller owns. The merchant account's owner passkey is copied from this row's stored signer set. Required the first time; not read once the merchant account exists.
+                     */
+                    source_account_id?: string;
+                    /** @description The WebAuthn credential the user authenticated with. Must be a passkey on the source account; the merchant account derives from it alone. Required the first time; not read once the merchant account exists. */
+                    key_id?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Merchant services are on and the caller already had a merchant account — turning merchant services back on, a repeat, a retry, or the second tab. `created` is false. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantServicesState"];
+                };
+            };
+            /** @description Merchant services are on and this request created the merchant account. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantServicesState"];
+                };
+            };
+            /** @description There is no merchant account yet and the request left out a field it needs (error_code MERCHANT_SETUP_DETAILS_REQUIRED, with `missing`), or the network is not served by the delegation rail (error_code UNSUPPORTED_NETWORK, with `supported`). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The named source account is not an account the caller owns: error_code SOURCE_ACCOUNT_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The caller already has a merchant account on a DIFFERENT network (error_code MERCHANT_ACCOUNT_ON_OTHER_NETWORK, with the existing `chain_id`), the derived idempotency key belongs to an account with a different chain or passkey (error_code IDEMPOTENCY_KEY_REUSED), or the derived address is already registered, or the account already under the derived key is the caller's default account and cannot be marked (error_code MERCHANT_ACCOUNT_ALREADY_REGISTERED). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The source account has no passkey to copy (SOURCE_HAS_NO_PASSKEY), the key_id is not one of its passkeys (KEY_NOT_ON_SOURCE), or the per-user per-chain account cap is reached (ACCOUNT_CAP_REACHED). */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The account address could not be derived: error_code MERCHANT_ACCOUNT_ADDRESS_UNAVAILABLE. */
+            502: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    turnOffMerchantServices: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Merchant services are off. `merchant_account` is the account that will be reused, or null. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantServicesState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantKeys: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's Sales keys. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantKeyListResponse"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    createMerchantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The key was created. `secret` is returned here and never again. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedMerchantKey"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    revokeMerchantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The key, revoked (or already revoked). */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantKey"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such key of the caller's: error_code MERCHANT_KEY_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantCatalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The caller's merchant catalogue. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    saveMerchantCatalogueDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uri
+                     * @description The public address of the kit deployment, e.g. `https://api.example.com`. https only, default port, no credentials. Stored as the deployment's ORIGIN: a path, query or fragment is dropped, and the read is always `<origin>/.well-known/x402`.
+                     */
+                    deployment_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The address is saved and the catalogue is the result of reading it. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description The address is not one Haven reads: error_code MERCHANT_CATALOGUE_URL_REFUSED, with the guard's `reason` (invalid_url, scheme_not_https, embedded_credentials, non_default_port, host_not_public). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The caller has no merchant account yet: error_code MERCHANT_ACCOUNT_REQUIRED. Turn merchant services on first. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    refreshMerchantCatalogue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": Record<string, never>;
+            };
+        };
+        responses: {
+            /** @description The catalogue after the read. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantCatalogueState"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No merchant account (error_code MERCHANT_ACCOUNT_REQUIRED), or no deployment address saved yet (error_code MERCHANT_CATALOGUE_NOT_CONFIGURED). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    ingestMerchantSale: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MerchantSaleRecord"];
+            };
+        };
+        responses: {
+            /** @description An identical resend: the sale already stored for this transaction. Nothing was written. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSale"];
+                };
+            };
+            /** @description A new sale was stored. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSale"];
+                };
+            };
+            /** @description The record is malformed, or `version` is not 1: error `unsupported_record_version` (version 1 is the only version). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Missing, invalid or revoked merchant key. */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Merchant services are turned off for the key's account: error_code MERCHANT_SERVICES_OFF. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `sale_record_conflict`: this transaction already has a different sale record on the account, and the first stands. Also answered, with a message saying so, when the account's record for the transaction changed while this one was being written. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Refused, not retryable. error `chain_mismatch`: `chain` is not the key account's network. error `no_payment_to_account`: the transaction is confirmed and has no USDC transfer into the key's account or into a deposit address registered to it and active at the transfer's block time (the same answer whether it paid another Haven account, an address registered to another account, an unregistered address, or nobody). A transfer to a registered deposit address sent only from the owner's own addresses is the owner moving money into Stripe, not a sale, and gets the same answer. */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `transaction_not_visible`: the retry answer. The receipt is not found yet, or has fewer than 3 confirmations. Send the same record again after `Retry-After` seconds. It is the only 4xx answer a reporter retries. */
+            425: {
+                headers: {
+                    /** @description Seconds to wait before sending the record again. */
+                    "Retry-After"?: number;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @enum {string} */
+                        error: "transaction_not_visible";
+                        /** @enum {string} */
+                        error_code: "transaction_not_visible";
+                        message: string;
+                        retry_after_seconds: number;
+                    };
+                };
+            };
+            /** @description Rate limited: 120/min per merchant key. */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error `chain_unavailable`: the chain could not be read; nothing was stored. Retry. */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantSalesSummary: {
+        parameters: {
+            query?: {
+                /** @description First UTC day of the period, inclusive. */
+                from?: string;
+                /** @description Last UTC day of the period, inclusive. */
+                to?: string;
+                /** @description Only payments of these kinds. `no_product` is a payment with no sale record. */
+                kind?: ("sale" | "no_product" | "own_move")[];
+                /** @description Only sales of these products (a payment with no product never matches). */
+                product_id?: string[];
+                /** @description Only payments from these addresses (case-insensitive). A payment from several payers matches when any of its transfers is from one of them; it stays `unattributed` in `by_payer`. */
+                payer?: string[];
+                /** @description A search, case-insensitive, at least 2 characters besides surrounding spaces. It matches a payer by the name the read shows (one of the caller's own contacts, accounts or agents; never another Haven user's), a product by its label or id, the receipt number by substring, and a payer address by prefix when the term is `0x` and at least four hex digits. The merchant's reference is not searched. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The summary for the period. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesSummary"];
+                };
+            };
+            /** @description The period is malformed or `from` is after `to` (error_code INVALID_PERIOD), or a filter is malformed (error_code invalid_request). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantSalesFacets: {
+        parameters: {
+            query?: {
+                /** @description First UTC day of the period, inclusive. */
+                from?: string;
+                /** @description Last UTC day of the period, inclusive. */
+                to?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The period's products and payers. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesFacets"];
+                };
+            };
+            /** @description The period is malformed or `from` is after `to`: error_code INVALID_PERIOD. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantSalesPayments: {
+        parameters: {
+            query?: {
+                /** @description First UTC day of the period, inclusive. */
+                from?: string;
+                /** @description Last UTC day of the period, inclusive. */
+                to?: string;
+                /** @description The previous page's `next_cursor`. */
+                cursor?: string;
+                /** @description Rows per page. 50 when omitted; capped at 200. */
+                limit?: number;
+                /** @description Only payments of these kinds. `no_product` is a payment with no sale record. */
+                kind?: ("sale" | "no_product" | "own_move")[];
+                /** @description Only sales of these products (a payment with no product never matches). */
+                product_id?: string[];
+                /** @description Only payments from these addresses (case-insensitive). A payment from several payers matches when any of its transfers is from one of them; it stays `unattributed` in `by_payer`. */
+                payer?: string[];
+                /** @description A search, case-insensitive, at least 2 characters besides surrounding spaces. It matches a payer by the name the read shows (one of the caller's own contacts, accounts or agents; never another Haven user's), a product by its label or id, the receipt number by substring, and a payer address by prefix when the term is `0x` and at least four hex digits. The merchant's reference is not searched. */
+                q?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description One page of payments. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesPaymentsPage"];
+                };
+            };
+            /** @description The period is malformed (INVALID_PERIOD), the cursor is not one this list issued (INVALID_CURSOR), or a filter is malformed (invalid_request). */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    getMerchantSalesPayment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The settlement transaction hash. */
+                txHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The payment. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantSalesPaymentDetail"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such payment on the account: error_code PAYMENT_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    clearMerchantSaleRecord: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The settlement transaction hash. */
+                txHash: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The record was deleted. */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description The transaction has no sale record on the account: error_code SALE_RECORD_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Merchant services are off or there is no merchant account: error_code MERCHANT_ACCOUNT_REQUIRED. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    listMerchantDepositAddresses: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registrations. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddressList"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    registerMerchantDepositAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description The deposit address: a 0x-prefixed 20-byte hex EVM address. Checked by the handler so a bad one answers INVALID_DEPOSIT_ADDRESS. */
+                    address: string;
+                };
+            };
+        };
+        responses: {
+            /** @description The address is registered. */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddress"];
+                };
+            };
+            /** @description error_code INVALID_DEPOSIT_ADDRESS: not a valid EVM address. */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESS_IS_OWN, DEPOSIT_ADDRESS_ALREADY_REGISTERED, or MERCHANT_ACCOUNT_REQUIRED (merchant services off). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+        };
+    };
+    retireMerchantDepositAddress: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The registration id. */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The registration, now retired. */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MerchantDepositAddress"];
+                };
+            };
+            /** @description Error response */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESSES_TESTNET_ONLY: the Sales account is not on a test network. */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description No such registration on the account: error_code DEPOSIT_ADDRESS_NOT_FOUND. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description error_code DEPOSIT_ADDRESS_RETIRED (already retired) or MERCHANT_ACCOUNT_REQUIRED (merchant services off). */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        error: string;
+                        statusCode?: number;
+                        details?: string;
+                    } & {
+                        [key: string]: unknown;
+                    };
+                };
+            };
+            /** @description Error response */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

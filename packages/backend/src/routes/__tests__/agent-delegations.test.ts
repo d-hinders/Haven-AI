@@ -9,6 +9,9 @@ import { encodeFunctionData, encodeAbiParameters } from 'viem'
 import { expectMatchesSpec, expectRejectsOffSpec } from '../../openapi/response-shape.js'
 import { installRequestValidation } from '../../openapi/request-validation.js'
 import { DelegationManager, DeleGatorCore } from '@metamask/delegation-abis'
+// #4821: the real typed error — the routes branch on `instanceof` and on
+// `outcome`, so a look-alike would prove nothing.
+import { SubmittedUserOpFailedError } from '../../rails/delegation-rail.js'
 // #3693: the shared helpers stay REAL through the reader mock above — the pins
 // below assert the route computes with exactly what analytics computes with.
 import { BUDGET_READ_CONCURRENCY, currentPeriodBounds } from '../../infra/chain/delegation-budget-reader.js'
@@ -856,6 +859,73 @@ describe('delegation lifecycle API (#828)', () => {
       expect(insert[1]).toEqual(['safe-1', NEW_PK.key_id, NEW_PK.x, NEW_PK.y])
       expectMatchesSpec('POST', '/agents/{id}/account-signers/submit', res.json())
     })
+
+    // ── #4821: the submit's failure body tells "nothing was sent" from "we do
+    // not know" ──────────────────────────────────────────────────────────────
+    const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+    /** The addKey calldata the route re-derives, so the pinning check passes. */
+    function addPasskeyCallData(): string {
+      return encodeFunctionData({
+        abi: [{ name: 'addKey', type: 'function', stateMutability: 'nonpayable', inputs: [{ name: '_keyId', type: 'string' }, { name: '_x', type: 'uint256' }, { name: '_y', type: 'uint256' }], outputs: [] }],
+        functionName: 'addKey',
+        args: [NEW_PK.key_id, 1n, 2n],
+      })
+    }
+
+    function mockSubmitRejects(err: unknown) {
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn(),
+        submitCall: vi.fn().mockRejectedValue(err),
+      })
+    }
+
+    it('an outcome-unknown submit answers a distinct code and the operation hash, never "Signer change failed"', async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockSubmitRejects(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} was sent but the bundler's answer was lost: timeout`,
+          USER_OP_HASH,
+          'receipt_unconfirmed',
+        ),
+      )
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/submit`,
+        payload: {
+          action: 'add_passkey', passkey: NEW_PK,
+          signature: '0x' + 'ab'.repeat(80),
+          user_operation: { sender: TREASURY, callData: addPasskeyCallData() },
+        },
+      })
+      expect(res.statusCode).toBe(502)
+      const body = res.json()
+      expect(body.error_code).toBe('submission_outcome_unknown')
+      expect(body.user_op_hash).toBe(USER_OP_HASH)
+      expect(body.error).not.toBe('Signer change failed')
+      expect(body.error).toMatch(/may have gone through/)
+      // The DB sync runs only after a landed op, so nothing was recorded.
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))).toBe(false)
+    })
+
+    it("an explicit pre-send rejection keeps today's status and text, plus the known-failure code", async () => {
+      mockDb({ owner: null, passkeys: [PK1, PK2] })
+      mockSubmitRejects(new Error('AA25 invalid account nonce'))
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/account-signers/submit`,
+        payload: {
+          action: 'add_passkey', passkey: NEW_PK,
+          signature: '0x' + 'ab'.repeat(80),
+          user_operation: { sender: TREASURY, callData: addPasskeyCallData() },
+        },
+      })
+      expect(res.statusCode).toBe(502)
+      const body = res.json()
+      expect(body.error).toBe('Signer change failed')
+      expect(body.error_code).toBe('onchain_execution_failed')
+      expect(body.user_op_hash).toBeUndefined()
+      expect(mockQuery.mock.calls.some((c) => /INSERT INTO hybrid_account_passkeys/.test(String(c[0])))).toBe(false)
+    })
   })
 
   describe('GET /:id/account-signers (#887)', () => {
@@ -1515,6 +1585,91 @@ describe('delegation lifecycle API (#828)', () => {
       expect(res.json()).toMatchObject({ revoked: true, tx_hash: '0xfeed' })
       expectMatchesSpec('POST', '/agents/{id}/delegations/{hash}/revoke/submit', res.json())
       expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(true)
+    })
+
+    // ── #4821: the submit's failure body tells "nothing was sent" from "we do
+    // not know", and the prepare-time heal is what makes a retry converge ────
+    const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+    it('an outcome-unknown submit answers a distinct code and the operation hash, never "Revocation failed"', async () => {
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn(),
+        submitCall: vi.fn().mockRejectedValue(
+          new SubmittedUserOpFailedError(
+            `treasury UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: timeout`,
+            USER_OP_HASH,
+            'receipt_unconfirmed',
+          ),
+        ),
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: boundOpJson() } },
+      })
+      expect(res.statusCode).toBe(502)
+      const body = res.json()
+      expect(body.error_code).toBe('submission_outcome_unknown')
+      expect(body.user_op_hash).toBe(USER_OP_HASH)
+      expect(body.error).not.toBe('Revocation failed')
+      expect(body.error).toMatch(/may have gone through/)
+      // The row is untouched: the write runs only after a landed op.
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it("an explicit pre-send rejection keeps today's status and text, plus the known-failure code", async () => {
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn(),
+        submitCall: vi.fn().mockRejectedValue(new Error('AA25 invalid account nonce')),
+      })
+      const res = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: boundOpJson() } },
+      })
+      expect(res.statusCode).toBe(502)
+      const body = res.json()
+      expect(body.error).toBe('Revocation failed')
+      expect(body.error_code).toBe('onchain_execution_failed')
+      expect(body.user_op_hash).toBeUndefined()
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+    })
+
+    it('#4821: after an unconfirmed revoke, a second revoke reads it disabled at prepare and ends revoked with no second on-chain op', async () => {
+      mockDb({ stored: { delegation_json: storedJson, status: 'active' } })
+      mockTreasury.mockResolvedValue({
+        treasuryAddress: TREASURY,
+        prepareCall: vi.fn(),
+        submitCall: vi.fn().mockRejectedValue(
+          new SubmittedUserOpFailedError(
+            `treasury UserOp ${USER_OP_HASH} was sent but the bundler's answer was lost: timeout`,
+            USER_OP_HASH,
+            'receipt_unconfirmed',
+          ),
+        ),
+      })
+      const first = await app.inject({
+        method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke/submit`,
+        payload: { signature: '0xabcd', user_operation: { callData: boundOpJson() } },
+      })
+      expect(first.statusCode).toBe(502)
+      expect(first.json().error_code).toBe('submission_outcome_unknown')
+      expect(mockQuery.mock.calls.some((c) => /status = 'revoked'/.test(String(c[0])))).toBe(false)
+
+      // The op landed after all: the chain shows the delegation disabled. The
+      // second revoke's PREPARE reads that, heals the row, and answers
+      // already-done — no second on-chain operation is prepared or submitted.
+      mockReadDisabled.mockResolvedValue(new Set([HASH]))
+      const second = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/${HASH}/revoke` })
+      expect(second.statusCode).toBe(409)
+      expect(second.json().error_code).toBe('DELEGATION_ALREADY_REVOKED')
+      const heal = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))
+      expect(heal).toBeDefined()
+      expect(heal![1]).toEqual([AGENT_ID, [HASH]])
+      // Only the FIRST attempt reached the treasury; the second never prepared.
+      expect(mockTreasury).toHaveBeenCalledTimes(1)
     })
   })
 
@@ -2328,6 +2483,103 @@ describe('POST /:id/delegations/revoke-all — #1400: one signature, every budge
     expect(res.statusCode).toBe(502)
     expect(JSON.stringify(res.json())).not.toContain('SECRET')
     expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+  })
+
+  // ── #4821: the submit's failure body tells "nothing was sent" from "we do
+  // not know", and the prepare-time heal is what makes a retry converge ──────
+  const USER_OP_HASH = ('0x' + 'dd'.repeat(32)) as `0x${string}`
+
+  it('an outcome-unknown submit answers a distinct code and the operation hash, never "Batch revocation failed"', async () => {
+    mockBatchDb({})
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: TREASURY,
+      prepareCalls: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} was sent but its receipt could not be confirmed: timeout`,
+          USER_OP_HASH,
+          'receipt_unconfirmed',
+        ),
+      ),
+    })
+    const res = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { callData: batchOpJson(['1', '2']) },
+        delegation_hashes: [HASH, HASH2],
+      },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error_code).toBe('submission_outcome_unknown')
+    expect(body.user_op_hash).toBe(USER_OP_HASH)
+    expect(body.error).not.toBe('Batch revocation failed')
+    expect(body.error).toMatch(/may have gone through/)
+    // Every row is untouched: the write runs only after a landed op.
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+  })
+
+  it("an explicit pre-send rejection keeps today's status and text, plus the known-failure code", async () => {
+    mockBatchDb({})
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: TREASURY,
+      prepareCalls: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(new Error('AA25 invalid account nonce')),
+    })
+    const res = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { callData: batchOpJson(['1', '2']) },
+        delegation_hashes: [HASH, HASH2],
+      },
+    })
+    expect(res.statusCode).toBe(502)
+    const body = res.json()
+    expect(body.error).toBe('Batch revocation failed')
+    expect(body.error_code).toBe('onchain_execution_failed')
+    expect(body.user_op_hash).toBeUndefined()
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+  })
+
+  it('#4821: after an unconfirmed batch revoke, a second revoke-all reads them disabled at prepare and ends revoked with no second on-chain op', async () => {
+    mockBatchDb({})
+    mockTreasury.mockResolvedValue({
+      treasuryAddress: TREASURY,
+      prepareCalls: vi.fn(),
+      submitCall: vi.fn().mockRejectedValue(
+        new SubmittedUserOpFailedError(
+          `treasury UserOp ${USER_OP_HASH} was sent but the bundler's answer was lost: timeout`,
+          USER_OP_HASH,
+          'receipt_unconfirmed',
+        ),
+      ),
+    })
+    const first = await app.inject({
+      method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all/submit`,
+      payload: {
+        signature: '0x' + 'ab'.repeat(65),
+        user_operation: { callData: batchOpJson(['1', '2']) },
+        delegation_hashes: [HASH, HASH2],
+      },
+    })
+    expect(first.statusCode).toBe(502)
+    expect(first.json().error_code).toBe('submission_outcome_unknown')
+    expect(mockQuery.mock.calls.some((c) => /SET status = 'revoked'/.test(String(c[0])))).toBe(false)
+
+    // The op landed after all: the chain shows both delegations disabled. The
+    // second revoke-all's PREPARE reads that, heals the rows, and answers
+    // already-done — no second on-chain operation is prepared or submitted.
+    mockReadDisabled.mockResolvedValue(new Set([HASH, HASH2]))
+    const second = await app.inject({ method: 'POST', url: `/agents/${AGENT_ID}/delegations/revoke-all` })
+    expect(second.statusCode).toBe(409)
+    expect(second.json().error).toMatch(/already disabled on-chain/)
+    const heal = mockQuery.mock.calls.find((c) => /SET status = 'revoked'/.test(String(c[0])))
+    expect(heal).toBeDefined()
+    expect(heal![1]).toEqual([AGENT_ID, [HASH, HASH2]])
+    // Only the FIRST attempt reached the treasury; the second never prepared.
+    expect(mockTreasury).toHaveBeenCalledTimes(1)
   })
 
   it('submit 400s on malformed signature, missing user_operation, and bad hashes', async () => {

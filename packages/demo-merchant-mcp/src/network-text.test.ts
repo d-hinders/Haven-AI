@@ -40,6 +40,7 @@ const INVOICE_PARAMS = {
   invoiceNumber: 'FAK-2026-00099',
   productId: 'storage_50gb' as const,
   buyerAddress: '0x2222222222222222222222222222222222222222',
+  receivingAddress: '0x1111111111111111111111111111111111111111',
   authorizationNonce: `0x${'ab'.repeat(32)}`,
   txHash: `0x${'cd'.repeat(32)}` as const,
   settlement: 'settled_onchain' as const,
@@ -62,14 +63,14 @@ describe('network display names (single source: CHAINS)', () => {
 
 describe('invoice network text', () => {
   it('mainnet: betalningssatt and both renders are byte-identical to the pre-#3834 text', () => {
-    const inv = generateInvoice({ ...INVOICE_PARAMS, chainId: MAINNET })
+    const inv = generateInvoice({ ...INVOICE_PARAMS, chainId: MAINNET, locale: 'sv' })
     expect(inv.json.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
     expect(renderInvoiceText(inv.json, 'X', 'en', MAINNET)).toContain('  Payment method:    Cryptocurrency (USDC on Base)\n')
     expect(renderInvoiceText(inv.json, 'X', 'sv', MAINNET)).toContain('Kryptovaluta (USDC på Base)')
   })
 
   it('Base Sepolia: betalningssatt and both renders name the testnet', () => {
-    const inv = generateInvoice({ ...INVOICE_PARAMS, chainId: SEPOLIA })
+    const inv = generateInvoice({ ...INVOICE_PARAMS, chainId: SEPOLIA, locale: 'sv' })
     expect(inv.json.betalningssatt).toBe('Kryptovaluta (USDC på Base Sepolia testnät)')
     const en = renderInvoiceText(inv.json, 'X', 'en', SEPOLIA)
     expect(en).toContain('  Payment method:    Cryptocurrency (USDC on Base Sepolia testnet)\n')
@@ -77,6 +78,16 @@ describe('invoice network text', () => {
     const sv = renderInvoiceText(inv.json, 'X', 'sv', SEPOLIA)
     expect(sv).toContain('Kryptovaluta (USDC på Base Sepolia testnät)')
     expect(sv).not.toContain('USDC på Base)')
+  })
+
+  // #4980: the default receipt's `betalningssatt` is English.
+  it('the default (English) betalningssatt names the network in English', () => {
+    expect(generateInvoice({ ...INVOICE_PARAMS, chainId: MAINNET }).json.betalningssatt).toBe(
+      'Cryptocurrency (USDC on Base)',
+    )
+    expect(generateInvoice({ ...INVOICE_PARAMS, chainId: SEPOLIA }).json.betalningssatt).toBe(
+      'Cryptocurrency (USDC on Base Sepolia testnet)',
+    )
   })
 })
 

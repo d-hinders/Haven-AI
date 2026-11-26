@@ -17,9 +17,14 @@ covers:
   - packages/backend/src/domain/chains.ts
   - packages/backend/src/routes/receive.ts
   - packages/backend/src/modules/transactions/receive.ts
+  - packages/backend/src/modules/transactions/chain-read.ts
+  - packages/backend/src/modules/transactions/merchant-index.ts
   - packages/backend/src/modules/transactions/off-ramp.ts
   - packages/backend/src/infra/repositories/inbound-transfers.ts
-last-verified: "2026-10-24"
+  - packages/backend/src/routes/merchant-catalogue.ts
+  - packages/backend/src/modules/catalog/merchant-products.ts
+  - packages/backend/src/infra/repositories/merchant-catalogue.ts
+last-verified: "2026-11-20"
 ---
 
 # Haven — Payment Execution Sequence
@@ -214,6 +219,21 @@ path above:
    strand. The intent settles to `confirmed`, or reverts if it breached the
    on-chain policy.
 
+### Reconciled confirms (#4819)
+
+A delegation-rail submit whose answer is lost is booked outcome-pending
+(`submitted`, `machine_metadata.user_op_hash` recorded, `submission_outcome:
+'unknown'`) and resolved later by the submission reconciler from the bundler's
+receipt index. A reconciler confirm runs the SAME booking the sign route runs
+(`modules/payments/confirm-booking.ts`): the three fiat values in the confirm
+write, the machine-payment evidence hook, the accounting underlag feed and the
+first-payment event. The confirm write is one compare-and-set
+(`status = 'submitted' AND tx_hash IS NULL`), so exactly one writer books a
+payment and the loser runs no side effect; it also resolves the
+`submission_outcome` marker, so a confirmed row never reads "unknown". The
+sponsored-gas row is written on the submit seam and is not backfilled by the
+reconciler ([sponsored gas](../operations/sponsored-gas.md)).
+
 Agent-facing intent shape and the `/payments/:id/sign` contract are identical to
 the legacy AllowanceModule rail's; only the `sign_data` scheme (`eip712_userop`
 vs the AllowanceModule transfer hash) and the enforcement mechanism differ. Delegation
@@ -299,12 +319,83 @@ of which moves a key or grants an agent authority:
 and stay that way — the wire shape (`direction: 'in' | 'out'`) is unchanged
 for the CLI and dashboard. What is NEW is that the same explorer read feeds a
 persisted index (`inbound_transfers`, migration 097): every USDC transfer
-inbound to the account's address is upserted idempotently per
-(chain, tx hash, account) with payer, raw amount and block time — one row per
-RECEIVING ACCOUNT, so one transaction paying two Haven accounts (or carrying
-several USDC legs) credits each account's ledger instead of collapsing into
-one. The live read remains the feed's source; the index is the matching
+inbound to the account's address is upserted idempotently with payer, raw
+amount and block time — one row per RECEIVING ACCOUNT, so one transaction
+paying two Haven accounts credits each account's ledger instead of collapsing
+into one. The live read remains the feed's source; the index is the matching
 substrate — and it costs no second explorer call.
+
+**Row identity (#4903).** A transfer's on-chain identity is its LOG, so the
+dedupe key is `(chain, tx hash, account, log index)` (migration 128). A
+transaction carrying several USDC transfers to the same account therefore
+lands one row per leg instead of one row per transaction. `log_index` is
+nullable — not every source reports it — so the unknown case keeps its own
+partial unique index on `(chain, tx hash, account, payer, amount)`: a re-read
+of the same leg still conflicts, while a second leg is a distinct row.
+
+**The cross-source rule, in both directions (#4903).** The two partial indexes
+are disjoint, so the same leg can arrive from the chain pass (log index known)
+and from the explorer read (Alchemy reports none) in either order, and both
+orders land ONE row. Explorer first, chain afterwards: the known-index leg
+ADOPTS the unknown row written from it (same payer and amount) by filling in
+the index, keeping the row's amount, match and `balance_consumed` flag. Chain
+first, explorer afterwards: the unknown-index leg is SKIPPED when a
+known-index row already exists for the same `(chain, tx hash, account, payer,
+amount)` — an explicit `WHERE NOT EXISTS` in the insert, because a partial
+index cannot span both cases. The receive balance of an account whose rows
+were collapsed before migration 128 does not move in either direction, while
+every leg is indexed. The match path carries the same rule: a row whose
+`(chain, tx hash, account, payer, amount)` leg is already matched is never
+matched again, so a replayed receipt drop cannot count one on-chain transfer
+twice. Zero-value transfers are left out for every account.
+
+**The merchant index pass (#4903, read on view since #5012).** One merchant
+account that received more payments between reads than the explorer's page cap
+lost the older ones. `modules/transactions/merchant-index.ts` reads every USDC
+transfer into an account marked `is_merchant_account` since its last indexed
+block, with no page cap. Where Alchemy's transfer index is configured for the
+chain (`ALCHEMY_HISTORY_API_KEY`), the index names the transactions, oldest
+first and paged to the end, and each one is read from the chain by hash
+(`readInboundTransfersViaIndex`, `chain-read.ts`), so the payer, amount, block
+time and exact log index of each leg come from the receipt. Otherwise the range
+is read with `eth_getLogs` (`readInboundTransfersInBlockRange`). A per-account
+cursor (`inbound_index_cursors`) records the highest fully indexed block; the
+first pass seeds it at the block carrying the account's creation time.
+
+**When it runs.** Only while the owner is looking: there is no scheduled pass
+since #5012 (it scanned on a clock and, on a 10-block `eth_getLogs` plan, held
+dev at ~1M Alchemy compute units an hour). The Sales payments read, which
+every Sales screen makes and nothing outside Sales does, asks for a background refresh of the owner's own account
+(`refreshMerchantAccountIndex`), at most once per 30 s per account across
+replicas (`claimInboundIndexRefresh`, one conditional UPDATE on the cursor
+row), and the Sales page re-reads every 10 s while visible. A payment nobody
+reported therefore shows on an open Sales page within about a minute when the
+transfer index is configured. On the `eth_getLogs` fallback a refresh walks at
+most 10,000 blocks (about 5.5 hours of Base), so after a longer quiet spell
+the page catches up over several refreshes. With nobody looking, a payment is
+indexed the next time the owner opens Sales. A sale the merchant reports is
+recorded at once by its own by-hash read (#4897) either way. The writes are
+idempotent and converge under concurrent refreshes (the row identity dedupes,
+the cursor only moves forward). While merchant services are off the Sales
+reads answer nothing, so no refresh runs; the next view continues from the
+cursor.
+Each row records `sender_is_own_address`, decided at index time against the
+owner's own addresses (the set #4897 defines).
+
+**The by-hash read (#4903).** `readInboundTransferByTxHash` reads ONE
+transaction from the chain and returns the USDC transfers to the account, or
+says there is none. It is the primitive #4897 uses to check a sale record at
+once, and it never returns a caller-supplied value. An unreadable chain is
+reported as such, never as "there is none".
+
+**The caller-supplied ingest route (#4903 decision).** `POST
+/receive/{accountAddress}/ingest` used to insert an inbound row from values the
+caller sent, with no chain check — a row planted through it would block the
+real one and could then be matched as a sale. It now VERIFIES AGAINST THE
+CHAIN: it takes only `tx_hash`, reads the receipt, and indexes the
+settlement-token transfers whose `to` is the account. A body naming a payer,
+amount, token or block time is refused with 400, so no row for a hash that did
+not pay the account can be created through any route.
 
 The receive-ledger read (`GET /receive/{accountAddress}`) reads the index
 directly: the receiving address per chain, the running USDC balance (sum of
@@ -369,5 +460,52 @@ their OWN saved deposit address at an off-ramp venue (Safello, Coinbase):
 Haven never holds the settlement key, never off-ramps, and never settles for
 third parties — the position recorded with counsel in
 [docs/regulatory/casp-risk-guardrails.md](../regulatory/casp-risk-guardrails.md).
+
+### 4. The catalogue — what the account sells (#4899, epic #4885)
+
+A merchant that runs the kit (`docs/architecture/12-merchant-kit.md`) serves a
+public discovery document at `/.well-known/x402`. The owner gives Haven the
+address of that deployment for the merchant account, and Haven reads the
+document, keeps the product list, and uses it to name products on the account's
+sales.
+
+- **The address is the owner's, and it is checked before it is stored.**
+  `PUT /merchant-catalogue/deployment` runs the outbound guard's own pure policy
+  (`assertSafeUrl`: https only, default port, no embedded credentials, no IP
+  literal, no locally-bound name) and refuses with the guard's `reason`. The
+  address is stored as the deployment's ORIGIN — path, query and fragment are
+  dropped — and the read is always `<origin>/.well-known/x402`, because the
+  proxy serves the document at that path and nowhere else. The read itself is
+  `safeGetText` with `sameHostOnly`, so a host that resolves into
+  private or local space is refused at resolution time and a redirect that
+  leaves the host is refused before it is resolved — the guard follows
+  cross-host redirects by default, and a merchant must not be able to point
+  Haven's read at a document it does not serve.
+- **The list is its own table.** `merchant_products`, keyed
+  `(merchant_account_id, product_id)`, never `merchant_catalog`: that table's
+  `pay_to` fills the recipient of a merchant-locked budget and feeds the public
+  catalogue, and neither may be reachable from merchant-supplied data. The
+  document's `pay_to` is COMPARED against the account's own address and stored
+  as a label on `merchant_catalogue_sources`; it is never used as a payment
+  destination.
+- **A mismatch is not a catalogue.** A document whose `pay_to` or `network` is
+  not the merchant account's is recorded as a mismatch and its products are not
+  written, so a document that is not this account's deployment cannot label this
+  account's sales. An unreachable, refused or malformed document records the
+  outcome and leaves the last good list in place; `last_read_at` is what the
+  owner's screen shows as "last read".
+- **A removed product is kept.** A product that disappears from the document is
+  marked `offered = false` with `removed_at` set and stays in the table, so a
+  past sale still names it. The sales reads (#4897) name a product from the
+  catalogue when its product id is known there — offered or not — and otherwise
+  fall back to the name the sale record carried (`labelSaleProduct`).
+- **It refreshes on a schedule and on request.** A leader-locked background job
+  reads every configured deployment every 15 minutes (the approved mockup's
+  cadence for an unreachable kit, and the schedule for a reachable one);
+  `POST /merchant-catalogue/refresh` is the owner's "read it now".
+
+Nothing in this piece moves money: it stores a merchant-supplied address and a
+product list, and labels products. It changes no amount, creates no sale, signs
+nothing and calls no facilitator.
 
 Historical verification records for this document are kept in the [archive](../archive/re-verification-notes-2026-11.md).

@@ -28,6 +28,15 @@ export function opsOperatorOf(request: FastifyRequest): OpsOperator {
   return operator
 }
 
+/**
+ * The operator `createOpsAuth` admitted for this request, or `undefined` when
+ * it did not run or refused. Never throws — the rate-limit key generator
+ * (#4955) asks it on every limited request, most of which are not ops ones.
+ */
+export function admittedOpsOperator(request: object): OpsOperator | undefined {
+  return operators.get(request as FastifyRequest)
+}
+
 export function createOpsAuth(cfg: OpsConfig, now?: () => number) {
   return async function opsAuth(request: FastifyRequest, reply: FastifyReply): Promise<void> {
     const header = request.headers.authorization

@@ -57,9 +57,12 @@ const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
  *
  * Merchant first means the TITLE is the counterparty — read through
  * `counterpartyLabel`'s no-address mode, so a raw address can never surface
- * here: the merchant's site for x402, the receipt/contact name the backend
- * resolved (`merchantName`), "Deposit" for inbound — or "From <account>"
- * when the money came from another of the user's own accounts (#4099) —
+ * here: the name the backend resolved in the one naming order
+ * (`merchantName`, #4882, #4883), else the merchant's site for x402,
+ * "Deposit" for inbound — or "From <account>"
+ * when the money came from another of the user's own accounts (#4099), or
+ * "Sale" / "Sale · <product>" for a group of sales into the Sales account
+ * (#5000), which never merges with the day's deposits —
  * "New recipient" when
  * nothing resolves, "Agent payment" for an x402 row without a resource URL,
  * "Returned from <agent>" for sweeps. The SUBTITLE is the agent's name; on an
@@ -68,7 +71,7 @@ const EMPTY_LIVE_KEYS: ReadonlySet<string> = new Set()
  * with exactly one (everything necessarily comes from it), and when no name
  * came back (an older backend). Inbound rows name no receiving account: a group does not carry
  * which account received, so "To My account" would be a guess — the title
- * ("Deposit", or "From <account>") and the success tone carry the
+ * ("Deposit", "Sale", or "From <account>") and the success tone carry the
  * direction already.
  *
  * A move between two of the user's own accounts arrives as ONE group
@@ -316,6 +319,9 @@ function ActivityRow({
     to: group.to,
     from: group.to,
     chainId: 0,
+    // #5000: a group of sales names its product only when every member
+    // shares it; the title then reads "Sale · <product>" (or "Sale").
+    sale: group.sale ?? undefined,
   }
   const ownTransfer = group.ownTransfer
   const title = ownTransfer

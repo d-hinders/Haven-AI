@@ -333,6 +333,36 @@ describe('owner_cli route census (#2526)', () => {
       { method: 'POST', path: '/contacts' },
       { method: 'PUT', path: '/contacts/{id}' },
       { method: 'DELETE', path: '/contacts/{id}' },
+      // #4895: turning merchant services on creates a spend-capable account
+      // and decides which account merchant payments land in; turning them off
+      // changes that decision. Neither is a reading or an arrangement, so a
+      // device-code session must not reach either. `GET /merchant-services`
+      // is a read and is not on the allow-list either — nothing needs it.
+      { method: 'POST', path: '/merchant-services' },
+      { method: 'DELETE', path: '/merchant-services' },
+      // #4896: creating a Sales key mints a live credential for the merchant
+      // account, and revoking one changes who may report sales into it.
+      // Neither is a reading or an arrangement, so a device-code session must
+      // not reach either. `GET /merchant-keys` is a read and is not on the
+      // allow-list either — nothing needs it.
+      { method: 'POST', path: '/merchant-keys' },
+      { method: 'DELETE', path: '/merchant-keys/{id}' },
+      // #4897: the sales ingest is the merchant key's own write; it is
+      // authenticated by a Sales key, never a session, so a device-code session
+      // has no business at it (and it can never be a way to plant a sale).
+      { method: 'POST', path: '/merchant/sales' },
+      // #4897: clearing a sale record deletes the merchant's statement about a
+      // payment. It is the owner's own decision, made on the dashboard; a
+      // device-code session an agent drives must not be able to erase the
+      // record of what a sale was for. The reads beside it are not on the
+      // allow-list either — nothing needs them.
+      { method: 'DELETE', path: '/merchant-sales/payments/{txHash}/record' },
+      // #4952: registering a Stripe deposit address names where a processor
+      // holds the merchant's sales, and retiring one stops sales being
+      // attributed to it. Both are the owner's decision, made on the dashboard.
+      // The list beside them is a read and is not on the allow-list either.
+      { method: 'POST', path: '/merchant-deposit-addresses' },
+      { method: 'POST', path: '/merchant-deposit-addresses/{id}/retire' },
     ]
     for (const route of mustRefuse) {
       expect(isOwnerCliAllowed(route.method, route.path), key(route)).toBe(false)

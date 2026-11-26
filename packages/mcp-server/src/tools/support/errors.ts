@@ -17,6 +17,7 @@
  */
 import { z } from 'zod/v3'
 import {
+  CheckoutDetailsUnavailableError,
   HavenApiError,
   HavenError,
   HavenPaymentStateError,
@@ -28,6 +29,7 @@ import {
   type EvidenceReportOutcome,
   type HavenClient,
   type NextStep,
+  type CheckoutDetailsRefusalStage,
 } from '@haven_ai/sdk'
 import { refusalNextStep } from './guidance.js'
 import type { PaymentScopeRefusalCode } from '@haven_ai/core'
@@ -336,6 +338,30 @@ const SUBMISSION_OUTCOME_UNKNOWN_ERROR_CODE = 'submission_outcome_unknown'
 const SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON =
   'the payment was submitted but its on-chain outcome is not known yet, and no payment id is available to poll; do not create a new payment for this — tell the user, who can check the account\'s activity or the userOpHash before paying again'
 
+/**
+ * #5035: the backend's typed `error_code` for a delegate sweep that was
+ * broadcast but whose outcome is not confirmed yet. The body carries the hash.
+ * A sweep has no `payment_id`, so `haven_get_payment_status` cannot check it —
+ * the call that reads the current state is `haven_sweep_delegate` itself:
+ * called with no arguments it answers the in-flight sweep's state, and
+ * re-submitting the SAME authorization and signature answers it too. Never a
+ * new prepare (the backend refuses to mint a second authorization while one is
+ * in flight) and never a second payment.
+ */
+const SWEEP_OUTCOME_UNKNOWN_ERROR_CODE = 'sweep_outcome_unknown'
+const SWEEP_OUTCOME_UNKNOWN_OMITTED_REASON =
+  'the sweep was broadcast but its outcome is not confirmed yet; do not prepare a new sweep — call haven_sweep_delegate again (no arguments) to read its current state, or re-submit the SAME authorization and signature; it answers swept once the authorization is used on-chain, or expired once it can no longer be used'
+
+/**
+ * #4826: the backend's `error_code` for an x402 authorize replay whose
+ * idempotency key already belongs to a `submitted` payment — the agent
+ * settled and the outcome is not booked yet. The row is in flight, so the
+ * answer is a status READ, never a retry and never a second authorize. The
+ * body always carries `payment_id`; the branch below requires it, because
+ * `check_status_later`'s default tool cannot be called without one.
+ */
+const PAYMENT_ALREADY_SUBMITTED_ERROR_CODE = 'payment_already_submitted'
+
 /** #3504: the backend's `error_code` for a payment the delegation's period budget cannot cover. */
 const DELEGATION_BUDGET_EXCEEDED_ERROR_CODE = 'delegation_budget_exceeded'
 const DELEGATION_BUDGET_EXCEEDED_OMITTED_REASON =
@@ -415,6 +441,29 @@ const PREPARE_REVERTED_OMITTED_REASON =
 const INSUFFICIENT_BALANCE_REVERT_CAUSE = 'insufficient_balance'
 const PREPARE_REVERTED_FUNDING_OMITTED_REASON =
   'the account does not hold enough of the token to fund this payment; the revert already proves the shortfall and the body carries no token or amount to check with — tell the user the account needs funds, and the payment can be re-made once it is funded'
+
+/**
+ * #4828: the backend's typed `error_code` on a sponsorship-budget 429 — the
+ * relayer's per-identity window cap (`hybrid_deploy` for an account deploy,
+ * `sweep` for a sweep). One value for both bodies, so the mapper never
+ * matches on English. A slot frees when the oldest counted operation ages
+ * out, so this is a stop that names the window, not a retry.
+ */
+const RELAYER_BUDGET_EXCEEDED_ERROR_CODE = 'relayer_budget_exceeded'
+const RELAYER_BUDGET_EXCEEDED_OMITTED_REASON =
+  'the relayer sponsorship budget for this operation is exhausted; a slot frees when the oldest counted operation ages out (up to 24 hours for an account deploy, up to 60 minutes for a sweep), so tell the user the window and do not re-call it now'
+
+/**
+ * #4828: a 429 is a rate limit, not a refusal as made. The limiter may be
+ * Haven (the plugin's per-route limit, the hourly x402 cap, the catalog
+ * submission queue) or the merchant (a 429 on the unpaid MCP probe, which
+ * reaches this branch as a status-only `HavenApiError`), so the reason names
+ * neither: it says the upstream call was rate-limited and tells the agent to
+ * wait, then re-call once. `retry_after_seconds` rides the result when the
+ * body carries it (the hourly x402 cap does).
+ */
+const RATE_LIMITED_OMITTED_REASON =
+  'the upstream call was rate-limited; wait (retry_after_seconds when the answer carries it), then re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user'
 
 /**
  * #3747: the structured hosted refusal for a merchant-egress policy refusal
@@ -506,7 +555,59 @@ function normalizeMerchantEgressError(
   }
 }
 
+/** #4872: why no tool follows a checkout-details refusal (the local runtime's reason, verbatim). */
+export const CHECKOUT_DETAILS_OMITTED_REASON =
+  'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
+
+/**
+ * #4872: the reason per stage. Only `before_payment` may say "retry the same
+ * tool": nothing was spent. A FUNDED refusal must never send the agent back to
+ * haven_settle_mcp_tool (it would relay funding again); an UNSENT erc7710
+ * settlement child is consumed, so only a new purchase works. A
+ * STATE_UNKNOWN refusal sends the agent to the status read first: an earlier
+ * settle may already have moved the payment.
+ */
+const CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
+  funded:
+    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_complete_mcp_tool with this payment_id and payment_header; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
+  unsent:
+    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase with the pay tool you used (haven_pay_mcp_tool, haven_prepare_catalog_purchase or haven_pay_x402_quote); do not settle or submit this payment again',
+  state_unknown:
+    "Haven could not read this payment's state, so an earlier settle or submit may already have funded or settled it: call haven_get_payment_status with this payment_id first: if it is still awaiting a signature, call the same tool again (haven_settle_mcp_tool or haven_submit) once the owner has fixed sharing; if it shows funded or settled, do not pay again",
+}
+const CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: 'not_started',
+  funded: 'funded_but_unsettled',
+  unsent: 'not_delivered',
+  state_unknown: 'unknown',
+}
+
 export function normalizeError(err: unknown): ToolFailure {
+  // #4872: a merchant requires a checkout detail this agent cannot share.
+  // The hosted pay tools throw it BEFORE any intent is created, and the
+  // settle leg and the plain-HTTP haven_submit before anything is spent or
+  // sent. Field names, never values.
+  if (err instanceof CheckoutDetailsUnavailableError) {
+    return {
+      success: false,
+      code: AgentPaymentFailureCode.CheckoutDetailsUnavailable,
+      message: err.message,
+      statusCode: err.statusCode,
+      ...(err.paymentId ? { paymentId: err.paymentId } : {}),
+      phase: CHECKOUT_DETAILS_STAGE_PHASE[err.stage],
+      missing_fields: err.missingFields,
+      reason: err.reason,
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      ...nextStepWireFields(
+        refusalNextStep({
+          nextAction: AgentPaymentNextAction.StopAndTellUser,
+          nextTool: null,
+          nextToolOmittedReason: CHECKOUT_DETAILS_STAGE_REASON[err.stage],
+        }),
+      ),
+    }
+  }
   if (err instanceof HostedToolError) {
     return {
       success: false,
@@ -790,6 +891,57 @@ export function normalizeError(err: unknown): ToolFailure {
       ...nextStepWireFields(step),
     }
   }
+  // #5035: a delegate sweep that was broadcast but whose outcome is not
+  // confirmed yet. The body carries the hash. A sweep has no payment_id, so the
+  // status read is the sweep tool itself — called with no arguments it answers
+  // the in-flight sweep's state. Never a new prepare, never a second payment.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === SWEEP_OUTCOME_UNKNOWN_ERROR_CODE
+  ) {
+    const body = err.body as { error_code?: string; tx_hash?: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_sweep_delegate',
+      nextArguments: {},
+    })
+    return {
+      success: false,
+      code: 'SWEEP_OUTCOME_UNKNOWN',
+      message: err.message,
+      statusCode: err.statusCode,
+      ...(typeof body.tx_hash === 'string' ? { tx_hash: body.tx_hash } : {}),
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
+  // #4826: an x402 authorize replay whose key belongs to a `submitted`
+  // payment. The payment is in flight — the agent settled and the outcome is
+  // not booked yet — so the ONLY follow-up is reading its status. Never a
+  // retry (a second authorize cannot succeed: the key is taken) and never a
+  // new payment. The body always carries `payment_id`; a body without one
+  // falls through to the generic 4xx branch below, which also never retries.
+  if (
+    err instanceof HavenApiError &&
+    (err.body as { error_code?: string } | undefined)?.error_code === PAYMENT_ALREADY_SUBMITTED_ERROR_CODE &&
+    typeof (err.body as { payment_id?: unknown }).payment_id === 'string'
+  ) {
+    const body = err.body as { error_code?: string; payment_id: string }
+    const step = refusalNextStep({
+      nextAction: AgentPaymentNextAction.CheckStatusLater,
+      nextTool: 'haven_get_payment_status',
+      nextArguments: { payment_id: body.payment_id },
+    })
+    return {
+      success: false,
+      code: 'PAYMENT_ALREADY_SUBMITTED',
+      message: err.message,
+      statusCode: err.statusCode,
+      paymentId: err.paymentId ?? body.payment_id,
+      next_action: step.next_action,
+      ...nextStepWireFields(step),
+    }
+  }
   if (
     err instanceof HavenApiError &&
     (err.body as { error_code?: string } | undefined)?.error_code === ACCOUNT_VALIDATION_FAILED_ERROR_CODE
@@ -902,7 +1054,12 @@ export function normalizeError(err: unknown): ToolFailure {
     // - Otherwise the status: a 5xx is usually transient — the live 500 that
     //   filed #3214 re-ran the same quote with the same arguments and
     //   succeeded — and a 4xx is the call refused as made.
+    // - #4828: a 429 is neither. It is a rate limit, so it takes the
+    //   transient step (wait, then re-call once) whatever the limiter; the
+    //   sponsorship budget is the one 429 that is a stop, and it is typed by
+    //   `error_code` rather than by English.
     const cause = err.failureCause
+    const body = err.body as { error_code?: string; retry_after_seconds?: unknown } | undefined
     const step =
       cause?.kind === 'no_answer'
         ? cause.method === 'GET'
@@ -922,25 +1079,42 @@ export function normalizeError(err: unknown): ToolFailure {
               nextTool: null,
               nextToolOmittedReason: DETERMINISTIC_API_OMITTED_REASON,
             })
-          : err.statusCode !== undefined && err.statusCode < 500
+          : body?.error_code === RELAYER_BUDGET_EXCEEDED_ERROR_CODE
             ? refusalNextStep({
                 nextAction: AgentPaymentNextAction.StopAndTellUser,
                 nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                nextToolOmittedReason: RELAYER_BUDGET_EXCEEDED_OMITTED_REASON,
               })
-            : refusalNextStep({
-                nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
-                nextTool: null,
-                nextToolOmittedReason:
-                  'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
-              })
+            : err.statusCode === 429
+              ? refusalNextStep({
+                  nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                  nextTool: null,
+                  nextToolOmittedReason: RATE_LIMITED_OMITTED_REASON,
+                })
+              : err.statusCode !== undefined && err.statusCode < 500
+                ? refusalNextStep({
+                    nextAction: AgentPaymentNextAction.StopAndTellUser,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call was refused as made (4xx); re-calling it the same way cannot succeed, so tell the user what failed',
+                  })
+                : refusalNextStep({
+                    nextAction: AgentPaymentNextAction.RetryWithExplicitContext,
+                    nextTool: null,
+                    nextToolOmittedReason:
+                      'the upstream call failed transiently; re-call the same tool with the same arguments (and the same idempotency_key where the tool has one) once before telling the user',
+                  })
     return {
       success: false,
       code: err.code,
       message: err.message,
       statusCode: err.statusCode,
       paymentId: err.paymentId,
+      // #4828: the wait the limiter stated, when the body carries one. Additive
+      // and only present when the body has a finite number.
+      ...(typeof body?.retry_after_seconds === 'number' && Number.isFinite(body.retry_after_seconds)
+        ? { retry_after_seconds: body.retry_after_seconds }
+        : {}),
       next_action: step.next_action,
       ...nextStepWireFields(step),
     }

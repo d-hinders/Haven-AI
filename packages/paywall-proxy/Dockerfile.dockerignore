@@ -1,0 +1,37 @@
+# The build context for `packages/paywall-proxy/Dockerfile` (#5007).
+#
+# This file is Dockerfile-SPECIFIC: Docker reads `<Dockerfile>.dockerignore`
+# beside the Dockerfile, so it applies only to
+# `docker build -f packages/paywall-proxy/Dockerfile .`. There is deliberately
+# no root `.dockerignore` — adding one would change the mcp-server image's build
+# context (`.github/workflows/ci.yml`, the MCP-server job).
+#
+# Patterns are relative to the build context root, which is the REPOSITORY ROOT.
+# The image needs three workspace slices and nothing else, so this is a
+# whitelist: exclude everything, re-include the three slices, then drop what the
+# image rebuilds for itself.
+
+*
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!packages
+
+# Only the three packages the proxy's build touches: the SDK, the shared
+# merchant payment core, and the proxy itself.
+packages/*
+!packages/sdk
+!packages/merchant-payments
+!packages/paywall-proxy
+
+# Installed and built inside the image. These come last so they win over the
+# re-inclusions above.
+**/node_modules
+**/dist
+
+# Haven's own demo configuration is not part of the published kit. The image
+# carries the kit's compiled output; a merchant supplies its own products file
+# at `/config/products.json`, and `products.example.json` stays in the
+# repository, where the README's Step 3 links to it. This is also why the #4892
+# demo service keeps building from source (docs/operations/railway-services.md).
+packages/paywall-proxy/demo

@@ -23,11 +23,19 @@ import { Button } from '../ui/Button'
 export function CloseGuardPanel({
   onCancel,
   onConfirm,
+  title = 'Close without saving the credential?',
+  body = 'This one-time manual credential will be hidden if you close now.',
+  testId = 'connect-close-guard',
 }: {
   /** Keep the credential and stay in the flow. */
   onCancel: () => void
   /** Drop the credential and leave the flow. */
   onConfirm: () => void
+  /** The question. Defaults to the connect flow's (#4905: the Sales key dialog words its own). */
+  title?: string
+  /** What closing costs. Defaults to the connect flow's. */
+  body?: string
+  testId?: string
 }) {
   const headingId = useId()
   const cancelRef = useRef<HTMLButtonElement>(null)
@@ -43,14 +51,14 @@ export function CloseGuardPanel({
     <div
       role="group"
       aria-labelledby={headingId}
-      data-testid="connect-close-guard"
+      data-testid={testId}
       className="rounded-lg border border-[var(--v2-border)] bg-[var(--v2-surface)] p-4"
     >
       <h3 id={headingId} className="text-sm font-medium text-[var(--v2-ink)]">
-        Close without saving the credential?
+        {title}
       </h3>
       <p className="mt-1 text-sm leading-relaxed text-[var(--v2-ink-2)]">
-        This one-time manual credential will be hidden if you close now.
+        {body}
       </p>
       <div className="mt-3 flex flex-wrap gap-3">
         <Button ref={cancelRef} type="button" variant="tertiary" onClick={onCancel}>

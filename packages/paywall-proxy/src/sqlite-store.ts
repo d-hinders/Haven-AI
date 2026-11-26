@@ -1,0 +1,494 @@
+/**
+ * The proxy's consumed-payment store (docs/architecture/12-merchant-kit.md §6):
+ * a SQLite file at `PAYMENTS_DB`, through `node:sqlite`, behind the core's
+ * `ConsumedPaymentStore` interface. A payment buys one call and it is
+ * remembered across restarts: a `delivered` record is never forwarded again.
+ *
+ * - One proxy process per file. The database is opened with
+ *   `PRAGMA locking_mode=EXCLUSIVE` and a write transaction at startup; a
+ *   second process gets SQLITE_BUSY and the store refuses to open
+ *   (`StoreLockedError`). The operating system drops the lock when the process
+ *   dies, so a crash never blocks the next start.
+ * - Every reservation-token hash is cleared at startup. That is safe only
+ *   because no other process holds one; a restart voids the "no proof needed"
+ *   exemption of every payment in progress.
+ * - Every state transition is ONE conditional UPDATE whose affected-row count
+ *   is checked, so two concurrent requests can never both win a transition.
+ * - The store keeps only the SHA-256 of a reservation token, in a column the
+ *   record type omits; neither `reserve`'s known-key answer nor `get` returns it.
+ */
+import { createHash, randomBytes } from 'node:crypto'
+import { accessSync, constants, existsSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { dirname } from 'node:path'
+import type { StatementSync } from 'node:sqlite'
+import {
+  MAX_FORWARDS_PER_PAYMENT,
+  type ConsumedPaymentRecord,
+  type ConsumedPaymentState,
+  type ConsumedPaymentStore,
+} from '@haven_ai/merchant-payments'
+import { SIWX_NONCE_LIFETIME_MS, SIWX_REISSUE_MIN_REMAINING_MS, type SiwxNonce } from './siwx.js'
+
+// Loaded through `require`: the bundler rewrites a bare `node:sqlite` import to `sqlite`, which does not exist.
+const { DatabaseSync } = createRequire(import.meta.url)('node:sqlite') as typeof import('node:sqlite')
+
+export class StoreLockedError extends Error {
+  constructor() {
+    super(
+      'PAYMENTS_DB is locked by another process. Exactly one proxy may use a payments database at a time: ' +
+        'stop the running proxy, then start this one.',
+    )
+    this.name = 'StoreLockedError'
+  }
+}
+
+/**
+ * The store's directory cannot be written by this process (#5007). The proxy
+ * runs as a non-root user in the container image, so a host directory bind
+ * mounted at `/data` must be writable by that user; a named volume is created
+ * with the image directory's ownership and needs nothing. Without this class the
+ * CLI printed only "The proxy cannot start (Error)." — the driver's message,
+ * which names neither the directory nor the reason.
+ */
+export class StorePermissionError extends Error {
+  constructor(
+    readonly directory: string,
+    readonly reason: 'not-writable' | 'missing',
+  ) {
+    super(
+      reason === 'missing'
+        ? `PAYMENTS_DB cannot be opened: the directory "${directory}" does not exist. ` +
+            'Create it, or mount a volume there.'
+        : `PAYMENTS_DB cannot be opened: the directory "${directory}" is not writable by this process. ` +
+            'The proxy runs as a non-root user, so a host directory mounted there must be writable by that user; ' +
+            'a named volume is created with the right ownership.',
+    )
+    this.name = 'StorePermissionError'
+  }
+}
+
+export interface SqliteConsumedPaymentStore extends ConsumedPaymentStore {
+  /**
+   * Clear a `settling` record's reservation-token hash, as one conditional
+   * update (state still `settling`, `reservedAt` unchanged). A later request
+   * calls it for a holder past `RESERVATION_DEADLINE_MS`. `false`: the update
+   * changed no row, so the holder or another request got there first and the
+   * caller must read the record again and act on what it finds.
+   */
+  clearReservation(key: string, reservedAt: string): Promise<boolean>
+  /**
+   * The proxy's challenge nonces (§6 "The challenge nonces are the proxy's"),
+   * in their own table in the same file, outside the core's interface: one
+   * live nonce per payment key.
+   */
+  siwxNonces: SiwxNonceTable
+  /**
+   * The settled payment with this transaction hash, for the re-report command
+   * (#4898): a sale whose record was cleared on Haven, or never recorded, is
+   * sent again from the payment the store kept. `null` when the store has no
+   * payment with that hash.
+   */
+  findByTxHash(txHash: string): Promise<ConsumedPaymentRecord | null>
+  /** True while the file can take a write; for the readiness route. */
+  isWritable(): boolean
+  close(): void
+}
+
+export interface SiwxNonceTable {
+  /** The key's live nonce (issued, not retired, unexpired), read without a write; null when it has none. */
+  current(key: string, nowMs: number): SiwxNonce | null
+  /**
+   * The nonce a challenge for this key carries: the live one, unchanged, while
+   * at least `SIWX_REISSUE_MIN_REMAINING_MS` of it remains, else a fresh one
+   * replacing it. A fresh one is one write, which also prunes expired rows, so
+   * a stranger replaying a public header cannot grow the table.
+   */
+  issue(key: string, nowMs: number): SiwxNonce
+  /**
+   * Retire the nonce, as one conditional update (still this key's live nonce,
+   * unexpired, not yet retired). True: this request accepted the proof; of two
+   * requests with the same proof only one gets true.
+   */
+  retire(key: string, nonce: string, nowMs: number): boolean
+}
+
+export interface SqliteStoreOptions {
+  /** A `forwarding` record older than this (ms) is taken over: `UPSTREAM_TIMEOUT_MS` plus 30 s. */
+  takeoverAfterMs: number
+}
+
+interface Row {
+  key: string
+  state: ConsumedPaymentState
+  product_id: string
+  chain: string
+  payer: string
+  amount: string
+  valid_before: number
+  reserved_at: string
+  merchant_reference: string
+  authorization_digest: string
+  tx_hash: string | null
+  settled_at: string | null
+  forwarding_started_at: string | null
+  forward_count: number
+  delivered_at: string | null
+  failed_at: string | null
+  failure_reason: string | null
+  upstream_status: number | null
+  sale_reported: number
+}
+
+const RECORD_COLUMNS =
+  'key, state, product_id, chain, payer, amount, valid_before, reserved_at, merchant_reference, ' +
+  'authorization_digest, tx_hash, settled_at, forwarding_started_at, forward_count, delivered_at, ' +
+  'failed_at, failure_reason, upstream_status, sale_reported'
+
+function toRecord(row: Row): ConsumedPaymentRecord {
+  return {
+    key: row.key,
+    state: row.state,
+    productId: row.product_id,
+    chain: row.chain,
+    payer: row.payer,
+    amount: row.amount,
+    validBefore: Number(row.valid_before),
+    reservedAt: row.reserved_at,
+    merchantReference: row.merchant_reference,
+    authorizationDigest: row.authorization_digest,
+    ...(row.tx_hash !== null ? { txHash: row.tx_hash } : {}),
+    ...(row.settled_at !== null ? { settledAt: row.settled_at } : {}),
+    ...(row.forwarding_started_at !== null ? { forwardingStartedAt: row.forwarding_started_at } : {}),
+    forwardCount: Number(row.forward_count),
+    ...(row.delivered_at !== null ? { deliveredAt: row.delivered_at } : {}),
+    ...(row.failed_at !== null ? { failedAt: row.failed_at } : {}),
+    ...(row.failure_reason !== null ? { failureReason: row.failure_reason } : {}),
+    ...(row.upstream_status !== null ? { upstreamStatus: Number(row.upstream_status) } : {}),
+    saleReported: row.sale_reported === 1,
+  }
+}
+
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function isBusy(err: unknown): boolean {
+  if (!(err instanceof Error)) return false
+  const code = (err as { errcode?: number }).errcode
+  return code === 5 || code === 6 || /database is locked|SQLITE_BUSY/i.test(err.message)
+}
+
+/** SQLite's `SQLITE_CANTOPEN`: the file could not be created or opened. */
+const SQLITE_CANTOPEN = 14
+
+/**
+ * The filesystem refused the open, as a `StorePermissionError` (#5007), or
+ * `null` when the failure is something else and the caller should rethrow it.
+ *
+ * `SQLITE_CANTOPEN` alone is not enough to say "not writable": it also covers a
+ * path that is a directory, or a file the process may read but not write. So the
+ * directory is probed — a missing one is named as missing, an unwritable one as
+ * not writable, and anything else falls through to the original error rather
+ * than being described wrongly.
+ */
+function storePermissionFailure(path: string, err: unknown): StorePermissionError | null {
+  if (!(err instanceof Error)) return null
+  const code = (err as { code?: string }).code
+  const explicit = code === 'EACCES' || code === 'EPERM' || code === 'EROFS'
+  if (!explicit && (err as { errcode?: number }).errcode !== SQLITE_CANTOPEN) return null
+
+  const directory = dirname(path)
+  if (!existsSync(directory)) return new StorePermissionError(directory, 'missing')
+  if (explicit) return new StorePermissionError(directory, 'not-writable')
+  try {
+    accessSync(directory, constants.W_OK)
+  } catch {
+    return new StorePermissionError(directory, 'not-writable')
+  }
+  return null
+}
+
+export function openSqliteConsumedPaymentStore(path: string, options: SqliteStoreOptions): SqliteConsumedPaymentStore {
+  let db: InstanceType<typeof DatabaseSync>
+  try {
+    db = new DatabaseSync(path)
+  } catch (err) {
+    // The constructor is the one call outside the try below: a directory the
+    // process cannot write fails here, before any statement runs.
+    throw storePermissionFailure(path, err) ?? err
+  }
+  try {
+    db.exec('PRAGMA locking_mode=EXCLUSIVE')
+    // The startup write: takes the exclusive lock now, or fails with SQLITE_BUSY.
+    db.exec('BEGIN EXCLUSIVE')
+    try {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS payments (
+          key TEXT PRIMARY KEY,
+          state TEXT NOT NULL,
+          product_id TEXT NOT NULL,
+          chain TEXT NOT NULL,
+          payer TEXT NOT NULL,
+          amount TEXT NOT NULL,
+          valid_before INTEGER NOT NULL,
+          reserved_at TEXT NOT NULL,
+          merchant_reference TEXT NOT NULL,
+          authorization_digest TEXT NOT NULL,
+          reservation_token_hash TEXT,
+          tx_hash TEXT,
+          settled_at TEXT,
+          forwarding_started_at TEXT,
+          forward_count INTEGER NOT NULL DEFAULT 0,
+          delivered_at TEXT,
+          failed_at TEXT,
+          failure_reason TEXT,
+          upstream_status INTEGER,
+          sale_reported INTEGER NOT NULL DEFAULT 0
+        )
+      `)
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS siwx_nonces (
+          key TEXT PRIMARY KEY,
+          nonce TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          expiration_time TEXT NOT NULL,
+          expires_ms INTEGER NOT NULL,
+          retired INTEGER NOT NULL DEFAULT 0
+        )
+      `)
+      // Every token hash goes: no other process holds a token, so none is valid.
+      db.exec('UPDATE payments SET reservation_token_hash = NULL WHERE reservation_token_hash IS NOT NULL')
+      db.exec('COMMIT')
+    } catch (err) {
+      db.exec('ROLLBACK')
+      throw err
+    }
+  } catch (err) {
+    try {
+      db.close()
+    } catch {
+      // already unusable
+    }
+    if (isBusy(err)) throw new StoreLockedError()
+    throw err
+  }
+
+  const prepare = (sql: string): StatementSync => db.prepare(sql)
+  const insert = prepare(`
+    INSERT INTO payments (key, state, product_id, chain, payer, amount, valid_before, reserved_at,
+      merchant_reference, authorization_digest, reservation_token_hash, forward_count, sale_reported)
+    VALUES (?, 'settling', ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
+    ON CONFLICT(key) DO NOTHING
+  `)
+  const select = prepare(`SELECT ${RECORD_COLUMNS} FROM payments WHERE key = ?`)
+  const selectByTx = prepare(
+    `SELECT ${RECORD_COLUMNS} FROM payments WHERE lower(tx_hash) = lower(?) ORDER BY settled_at DESC LIMIT 1`,
+  )
+  const settleWithToken = prepare(`
+    UPDATE payments SET state = 'forwarding', forward_count = 1, forwarding_started_at = ?, tx_hash = ?,
+      settled_at = ?, reservation_token_hash = NULL
+    WHERE key = ? AND state = 'settling' AND reservation_token_hash = ?
+  `)
+  const settleWithoutToken = prepare(`
+    UPDATE payments SET state = 'settled', tx_hash = ?, settled_at = ?, reservation_token_hash = NULL
+    WHERE key = ? AND (state = 'settlement_unknown' OR (state = 'settling' AND reservation_token_hash IS NULL))
+  `)
+  const markUnknown = prepare(`
+    UPDATE payments SET state = 'settlement_unknown', reservation_token_hash = NULL
+    WHERE key = ? AND state = 'settling'
+  `)
+  const remove = prepare(`DELETE FROM payments WHERE key = ? AND state IN ('settling', 'settlement_unknown')`)
+  const clearToken = prepare(`
+    UPDATE payments SET reservation_token_hash = NULL
+    WHERE key = ? AND state = 'settling' AND reserved_at = ? AND reservation_token_hash IS NOT NULL
+  `)
+  const forwardFresh = prepare(`
+    UPDATE payments SET state = 'forwarding', forward_count = forward_count + 1, forwarding_started_at = ?
+    WHERE key = ? AND state IN ('settled', 'failed') AND forward_count < ?
+  `)
+  const forwardTakeover = prepare(`
+    UPDATE payments SET state = 'forwarding', forward_count = forward_count + 1, forwarding_started_at = ?,
+      failed_at = ?, failure_reason = 'forwarding_abandoned'
+    WHERE key = ? AND state = 'forwarding' AND forwarding_started_at < ? AND forward_count < ?
+  `)
+  const exhaust = prepare(`
+    UPDATE payments SET state = 'exhausted'
+    WHERE key = ? AND forward_count >= ?
+      AND (state IN ('settled', 'failed') OR (state = 'forwarding' AND forwarding_started_at < ?))
+  `)
+  const delivered = prepare(`
+    UPDATE payments SET state = 'delivered', upstream_status = ?, delivered_at = ?
+    WHERE key = ? AND state = 'forwarding'
+  `)
+  const failed = prepare(`
+    UPDATE payments SET state = 'failed', failure_reason = ?, failed_at = ?
+    WHERE key = ? AND state = 'forwarding'
+  `)
+  const reported = prepare('UPDATE payments SET sale_reported = 1 WHERE key = ?')
+  const nonceSelect = prepare('SELECT nonce, issued_at, expiration_time, expires_ms, retired FROM siwx_nonces WHERE key = ?')
+  const noncePrune = prepare('DELETE FROM siwx_nonces WHERE expires_ms <= ?')
+  const nonceUpsert = prepare(`
+    INSERT INTO siwx_nonces (key, nonce, issued_at, expiration_time, expires_ms, retired) VALUES (?, ?, ?, ?, ?, 0)
+    ON CONFLICT(key) DO UPDATE SET nonce = excluded.nonce, issued_at = excluded.issued_at,
+      expiration_time = excluded.expiration_time, expires_ms = excluded.expires_ms, retired = 0
+  `)
+  const nonceRetire = prepare(`
+    UPDATE siwx_nonces SET retired = 1 WHERE key = ? AND nonce = ? AND retired = 0 AND expires_ms > ?
+  `)
+  const probe = prepare('BEGIN IMMEDIATE')
+  let closed = false
+
+  function read(key: string): ConsumedPaymentRecord | null {
+    const row = select.get(key) as unknown as Row | undefined
+    return row ? toRecord(row) : null
+  }
+
+  interface NonceRow {
+    nonce: string
+    issued_at: string
+    expiration_time: string
+    expires_ms: number
+    retired: number
+  }
+  const toNonce = (row: NonceRow): SiwxNonce => ({
+    nonce: row.nonce,
+    issuedAt: row.issued_at,
+    expirationTime: row.expiration_time,
+    expiresMs: Number(row.expires_ms),
+  })
+  const siwxNonces: SiwxNonceTable = {
+    current(key, nowMs) {
+      const row = nonceSelect.get(key) as unknown as NonceRow | undefined
+      if (!row || row.retired === 1 || Number(row.expires_ms) <= nowMs) return null
+      return toNonce(row)
+    },
+    issue(key, nowMs) {
+      const row = nonceSelect.get(key) as unknown as NonceRow | undefined
+      if (row && row.retired === 0 && Number(row.expires_ms) - nowMs >= SIWX_REISSUE_MIN_REMAINING_MS) return toNonce(row)
+      const fresh: SiwxNonce = {
+        // 32 hex characters: alphanumeric and well over the 8 EIP-4361 requires.
+        nonce: randomBytes(16).toString('hex'),
+        issuedAt: new Date(nowMs).toISOString(),
+        expirationTime: new Date(nowMs + SIWX_NONCE_LIFETIME_MS).toISOString(),
+        expiresMs: nowMs + SIWX_NONCE_LIFETIME_MS,
+      }
+      db.exec('BEGIN IMMEDIATE')
+      try {
+        noncePrune.run(nowMs)
+        nonceUpsert.run(key, fresh.nonce, fresh.issuedAt, fresh.expirationTime, fresh.expiresMs)
+        db.exec('COMMIT')
+      } catch (err) {
+        db.exec('ROLLBACK')
+        throw err
+      }
+      return fresh
+    },
+    retire(key, nonce, nowMs) {
+      return Number(nonceRetire.run(key, nonce, nowMs).changes) === 1
+    },
+  }
+
+  return {
+    siwxNonces,
+
+    async reserve(input) {
+      const reservationToken = randomBytes(32).toString('hex')
+      const result = insert.run(
+        input.key,
+        input.productId,
+        input.chain,
+        input.payer,
+        input.amount,
+        input.validBefore,
+        input.now,
+        input.merchantReference,
+        input.authorizationDigest,
+        hashToken(reservationToken),
+      )
+      if (Number(result.changes) === 1) return { reserved: true, reservationToken }
+      const record = read(input.key)
+      // The row vanished between the conflict and the read (released): the caller tries again.
+      if (!record) throw new Error('consumed-payment store: key disappeared during reserve')
+      return { reserved: false, record }
+    },
+
+    async markSettled(key, input) {
+      if (input.reservationToken !== undefined) {
+        const result = settleWithToken.run(
+          input.settledAt,
+          input.txHash,
+          input.settledAt,
+          key,
+          hashToken(input.reservationToken),
+        )
+        return Number(result.changes) === 1 ? 'forward' : 'not_settleable'
+      }
+      const result = settleWithoutToken.run(input.txHash, input.settledAt, key)
+      return Number(result.changes) === 1 ? 'settled' : 'not_settleable'
+    },
+
+    async markSettlementUnknown(key) {
+      markUnknown.run(key)
+    },
+
+    async release(key) {
+      remove.run(key)
+    },
+
+    async clearReservation(key, reservedAt) {
+      return Number(clearToken.run(key, reservedAt).changes) === 1
+    },
+
+    async beginForwarding(key, now) {
+      const staleBefore = new Date(Date.parse(now) - options.takeoverAfterMs).toISOString()
+      if (Number(forwardFresh.run(now, key, MAX_FORWARDS_PER_PAYMENT).changes) === 1) return 'forward'
+      if (Number(forwardTakeover.run(now, now, key, staleBefore, MAX_FORWARDS_PER_PAYMENT).changes) === 1) {
+        return 'forward'
+      }
+      exhaust.run(key, MAX_FORWARDS_PER_PAYMENT, staleBefore)
+      const record = read(key)
+      if (record?.state === 'delivered') return 'delivered'
+      if (record?.state === 'exhausted') return 'exhausted'
+      // forwarding and young, or a record the core resolves (settling, settlement_unknown), or gone.
+      return 'in_flight'
+    },
+
+    async markDelivered(key, input) {
+      delivered.run(input.upstreamStatus, input.deliveredAt, key)
+    },
+
+    async markFailed(key, input) {
+      failed.run(input.reason, input.failedAt, key)
+    },
+
+    async markSaleReported(key) {
+      reported.run(key)
+    },
+
+    async get(key) {
+      return read(key)
+    },
+
+    async findByTxHash(txHash) {
+      const row = selectByTx.get(txHash) as unknown as Row | undefined
+      return row ? toRecord(row) : null
+    },
+
+    isWritable() {
+      try {
+        probe.run()
+        db.exec('ROLLBACK')
+        return true
+      } catch {
+        return false
+      }
+    },
+
+    close() {
+      if (closed) return
+      closed = true
+      db.close()
+    },
+  }
+}

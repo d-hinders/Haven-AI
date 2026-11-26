@@ -9,7 +9,9 @@
  * PIN, session token or key. The relay of the actual secret stays the agent's
  * job (the haven-pay skill's rule); this guard is the backstop that refuses
  * the obvious credential shapes from being persisted into Haven's evidence
- * row, where the owner (and any receipt export) would read them.
+ * row, where the owner (and any receipt export) would read them — and, since
+ * #4877, the connected accounting provider's ledger (Fortnox, Accounted,
+ * Igdrasil), where the reference is printed under "Stated by the agent".
  *
  * Deliberately conservative, in the refuse-obvious-shapes direction only:
  *

@@ -1,7 +1,7 @@
 /**
  * The backend's background jobs, as one importable table (#4764).
  *
- * `index.ts` used to start all ten of these inline, between its route
+ * `index.ts` used to start all of these inline, between its route
  * registrations and `startRetrySweep`. That made the wiring untestable —
  * importing `index.ts` boots the server — so two tests read the file as text
  * and regex-matched it, a technique that failed once on record (#4411).
@@ -15,14 +15,20 @@
  * Behaviour is unchanged from the inline wiring: same lock keys, intervals,
  * first-run behaviour, `.unref()`, and warn messages; per-pass and per-phase
  * catches kept with their exact messages; dynamic imports stay lazy, not
- * hoisted; no overlap guard is added to these ten; the outbound job still
+ * hoisted; no overlap guard is added to these rows; the outbound job still
  * iterates per chain inside one tick.
  *
- * The eleventh job — the accounting retry sweep — is NOT a row. It registers
+ * The twelfth job — the accounting retry sweep — is NOT a row. It registers
  * nothing when `config.accountingEnabled` is off, its interval comes from
  * config, it has an in-process overlap guard, and its leader function is
  * injectable, so it stays self-registering in
  * `modules/accounting/retry-sweep.ts` and `startBackgroundJobs` calls it.
+ *
+ * #4903 (the merchant inbound index) and #4899 (the merchant catalogue
+ * refresh) each added a ROW; #5012 removed the merchant inbound index row again
+ * (it now runs only while its owner views Sales, `refreshMerchantAccountIndex`),
+ * and #5035 added the delegate-sweep confirmer, so the table is twelve rows and
+ * the retry sweep is the thirteenth job.
  */
 import { config } from './config.js'
 import { deployableChainIds } from './domain/chains.js'
@@ -37,6 +43,8 @@ import {
   createCatalogIngestMonitor,
   deliverCatalogAlerts,
   ingestDiscoveredCatalog,
+  MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+  refreshAllMerchantCatalogues,
   refreshCatalog,
   type CatalogIngestMonitor,
   type QueryableLike,
@@ -95,6 +103,13 @@ const PASSPORT_SWEEP_INTERVAL_MS = 5 * 60 * 1000
 
 const OUTBOUND_BUMP_INTERVAL_MS = 60_000
 const RECONCILE_INTERVAL_MS = 60_000
+/**
+ * #5035: the delegate-sweep confirmer. A sweep booked `outcome_unknown` is
+ * resolved from the token's `authorizationState` — a cheap read — and the
+ * route's synchronous wait is 15 s, so a minute is the right cadence: the row
+ * is usually resolved on the first tick after it is booked.
+ */
+const SWEEP_CONFIRMER_INTERVAL_MS = 60_000
 
 /**
  * Ops webhook, same Slack-compatible `{ text }` shape as the
@@ -121,7 +136,7 @@ export interface BackgroundJobsDeps {
 }
 
 /**
- * Build the ten rows. A function rather than a module-level constant because
+ * Build the rows. A function rather than a module-level constant because
  * the catalog-ingest monitor must be built ONCE per start and held across
  * every tick (#4407) — a module-level table would build it at import time,
  * before the process has a logger or a pool.
@@ -203,6 +218,23 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
         // log-only mode — the warn above is the whole alert and the
         // episode counts as handled.
         await deliverCatalogAlerts(report.alerts, (text) => sendCatalogOpsAlert(log, text))
+      },
+    },
+    {
+      name: 'merchant catalogue refresh',
+      intervalMs: MERCHANT_CATALOGUE_REFRESH_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.merchantCatalogueRefresh,
+      failureMessage: 'Merchant catalogue refresh failed',
+      // #4899: read every configured kit deployment's discovery document and
+      // keep its product list. The approved mockup (#4894) pins 15 minutes for
+      // an unreachable kit; the same tick is the schedule for a reachable one,
+      // so a recovered kit is picked up on the tick that retries a broken one.
+      // Leader-locked: two replicas would read the same merchant's deployment
+      // at once. One source's failure never stops the pass — each read is
+      // caught and counted, and the next tick retries it.
+      run: async () => {
+        const report = await refreshAllMerchantCatalogues()
+        if (report.read > 0) log.info(report, 'Merchant catalogues refreshed')
       },
     },
     {
@@ -353,9 +385,37 @@ export function createBackgroundJobs(deps: BackgroundJobsDeps): BackgroundJobRow
       // booking.
       run: async () => {
         const { runSubmissionReconcileTick } = await import('./modules/payments/index.js')
-        const tick = await runSubmissionReconcileTick(log)
+        // #4819: a reconciled confirm runs the SAME booking the sign route
+        // runs, and that booking calls the machine-payment evidence hook. The
+        // hook lives in the mpp module, whose barrel imports the payments
+        // barrel, so it is handed in here rather than imported by the tick.
+        const { tryRecordMachinePaymentEvidenceBaseById } = await import('./modules/mpp/index.js')
+        const tick = await runSubmissionReconcileTick(log, {
+          recordEvidence: tryRecordMachinePaymentEvidenceBaseById,
+        })
         if (tick.confirmed || tick.failedReverted || tick.failedWindowElapsed) {
           log.info(tick, 'Submission reconcile tick acted')
+        }
+      },
+    },
+    {
+      name: 'sweep confirmer',
+      intervalMs: SWEEP_CONFIRMER_INTERVAL_MS,
+      lockKey: LEADER_LOCK_KEYS.sweepConfirmer,
+      failureMessage: 'Sweep confirmer tick failed',
+      // #5035: a delegate sweep whose receipt wait timed out (or whose
+      // broadcast answer was lost) is booked `outcome_unknown` with its hash,
+      // never `failed`. This tick decides the real outcome from the token's
+      // `authorizationState(from, nonce)` — independent of which hash mined —
+      // marks the row `submitted` with the mined hash (so transaction history
+      // attributes it) and resolves the stranded-funds event; an authorization
+      // that expired unused is marked `failed`. Leader-gated because the RPC
+      // reads are the expensive part; the terminal writes are CASes.
+      run: async () => {
+        const { runSweepConfirmerTick } = await import('./modules/mpp/index.js')
+        const tick = await runSweepConfirmerTick(log)
+        if (tick.submitted || tick.failedExpired) {
+          log.info(tick, 'Sweep confirmer tick acted')
         }
       },
     },
@@ -460,7 +520,7 @@ export interface StartBackgroundJobsOptions extends BackgroundJobsDeps {
 }
 
 /**
- * The one entry point `index.ts` calls: start the ten table rows, then the
+ * The one entry point `index.ts` calls: start the table rows, then the
  * self-registering accounting retry sweep.
  *
  * The retry sweep is called AFTER the rows, exactly as the inline wiring did,

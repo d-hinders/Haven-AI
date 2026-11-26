@@ -1,0 +1,39 @@
+{
+  "fakturanummer": "FAK-4790675261083085",
+  "fakturadatum": "2026-11-18",
+  "forfallodatum": "2026-12-18",
+  "ocr_nummer": "47906752610830855",
+  "saljare": {
+    "name": "Kit Merchant AB",
+    "address": "Sveavägen 10, 111 57 Stockholm",
+    "org_nr": "559123-4567",
+    "moms_nr": "SE559123456701",
+    "iban": "SE35 5000 0000 0549 1000 0003",
+    "bic": "ESSESESS",
+    "crypto_address": "0x1111111111111111111111111111111111111111"
+  },
+  "kopare": {
+    "identifierare": "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1",
+    "typ": "blockkedjeadress",
+    "roll": "agent_delegate"
+  },
+  "rader": [
+    {
+      "beskrivning": "Chat, 1,000 output tokens — One chat completion on your-provider/your-model, up to 1,000 output tokens.",
+      "antal": 1,
+      "apris_exkl_moms": "0.008",
+      "moms_procent": 25,
+      "moms_belopp": "0.002",
+      "totalt_inkl_moms": "0.01"
+    }
+  ],
+  "belopp_exkl_moms": "0.008",
+  "moms_procent": 25,
+  "moms_belopp": "0.002",
+  "totalt_inkl_moms": "0.01",
+  "momsbehandling": "SE_25",
+  "valuta": "USDC",
+  "betalningssatt": "Kryptovaluta (USDC på Base Sepolia testnät)",
+  "blockkedje_referens": "Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "status": "Betald"
+}

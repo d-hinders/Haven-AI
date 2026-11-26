@@ -49,7 +49,30 @@ const SNAPSHOT_OPTIONS = {
  * tab bar instead. The clip filenames are unchanged — height is not part of
  * their identity, only the width class (`-mobile`) is.
  */
-const MOBILE_CAPTURE_HEIGHT = 2000
+const MOBILE_CAPTURE_HEIGHT = 3600
+
+/**
+ * The desktop clip's own height (#4870 review round 3). Same reason as the
+ * mobile one above, one breakpoint over: #4870 added the receipt email and two
+ * structured address blocks, which grew the card to 1210px (empty) / 1262px
+ * (filled) — taller than the committed 800px desktop viewport. Playwright's
+ * element screenshot only paints the part of the element that is inside the
+ * viewport, so at 800px the whole **Shipping address (optional)** block and the
+ * Save / Remove actions came out as blank background in all four desktop
+ * baselines: the pixel gate then compared blank-to-blank over the new UI and a
+ * desktop regression there would have passed silently.
+ *
+ * 1400 clears the tallest card (1262) with room for the card's own bottom
+ * padding, so the whole card fits inside one viewport with nothing left to
+ * scroll to. The WIDTH still comes from `VIEWPORTS` (1280) — only the height
+ * changes, so the layout is the one CI renders. Height is not part of the clip
+ * filenames' identity, only the width class (`-desktop`) is.
+ */
+const DESKTOP_CAPTURE_HEIGHT = 1400
+
+/** The viewport height a capture of `vp` needs — see the two constants above. */
+const captureHeight = (vp: { name: 'desktop' | 'mobile'; height: number }): number =>
+  vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : DESKTOP_CAPTURE_HEIGHT
 
 /**
  * #3332 review round 2, design 1: scrolls `card` to the TOP of its scroll
@@ -71,6 +94,16 @@ const FILLED_DETAILS = {
   vat_number: 'SE556677889901',
   vies_status: 'valid',
   vies_checked_at: '2026-09-20T10:00:00.000Z',
+  // #4870: the receipt email and the two structured addresses.
+  receipt_email: 'billing@acme.se',
+  billing_address: {
+    line1: 'Sveavagen 1',
+    line2: '4 tr',
+    city: 'Stockholm',
+    postCode: '111 57',
+    country: 'SE',
+  },
+  shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
   created_at: '2026-09-01T00:00:00.000Z',
   updated_at: '2026-09-20T10:00:00.000Z',
 }
@@ -128,13 +161,18 @@ test.describe('settings company details', () => {
     test(`empty — purpose text, blank fields behind Add company details (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await page.setViewportSize({ width: vp.width, height: captureHeight(vp) })
       await serveCompanyDetails(page, EMPTY_DETAILS, 200)
       // #4359: the blank form is behind **Add company details** — click
       // through, then capture the form as before.
       const card = await openSettings(page, { reveal: true })
       await expect(card.getByLabel('Legal name')).toHaveValue('')
       await expect(card.getByTestId('company-details-purpose')).toContainText('personal identity number')
+      // #4870: the receipt email is prefilled from the SIGN-UP email, and the
+      // two address blocks are present and blank.
+      await expect(card.getByLabel('Receipt email (optional)', { exact: true })).toHaveValue('ada@haven.test')
+      await expect(card.getByLabel('Billing street address', { exact: true })).toHaveValue('')
+      await expect(card.getByLabel('Shipping street address', { exact: true })).toHaveValue('')
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-empty-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,
@@ -145,7 +183,7 @@ test.describe('settings company details', () => {
     test(`filled — the VIES badge says "Checked against VIES", never "verified" (${vp.name})`, async ({ page }, testInfo) => {
       const scheme = schemeOf(testInfo)
       test.skip(scheme === 'dark' && vp.name !== 'desktop', 'no mobile dark baseline for this spec')
-      await page.setViewportSize({ width: vp.width, height: vp.name === 'mobile' ? MOBILE_CAPTURE_HEIGHT : vp.height })
+      await page.setViewportSize({ width: vp.width, height: captureHeight(vp) })
       await serveCompanyDetails(page, FILLED_DETAILS)
       const card = await openSettings(page)
       await expect(card.getByLabel('Legal name')).toHaveValue('Ada Lovelace AB')
@@ -154,6 +192,12 @@ test.describe('settings company details', () => {
       await expect(card.getByTestId('vies-status-line')).toContainText('20 September 2026')
       await expect(card.getByText(/verified/i)).toHaveCount(0)
       await expect(card.getByRole('button', { name: 'Remove company details' })).toHaveCount(1)
+      // #4870: the stored receipt email and both addresses render.
+      await expect(card.getByLabel('Receipt email (optional)', { exact: true })).toHaveValue('billing@acme.se')
+      await expect(card.getByLabel('Billing street address', { exact: true })).toHaveValue('Sveavagen 1')
+      await expect(card.getByLabel('Billing city', { exact: true })).toHaveValue('Stockholm')
+      await expect(card.getByLabel('Shipping street address', { exact: true })).toHaveValue('Storgatan 2')
+      await expect(card.getByLabel('Shipping city', { exact: true })).toHaveValue('Goteborg')
       await scrollCardToTop(card)
       await expect(card).toHaveScreenshot(
         `settings-company-details-filled-${vp.name}${scheme === 'dark' ? '-dark' : ''}.png`,

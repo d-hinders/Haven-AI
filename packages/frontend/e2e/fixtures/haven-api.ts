@@ -166,6 +166,10 @@ export const testAgent = {
   // schema-checked against `ApiSchema<'Agent'>`, so the new required boolean
   // cannot be dropped silently here).
   tax_declaration_enabled: false,
+  // #4871: the owner's per-agent checkout-details sharing switch, default
+  // OFF — the same fact the e2e default agent must carry (the fixture is
+  // schema-checked against `ApiSchema<'Agent'>`).
+  checkout_details_sharing_enabled: false,
   // #4429: the stored display colour (1..6), assigned by the database on
   // insert. DISPLAY ONLY — the fixture is schema-checked against
   // `ApiSchema<'Agent'>`, so the new required field cannot be dropped here.
@@ -348,6 +352,13 @@ export const dashboardTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://research.example/report',
   x402MerchantAddress: testRecipientAddress,
+  // #4931: the server-resolved counterparty name (#4883). Null here on
+  // purpose — this row keeps testing the resource-host fallback, which
+  // `transactions-detail.spec.ts` and `transactions-detail-polish.spec.ts`
+  // assert as `research.example`. The key exists because the screenshot
+  // dataset's matching row carries a name and `fixture-shape-parity.test.ts`
+  // requires this fixture to be a key superset of every screenshot row.
+  recipientName: null,
   // #2870: the payment-intent id the accounting badge is keyed on, and the
   // badge's own object. Carried on the row itself so the fixture-shape parity
   // test (`fixture-shape-parity.test.ts`) sees the same keys the screenshot
@@ -406,6 +417,12 @@ export const x402UnrecordedSettlementTransaction = {
   source: 'x402',
   x402ResourceUrl: 'https://api.example.dev/datasets',
   x402MerchantAddress: testRecipientAddress,
+  // #4931: the server names this row's counterparty (#4883), and the name
+  // differs from the resource host on purpose — the row title and the drawer
+  // heading must show the NAME, not `api.example.dev`. This is the row the
+  // visual gate photographs (`transaction-panel-needs-attention-mobile.png`)
+  // and the one `transactions-detail-polish.spec.ts` opens by name.
+  recipientName: 'Klara Data AB',
   paymentId: 'pay-research-2',
   confirmedAt: '2026-05-16T01:13:20.000Z',
   timestampSource: 'confirmed_at' as const,
@@ -1162,6 +1179,384 @@ export const accountingFeedAttention = {
   counts: { pending: 0, failed: 1, exhausted: 3 },
 }
 
+/**
+ * Merchant services (#4904, epic #4885): the setting the shell reads once.
+ *
+ * The DEFAULT is OFF with no account — the state every user starts in, and the
+ * one the Settings → Business card renders as "Turn on Sales". Every visual
+ * spec that renders the shell reads this route (the Sales menu entry #4900
+ * will read it too), so it must be answered here or the shell hits the 599
+ * unmocked-route gate.
+ *
+ * `merchantServicesOn` is the state after a turn-on: the setting on and the
+ * dedicated account the route creates, named "Sales" by the server. The
+ * account is a real `smart_accounts` row — a delegation-rail account on the
+ * fixture's chain, never the default, with no agents or budgets — so the
+ * fixture never invents a state the backend cannot serve (#2120).
+ */
+export const merchantServicesOff = {
+  enabled: false,
+  enabled_at: null as string | null,
+  disabled_at: null as string | null,
+  merchant_account: null as {
+    id: string
+    account_address: string
+    chain_id: number
+    name: string
+    created_at: string
+  } | null,
+}
+
+export const merchantServicesOn = {
+  enabled: true,
+  enabled_at: '2026-05-04T09:00:00.000Z',
+  disabled_at: null as string | null,
+  merchant_account: {
+    id: 'account-sales',
+    account_address: '0x5555555555555555555555555555555555555555',
+    chain_id: testSafe.chain_id,
+    name: 'Sales',
+    created_at: '2026-05-04T09:00:00.000Z',
+  },
+}
+
+/**
+ * Sales (#4900, epic #4885): the reads the Sales page makes — the summary, the
+ * payments list and one payment's detail (`routes/merchant-sales-reads.ts`,
+ * #4897), the catalogue (`routes/merchant-catalogue.ts`, #4899) and the keys
+ * (`routes/merchant-keys.ts`, #4896).
+ *
+ * The DEFAULT in `mockHavenApi` is the empty answer the backend gives an
+ * account with nothing to show (`emptySummary()`, an empty page, no kit
+ * address, no keys), so a spec that renders the shell with Sales off, or on
+ * with nothing paid, sees what a real deployment serves. `serveSales` is the
+ * populated answer: it turns Sales ON and serves one period of payments whose
+ * figures agree with each other, so a baseline photographs a state the product
+ * can produce (#2120).
+ *
+ * The data is one story. Revenue $2.14 = 2 chat sales ($0.84) + 1 embeddings
+ * sale ($0.30) + 1 payment with no product ($1.00); a $0.50 move from the
+ * owner's own agent is listed and is in no figure. All dates are absolute and
+ * sit inside the 30 days before `SALES_FROZEN_NOW`, which a spec freezes the
+ * page clock to, so the period's chart does not move with the wall clock.
+ */
+export const SALES_FROZEN_NOW = new Date('2026-11-17T12:00:00.000Z')
+
+const salesContact = { kind: 'contact', name: 'Lumen Research', address: '0x41b2c09e7a55d81f3b2e6c40a9d17e5f8c0b7d93' }
+const salesOwn = { kind: 'own', name: 'Atlas', address: '0x9e10aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa4c2a' }
+const salesWallet = { kind: 'wallet', name: null as string | null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' }
+
+/**
+ * Today's USDC price in each display currency as the Sales reads carry it
+ * (#4963): the fixture's rate story, in the wire's `usdc_rates` shape. USD is
+ * the real feed's ~0.9998 on purpose — the page never reads it (the registry
+ * peg makes USD exact), so a USD baseline cannot move with it.
+ */
+export const salesUsdcRates = {
+  usd: 0.9998,
+  eur: FIXTURE_USDC_RATES.EUR,
+  sek: FIXTURE_USDC_RATES.SEK,
+}
+
+/** The empty answer (Sales off, or an unpaid account): no rate is read, so the field is null. */
+export const salesEmptySummary = {
+  usdc_rates: null as typeof salesUsdcRates | null,
+  revenue_raw: '0',
+  revenue_in_account_raw: '0',
+  sales: 0,
+  average_sale_raw: '0',
+  without_product: { count: 0, amount_raw: '0' },
+  own_moves: { count: 0, amount_raw: '0' },
+  by_product: [] as unknown[],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [] as unknown[],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [] as unknown[],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+}
+
+export const salesSummary = {
+  usdc_rates: salesUsdcRates as typeof salesUsdcRates | null,
+  revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
+  sales: 3,
+  // $2.14 over every payment counted (3 sales + 1 with no product), rounded down (#4981).
+  average_sale_raw: '535000',
+  without_product: { count: 1, amount_raw: '1000000' },
+  own_moves: { count: 1, amount_raw: '500000' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '300000' },
+  ],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [
+    { payer: salesContact, payments: 2, amount_raw: '840000', last_paid_at: '2026-11-16T14:05:00.000Z' },
+    { payer: salesWallet, payments: 2, amount_raw: '1300000', last_paid_at: '2026-11-16T13:48:00.000Z' },
+  ],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [
+    // #4901: the per-product split the Analytics Revenue chart stacks. It adds
+    // up to `revenue_raw` on every day (products + other_products_raw +
+    // without_product_raw), which is the property the chart's bars rely on.
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+}
+
+/** The period before: a smaller revenue, so the Revenue tile carries a comparison. */
+export const salesPreviousSummary = { ...salesSummary, revenue_raw: '1070000', without_product: { count: 0, amount_raw: '0' }, own_moves: { count: 0, amount_raw: '0' } }
+
+const salesHash = (byte: string) => `0x${byte.repeat(32)}`
+
+export const salesPayments = [
+  { tx_hash: salesHash('a1'), block_time: '2026-11-16T14:05:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: salesContact, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a2'), block_time: '2026-11-16T13:48:00.000Z', kind: 'no_product', amount_raw: '1000000', product_id: null, product_label: null, payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a3'), block_time: '2026-11-14T10:00:00.000Z', kind: 'own_move', amount_raw: '500000', product_id: null, product_label: null, payer: salesOwn, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a4'), block_time: '2026-11-14T09:30:00.000Z', kind: 'sale', amount_raw: '420000', product_id: 'chat', product_label: 'Chat completion', payer: salesContact, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+  { tx_hash: salesHash('a5'), block_time: '2026-11-12T09:00:00.000Z', kind: 'sale', amount_raw: '300000', product_id: 'embed', product_label: 'Embeddings', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'account' },
+]
+
+/**
+ * #4954: the Stripe deposit addresses the owner registered (#4952,
+ * `routes/merchant-deposit-addresses.ts`), newest first: one active and one
+ * retired. Lower-case on the wire, `verified: false` always. #5028: the
+ * registry is open only on a testnet Sales account, so these are served only
+ * for `serveSales(..., { salesChainId: 84532 })`. The rows carry no chain of
+ * their own — `serveSales` stamps the chain of the account it serves, so the
+ * fixture cannot claim a registration on a chain the account is not on.
+ */
+export const salesStripeAddress = '0x3c9e5a1b7d2f4e60a8b1c3d5e7f9a0b2c4d6e8f0'
+export const salesDepositAddresses = [
+  { id: '6f1c2d3e-4a5b-4c6d-8e7f-90a1b2c3d4e5', address: salesStripeAddress, registered_at: '2026-11-10T09:00:00.000Z', retired_at: null as string | null, active: true, verified: false, verification: 'Registered by you, not verified by Haven.' },
+  { id: '0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d', address: '0x71e4b0c9d8a7f6e5d4c3b2a1908f7e6d5c4b3a29', registered_at: '2026-11-02T09:00:00.000Z', retired_at: '2026-11-09T17:00:00.000Z' as string | null, active: false, verified: false, verification: 'Registered by you, not verified by Haven.' },
+]
+
+/**
+ * #4954, #4981: the same period with two sales received at the registered
+ * Stripe address ($0.01 on the 16th + $0.02 on the 14th, "Joke", the demo
+ * merchant's Stripe product, paid by `salesWallet`). They count in EVERY figure
+ * — Revenue $2.17, 5 sales + 1 with no product = 6 payments, the chart, both
+ * breakdowns — and are split out: `revenue_in_account_raw` ($2.14) plus
+ * `received_in_stripe` ($0.03) is `revenue_raw`, and the two days carry
+ * `in_stripe_raw`. The ingest never writes them a transfer (#4952).
+ */
+export const salesSummaryWithStripe = {
+  ...salesSummary,
+  revenue_raw: '2170000',
+  revenue_in_account_raw: '2140000',
+  sales: 5,
+  // 2170000 / (5 sales + 1 with no product), rounded down.
+  average_sale_raw: '361666',
+  by_product: [...salesSummary.by_product, { product_id: 'joke', label: 'Joke', sales: 2, amount_raw: '30000' }],
+  by_payer: [salesSummary.by_payer[0], { ...salesSummary.by_payer[1], payments: 4, amount_raw: '1330000' }],
+  by_day: [
+    salesSummary.by_day[0],
+    { day: '2026-11-14', payments: 2, sales: 2, revenue_raw: '440000', without_product_raw: '0', in_stripe_raw: '20000', by_product: [{ product_id: 'chat', amount_raw: '420000' }, { product_id: 'joke', amount_raw: '20000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 3, sales: 2, revenue_raw: '1430000', without_product_raw: '1000000', in_stripe_raw: '10000', by_product: [{ product_id: 'chat', amount_raw: '420000' }, { product_id: 'joke', amount_raw: '10000' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 2, amount_raw: '30000' },
+}
+export const salesStripePayments = [
+  { tx_hash: salesHash('b1'), block_time: '2026-11-16T15:10:00.000Z', kind: 'sale', amount_raw: '10000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },
+  { tx_hash: salesHash('b2'), block_time: '2026-11-14T11:20:00.000Z', kind: 'sale', amount_raw: '20000', product_id: 'joke', product_label: 'Joke', payer: salesWallet, several_payers: false, receipt_number: null, vat_treatment: null, held_by: 'stripe', receiving_address: salesStripeAddress as string | null },
+]
+const salesPaymentsWithStripe = [...salesPayments.map((p) => ({ ...p, receiving_address: null as string | null })), ...salesStripePayments].sort(
+  (a, b) => b.block_time.localeCompare(a.block_time),
+)
+
+const salesProduct = (overrides: Record<string, unknown>) => ({
+  description: null,
+  route: null,
+  model: null,
+  output_token_cap: null,
+  network: `eip155:${testSafe.chain_id}`,
+  offered: true,
+  removed_at: null as string | null,
+  ...overrides,
+})
+
+/** No kit address saved: the state of every Sales account before step 3. */
+export const salesCatalogueNone = {
+  deployment_url: null as string | null,
+  last_read_at: null as string | null,
+  last_read_status: 'never',
+  last_read_detail: null as string | null,
+  mismatch: false,
+  mismatch_reason: null as string | null,
+  document_name: null as string | null,
+  document_operator_name: null as string | null,
+  document_network: null as string | null,
+  document_pay_to: null as string | null,
+  document_updated: null as string | null,
+  products: [] as unknown[],
+}
+
+export const salesCatalogueOk = {
+  ...salesCatalogueNone,
+  deployment_url: 'https://inference.example.com',
+  last_read_at: '2026-11-17T11:56:00.000Z',
+  last_read_status: 'ok',
+  document_name: 'Inference',
+  document_network: `eip155:${testSafe.chain_id}`,
+  document_pay_to: merchantServicesOn.merchant_account.account_address,
+  products: [
+    salesProduct({ product_id: 'chat', name: 'Chat completion', price_atomic: '18000' }),
+    salesProduct({ product_id: 'embed', name: 'Embeddings', price_atomic: '100' }),
+    salesProduct({ product_id: 'legacy', name: 'Legacy model', price_atomic: '1000000', offered: false, removed_at: '2026-11-01T00:00:00.000Z' }),
+  ] as unknown[],
+}
+
+export const salesCatalogueMismatch = {
+  ...salesCatalogueOk,
+  last_read_status: 'mismatch',
+  mismatch: true,
+  mismatch_reason: 'pay_to_differs',
+  document_network: 'eip155:84532',
+  document_pay_to: '0x12d9aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaae4ab',
+}
+
+export const salesCatalogueUnreachable = {
+  ...salesCatalogueOk,
+  last_read_at: '2026-11-17T10:00:00.000Z',
+  last_read_status: 'unreachable',
+}
+
+export const salesKeys = [
+  { id: 'key-1', key_prefix: 'sk_merchant_4f2a9c7e1b05', created_by: testUser.id, created_at: '2026-11-12T09:00:00.000Z', revoked_by: null as string | null, revoked_at: null as string | null, last_used_at: '2026-11-17T11:58:00.000Z' as string | null },
+]
+
+/**
+ * The Setup tab's Sales keys (#4905): one live key used a moment ago, one never
+ * used, one revoked. `created_by` / `revoked_by` are the signed-in test user, so
+ * the list reads "Created by you". The secret is a FAKE, obviously sample value
+ * that no route accepts; it exists so the create dialog can be photographed.
+ */
+export const salesKeysSetup = [
+  ...salesKeys,
+  { id: 'key-2', key_prefix: 'sk_merchant_b81c4d90e2a7', created_by: testUser.id, created_at: '2026-11-03T09:00:00.000Z', revoked_by: null as string | null, revoked_at: null as string | null, last_used_at: null as string | null },
+  { id: 'key-3', key_prefix: 'sk_merchant_07de5a13c8f2', created_by: testUser.id, created_at: '2026-10-28T09:00:00.000Z', revoked_by: testUser.id as string | null, revoked_at: '2026-11-03T10:00:00.000Z' as string | null, last_used_at: '2026-11-02T08:00:00.000Z' as string | null },
+]
+
+export const SALES_KEY_FAKE_SECRET = 'sk_merchant_0000sample0000not0000a0000real0000key0000000000000000'
+
+/**
+ * Serve the Setup tab's keys (and the create route) on top of `serveSales`.
+ * Registered AFTER it, so it answers first.
+ */
+export async function serveSalesKeys(page: Page) {
+  await page.route(/\/api\/merchant-keys/, async (route) => {
+    const request = route.request()
+    if (request.method() === 'POST') {
+      return fulfillJson(route, { ...salesKeys[0], id: 'key-new', key_prefix: SALES_KEY_FAKE_SECRET.slice(0, 24), secret: SALES_KEY_FAKE_SECRET }, 201)
+    }
+    if (request.method() === 'GET') return fulfillJson(route, { keys: salesKeysSetup })
+    await route.fallback()
+  })
+}
+
+export type SalesScenario =
+  | 'overview'
+  | 'first-run'
+  | 'first-run-progressed'
+  | 'products-ok'
+  | 'products-mismatch'
+  | 'products-unreachable'
+  | 'products-none'
+  | 'overview-stripe'
+
+/**
+ * Turn Sales ON and serve its reads for one scenario. Registered AFTER
+ * `mockHavenApi`, so it answers first (Playwright runs the latest route first)
+ * and everything it does not name falls through to the shell's fixtures.
+ *
+ * `first-run-progressed` (#4985) is the first-run screen with progress: the
+ * account has still never been paid, but a Sales key exists and the product
+ * list address reads `ok`, so all three steps are done and the card says the
+ * seller is connected. `first-run` serves neither.
+ *
+ * `salesChainId` (#5028) serves the Sales account on another chain. The Stripe
+ * deposit-address registry is open only on a testnet Sales account, so the
+ * spec that captures that section passes `84532`; every other spec keeps the
+ * fixture's Base account.
+ */
+export async function serveSales(
+  page: Page,
+  scenario: SalesScenario,
+  opts: { salesChainId?: number } = {},
+) {
+  const catalogue =
+    scenario === 'products-ok' ||
+    scenario === 'overview' ||
+    scenario === 'overview-stripe' ||
+    scenario === 'first-run-progressed'
+      ? salesCatalogueOk
+      : scenario === 'products-mismatch'
+        ? salesCatalogueMismatch
+        : scenario === 'products-unreachable'
+          ? salesCatalogueUnreachable
+          : salesCatalogueNone
+  const paid = scenario !== 'first-run' && scenario !== 'first-run-progressed'
+  const stripe = scenario === 'overview-stripe'
+  const summary = stripe ? salesSummaryWithStripe : salesSummary
+  const payments = stripe ? salesPaymentsWithStripe : salesPayments
+  await page.route(/\/api\/merchant-(services|sales|catalogue|keys|deposit-addresses)/, async (route) => {
+    const request = route.request()
+    if (request.method() !== 'GET') {
+      await route.fallback()
+      return
+    }
+    const url = new URL(request.url())
+    const path = url.pathname.replace(/^\/api/, '')
+    if (path === '/merchant-services') {
+      return fulfillJson(
+        route,
+        opts.salesChainId === undefined
+          ? merchantServicesOn
+          : { ...merchantServicesOn, merchant_account: { ...merchantServicesOn.merchant_account, chain_id: opts.salesChainId } },
+      )
+    }
+    if (path === '/merchant-catalogue') return fulfillJson(route, catalogue)
+    if (path === '/merchant-keys') return fulfillJson(route, { keys: scenario === 'first-run' ? [] : salesKeys })
+    if (path === '/merchant-deposit-addresses') {
+      // #5028: the registry is per Sales account, so the served registrations
+      // carry the chain of the account this scenario serves.
+      const chainId = opts.salesChainId ?? merchantServicesOn.merchant_account.chain_id
+      return fulfillJson(route, {
+        verification: 'Registered by you, not verified by Haven.',
+        addresses: stripe ? salesDepositAddresses.map((a) => ({ ...a, chain: `eip155:${chainId}` })) : [],
+      })
+    }
+    if (path === '/merchant-sales/summary') {
+      const previous = url.searchParams.get('to') === '2026-10-18'
+      return fulfillJson(route, !paid ? salesEmptySummary : previous ? salesPreviousSummary : summary)
+    }
+    if (path === '/merchant-sales/payments') {
+      // Whole history with `limit=1` is the page's "has it ever been paid" probe.
+      const rows = !paid ? [] : url.searchParams.has('from') ? payments : payments.slice(0, 1)
+      // #4960: `total` is the read's count for the filter set (here: no filter).
+      return fulfillJson(route, { usdc_rates: paid ? salesUsdcRates : null, payments: rows, next_cursor: null, total: rows.length })
+    }
+    if (path === '/merchant-sales/facets') {
+      // #4960: every product and payer of the period, for the filter menus.
+      if (!paid) return fulfillJson(route, { products: [], payers: [] })
+      const products = [...new Map(payments.filter((p) => p.product_id).map((p) => [p.product_id, { product_id: p.product_id, label: p.product_label }])).values()]
+      const payers = [...new Map(payments.filter((p) => p.payer).map((p) => [p.payer!.address, p.payer])).values()]
+      return fulfillJson(route, { products, payers })
+    }
+    const detail = /^\/merchant-sales\/payments\/(0x[0-9a-f]+)$/.exec(path)
+    if (detail) {
+      const row = payments.find((p) => p.tx_hash === detail[1])
+      if (!row) return fulfillJson(route, { error: 'No such payment on this account.', error_code: 'PAYMENT_NOT_FOUND' }, 404)
+      return fulfillJson(route, { ...row, usdc_rates: salesUsdcRates, merchant_reference: row.kind === 'sale' ? 'req_01JD8Q4F2K' : null, legs: row.payer ? [{ log_index: 2, payer: row.payer, amount_raw: row.amount_raw }] : [] })
+    }
+    await route.fallback()
+  })
+}
+
 type JsonValue = Record<string, unknown> | unknown[] | null
 
 async function fulfillJson(route: Route, json: JsonValue, status = 200) {
@@ -1744,6 +2139,45 @@ export async function mockHavenApi(page: Page) {
       return
     }
 
+    // #4904: the merchant-services setting, read ONCE by the shell
+    // (`MerchantServicesProvider`) on every authenticated page. The default is
+    // OFF with no account — the state every user starts in — so the Settings →
+    // Business card renders its "Turn on Sales" state and the Sales menu entry
+    // (#4900) stays hidden. A spec that needs Sales on overrides this route.
+    if (method === 'GET' && path === '/merchant-services') {
+      await fulfillJson(route, merchantServicesOff)
+      return
+    }
+
+    // #4900: the Sales reads. Off (the default), the backend answers the
+    // empty state — no payments, no kit address, no keys — and the shell never
+    // asks; a spec that renders Sales calls `serveSales`.
+    if (method === 'GET' && path === '/merchant-sales/summary') {
+      await fulfillJson(route, salesEmptySummary)
+      return
+    }
+    if (method === 'GET' && path === '/merchant-sales/payments') {
+      await fulfillJson(route, { usdc_rates: null, payments: [], next_cursor: null, total: 0 })
+      return
+    }
+    if (method === 'GET' && path === '/merchant-sales/facets') {
+      await fulfillJson(route, { products: [], payers: [] })
+      return
+    }
+    if (method === 'GET' && path === '/merchant-catalogue') {
+      await fulfillJson(route, salesCatalogueNone)
+      return
+    }
+    if (method === 'GET' && path === '/merchant-keys') {
+      await fulfillJson(route, { keys: [] })
+      return
+    }
+    // #4954: no Stripe deposit address registered — the state every Sales account starts in.
+    if (method === 'GET' && path === '/merchant-deposit-addresses') {
+      await fulfillJson(route, { verification: 'Registered by you, not verified by Haven.', addresses: [] })
+      return
+    }
+
     if (method === 'GET' && path === '/user/owners') {
       await fulfillJson(route, {
         owners: [],
@@ -2162,6 +2596,11 @@ export async function serveAgentDetailResponses(
           source: 'x402',
           x402_resource_url: 'https://research.example/report',
           x402_merchant_address: testRecipientAddress,
+          // #4931: the server names the merchant (#4883) — the agent ledger
+          // row's title is this name, ahead of the resource host. The name
+          // differs from the host on purpose, so the row title proves the
+          // rule rather than the fallback.
+          counterparty_name: 'NordShield VPN',
           chain_id: testSafe.chain_id,
           account_id: testSafe.id,
           account_address: testSafeAddress,
@@ -2258,6 +2697,9 @@ export async function serveAgentDetailResponses(
             source: 'x402',
             x402_resource_url: 'https://research.example/report',
             x402_merchant_address: testRecipientAddress,
+            // #4931: same name as the kinded read above — one row, both
+            // reads, so the legacy merged list cannot disagree with it.
+            counterparty_name: 'NordShield VPN',
             chain_id: testSafe.chain_id,
             account_id: testSafe.id,
             account_address: testSafeAddress,

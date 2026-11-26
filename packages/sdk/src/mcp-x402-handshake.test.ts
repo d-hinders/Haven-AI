@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { HavenClient } from './client.js'
-import type { X402PaymentOption, X402PaymentRequired } from './types.js'
+import { HavenApiError, type X402PaymentOption, type X402PaymentRequired } from './types.js'
 import { buildFundingLegSignData } from './__fixtures__/valid-userop.js'
 
 // The live funding-leg wire shape (#946): every sign_data the backend emits
@@ -480,6 +480,9 @@ describe('MCP-over-x402 auto-handshake (issue #315)', () => {
     // ...but failed, so no MCP headers leak onto the probe or the retry.
     expect(headersOf(fetchMock.mock.calls[1]).has('mcp-session-id')).toBe(false)
     expect(headersOf(fetchMock.mock.calls[6]).has('mcp-session-id')).toBe(false)
+    // #5089: nor the MCP `Accept` — a failed handshake is a plain-HTTP request.
+    expect(headersOf(fetchMock.mock.calls[1]).has('Accept')).toBe(false)
+    expect(headersOf(fetchMock.mock.calls[6]).has('Accept')).toBe(false)
 
     // Standard x402 result passes through untouched (not SSE-collapsed).
     expect(response.status).toBe(200)
@@ -649,6 +652,62 @@ describe('completeX402MerchantCall — hosted merchant settlement leg', () => {
       paymentProofHeader: 'PAYMENT_HEADER_ABC',
       protocolReceiptHeaderName: 'PAYMENT-RESPONSE',
     })
+  })
+
+  it('#5086: an approvedEndpoint binds delivery to the stored endpoint; the evidence keeps the payment\'s mcp://tool/ address', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      // 0: the payment's stored address is the merchant's declared mcp://tool/x
+      .mockResolvedValueOnce(paymentStatusReady('mcp://tool/x'))
+      .mockResolvedValueOnce(initializeOk('sess-pay'))
+      .mockResolvedValueOnce(notificationAccepted())
+      .mockResolvedValueOnce(
+        sseResponse(sse({ jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: 'a haiku' }] } }), {
+          headers: { 'PAYMENT-RESPONSE': btoa(JSON.stringify({ transaction: '0xsettle' })) },
+        }),
+      )
+      .mockResolvedValueOnce(evidenceAccepted())
+
+    const result = await newClient().completeX402MerchantCall({
+      url: mcpUrl,
+      init: merchantInit,
+      paymentId: 'pay_123',
+      paymentHeader: 'PAYMENT_HEADER_ABC',
+      approvedEndpoint: mcpUrl,
+    })
+
+    expect(result.ok).toBe(true)
+    const evidenceCall = fetchMock.mock.calls.find(([url]) => String(url).endsWith('/machine-payments/evidence'))!
+    // The backend refuses evidence whose resourceUrl is not the stored address.
+    expect(bodyOf(evidenceCall)).toMatchObject({ paymentId: 'pay_123', resourceUrl: 'mcp://tool/x' })
+  })
+
+  it('#5086: without approvedEndpoint, the same mcp://tool/ address is refused before the merchant is called (unchanged)', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(paymentStatusReady('mcp://tool/x'))
+    const err = await newClient()
+      .completeX402MerchantCall({ url: mcpUrl, init: merchantInit, paymentId: 'pay_123', paymentHeader: 'PAYMENT_HEADER_ABC' })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenApiError)
+    expect((err as HavenApiError).statusCode).toBe(409)
+    expect((err as Error).message).toBe('x402 merchant completion does not match the approved resource URL.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('#5086: an approvedEndpoint that is not the URL being called is refused before the merchant is called', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(paymentStatusReady('mcp://tool/x'))
+    const err = await newClient()
+      .completeX402MerchantCall({
+        url: 'https://elsewhere.example/mcp',
+        init: merchantInit,
+        paymentId: 'pay_123',
+        paymentHeader: 'PAYMENT_HEADER_ABC',
+        approvedEndpoint: mcpUrl,
+      })
+      .catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(HavenApiError)
+    expect((err as HavenApiError).statusCode).toBe(409)
+    expect((err as Error).message).toBe('x402 merchant completion does not match the approved MCP endpoint.')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
   it('#3171: the hosted twin recovers a settled-nothing 404 the same way — one re-initialize, same header, ok:true', async () => {

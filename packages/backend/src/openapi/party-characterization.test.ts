@@ -87,6 +87,7 @@ vi.mock('../db.js', () => ({ default: { query: (...args: unknown[]) => mockQuery
 // `vitest.config.ts`'s hookTimeout comment documents for db-harness.
 import { listReceipts } from '../modules/mpp/evidence.js'
 import { getAgentPaymentStatus } from '../modules/payments/agent-payment-status.js'
+import { getPaymentReceipt } from '../modules/payments/receipt.js'
 
 beforeEach(() => {
   mockQuery.mockReset()
@@ -571,5 +572,113 @@ describe('#2960 party-characterization replay (base 24a08ec3 → HEAD)', () => {
     const live = liveBody as unknown as { parties: { delegate_account: string | null } }
     // #3307: read back EIP-55 checksummed at the read boundary (storage stays lowercase).
     expect(live.parties.delegate_account).toBe(getAddress(authorizeTimeDelegator))
+  })
+})
+
+// ── #4822: GET /payments/:id/receipt joins the party characterization ────────
+//
+// The four fixtures above cover the status read and the receipt list, each for
+// both schemes; neither is the signed bundle. These two add the bundle:
+//
+//   - `machine-payment-receipt-erc7710.json` was recorded with the BASE-COMMIT
+//     builder (`origin/dev` @ 65b1d7cb7), so it pins the pre-#4822 bundle. The
+//     replay strips the one additive field and asserts every other field is
+//     byte-identical.
+//   - `machine-payment-receipt-eip3009.json` pins the CORRECTED values: the
+//     merchant party is the merchant named at authorize (not the funding leg's
+//     `to_address`, the agent's own delegate) and `settlementTxHash` is the
+//     on-chain-verified merchant settlement transaction.
+//
+// Both rows are the shape `FIND_SETTLED_PAYMENT_RECEIPT_SQL` returns; the
+// database is mocked at the same `pool.query` boundary the other fixtures use,
+// so the SQL half of the defect is pinned by the real-Postgres case in
+// `infra/repositories/__tests__/payment-intents.test.ts`.
+
+/** Strip the one field #4822 adds to the bundle, recursively. */
+function stripReceiptAdditions(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stripReceiptAdditions)
+  if (value === null || typeof value !== 'object') return value
+  const out: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+    if (k === 'settlementTxHash') continue
+    out[k] = stripReceiptAdditions(v)
+  }
+  return out
+}
+
+const RECEIPT_ERC7710_ROW = {
+  id: 'pi-5',
+  account_address: '0x7777777777777777777777777777777777777777',
+  chain_id: 8453,
+  token_symbol: 'USDC',
+  token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  to_address: '0x4444444444444444444444444444444444444444',
+  amount_human: '0.02',
+  delegate_address: '0x6666666666666666666666666666666666666666',
+  sign_hash: `0x${'ab'.repeat(32)}`,
+  signature: `0x${'11'.repeat(65)}`,
+  tx_hash: `0x${'fa'.repeat(32)}`,
+  confirmed_at: '2026-09-01T00:10:00.000Z',
+  resource_url: 'https://api.example.com/data',
+  amount_sek: '0.21',
+  delegate_account_address: null,
+  execution_rail: 'delegation',
+  settlement_scheme: 'erc7710',
+  delivery_quality: null,
+  delivery_note: null,
+  delivery_reported_at: null,
+  merchant_address: '0x4444444444444444444444444444444444444444',
+  merchant_settlement_tx_hash: null,
+}
+
+const RECEIPT_EIP3009_ROW = {
+  id: 'pi-6',
+  account_address: '0x2222222222222222222222222222222222222222',
+  chain_id: 8453,
+  token_symbol: 'USDC',
+  token_address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+  // The funding leg: `to_address` is the agent's own delegate.
+  to_address: '0xcb9a000000000000000000000000000000005ba8',
+  amount_human: '0.01',
+  delegate_address: '0xcb9a000000000000000000000000000000005ba8',
+  sign_hash: `0x${'cd'.repeat(32)}`,
+  signature: `0x${'22'.repeat(65)}`,
+  tx_hash: `0x${'de'.repeat(32)}`,
+  confirmed_at: '2026-09-01T00:05:00.000Z',
+  resource_url: 'https://api.example.com/data',
+  amount_sek: '0.11',
+  delegate_account_address: null,
+  execution_rail: 'delegation',
+  settlement_scheme: 'eip3009',
+  delivery_quality: null,
+  delivery_note: null,
+  delivery_reported_at: null,
+  merchant_address: '0x041500000000000000000000000000000000b195',
+  merchant_settlement_tx_hash: `0x${'5e'.repeat(32)}`,
+}
+
+describe('#4822 receipt bundle characterization (GET /payments/:id/receipt)', () => {
+  it('erc7710 — recorded at base 65b1d7cb7: every field unchanged, only settlementTxHash added', async () => {
+    const fixture = loadFixture('machine-payment-receipt-erc7710')
+    mockQuery.mockResolvedValueOnce({ rows: [RECEIPT_ERC7710_ROW] })
+    const live = await getPaymentReceipt('pi-5', 'agent-2')
+    expect(live).not.toBeNull()
+    expect(stripReceiptAdditions(live)).toEqual(fixture.body)
+    // The one addition: the same transaction, under the name the SDK and the
+    // tool descriptions already use.
+    expect(live!.settlementTxHash).toBe(live!.onChain.txHash)
+  })
+
+  it('eip3009 — pins the corrected values: merchant party is the named merchant, settlementTxHash the verified hash', async () => {
+    const fixture = loadFixture('machine-payment-receipt-eip3009')
+    mockQuery.mockResolvedValueOnce({ rows: [RECEIPT_EIP3009_ROW] })
+    const live = await getPaymentReceipt('pi-6', 'agent-1')
+    expect(live).toEqual(fixture.body)
+    // The merchant named at authorize, never the funding leg's delegate.
+    expect(live!.payment.parties?.merchant).toBe('0x041500000000000000000000000000000000b195')
+    // The funding leg keeps its own names (owner decision 2026-11-12).
+    expect(live!.payment.recipient).toBe('0xcb9a000000000000000000000000000000005ba8')
+    expect(live!.onChain.txHash).toBe(`0x${'de'.repeat(32)}`)
+    expect(live!.settlementTxHash).toBe(`0x${'5e'.repeat(32)}`)
   })
 })

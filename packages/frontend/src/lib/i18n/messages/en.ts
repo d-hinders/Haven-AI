@@ -6,6 +6,157 @@
  * locale must satisfy (see ../index.ts), so a missing or mistyped key in
  * another locale is a compile error, not a silent fallback.
  */
+
+/**
+ * What a seller is, in one shared constant (#4985, widened by the owner on
+ * 2026-11-19: the merchant kit is one way to sell, not the only one).
+ *
+ * A merchant's own MCP server or API can be the seller; Haven's merchant kit
+ * is one option, never the assumption. #4985 introduces the seller on the
+ * Sales page's first-run helper and Setup tab; #4983's Settings description
+ * uses the same sentences, so the two surfaces cannot drift. #4985 appends the
+ * merchant kit's own sentence ("The merchant kit is a small program you run in
+ * front of an API.") where it introduces the merchant kit — that sentence is
+ * kit-specific and belongs with the merchant kit, not in the definition every
+ * seller reads.
+ *
+ * Exported rather than nested in `en` because it is not a message key: it is
+ * one paragraph two surfaces compose into their own sentences.
+ */
+export const SELLER_DEFINITION =
+  'To sell through Haven, you run a seller: your own MCP server or API, or Haven’s merchant kit. It asks each buyer to pay into your Sales account and tells Haven what each payment was for, using a Sales key.'
+
+/**
+ * The merchant kit's own sentence (#4985). Appended where the merchant kit is
+ * introduced, never folded into `SELLER_DEFINITION`: a merchant running its own
+ * MCP server or API is a seller too, and the definition every seller reads must
+ * not describe the merchant kit.
+ */
+export const MERCHANT_KIT_SENTENCE = 'The merchant kit is a small program you run in front of an API.'
+
+/**
+ * The pilot condition (#4985), stated wherever the merchant kit is offered so
+ * the product UI never reads as a licence. The merchant kit's README says a
+ * merchant in Haven's pilot may run and modify the kit to evaluate Haven, must
+ * not redistribute it, and gets a licence before general availability; and
+ * that this release runs on Base Sepolia only (`packages/paywall-proxy/README.md`
+ * § Licence, § Quickstart). The permission is the pilot merchant's, with
+ * no written step (#5009, owner decision (b) on #5005).
+ */
+export const MERCHANT_KIT_PILOT_LINE =
+  'During the pilot the merchant kit runs on Base Sepolia only. A merchant in the pilot may run and modify it to evaluate Haven, but not redistribute it.'
+
+/** The merchant kit's setup guide — the README the definition links to (#4985). */
+export const MERCHANT_KIT_README_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/packages/paywall-proxy/README.md'
+
+/** The architecture doc's "Selling without the kit" section (#4985). */
+export const SELLING_WITHOUT_KIT_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/architecture/12-merchant-kit.md#selling-without-the-kit'
+
+/**
+ * The merchant kit's container image (#5007). The setup prompt's first step
+ * runs it, so a developer never clones or builds (#5009). Pin a
+ * `dev-<short-sha>` tag until the kit's first production release, and the
+ * newest `pilot-<short-sha>` once that release lists one: the README's
+ * Quickstart says why (#5058).
+ */
+export const MERCHANT_KIT_IMAGE = 'ghcr.io/d-hinders/haven-paywall-proxy'
+
+/**
+ * The package page that lists the merchant kit image's tags (#5058). The setup
+ * prompt's first step sends a developer here to pick the tag to pin, so the
+ * page is named once, beside the image, and the README names the same page.
+ */
+export const MERCHANT_KIT_TAGS_URL =
+  'https://github.com/d-hinders/Haven-AI/pkgs/container/haven-paywall-proxy'
+
+/**
+ * The "Set up with your coding agent" prompt (#4985), in the style of the agent
+ * connect flow's prompt: one block a merchant pastes to their coding agent.
+ *
+ * It carries the README URL, the container image to run, the pilot line, `PAY_TO`
+ * (the Sales account's address), `NETWORK` in the CAIP-2 form the merchant kit
+ * needs and `HAVEN_SALES_URL` (Haven's API origin). It NEVER carries a Sales key
+ * secret or a key prefix: the agent is told to ask the merchant for a key they
+ * create on Sales → Setup → Sales keys, and to paste it into
+ * `HAVEN_MERCHANT_KEY`.
+ *
+ * Step 4 asks where the merchant hosts the kit (#5059), before the environment
+ * step, so the agent knows the host before it writes variables. It stays silent
+ * on the buyer: buying belongs to a different Haven user, and the README's
+ * buyer section is where that lives.
+ *
+ * `salesUrl` must be an origin with no path — the merchant kit refuses a URL
+ * with a path (`packages/paywall-proxy/src/config.ts`). `lib/sales.ts`
+ * `havenApiOrigin()` is the one reading of it.
+ */
+export function merchantKitSetupPrompt(params: { accountAddress: string; salesUrl: string }): string {
+  return [
+    'Set up Haven’s merchant kit so my Sales account can take payments.',
+    '',
+    `1. Run the merchant kit from its container image, ${MERCHANT_KIT_IMAGE}, pinned to the newest pilot-<short-sha> tag if the package page lists one, otherwise the newest dev-<short-sha> tag. The pilot-<short-sha> tag arrives with the kit’s first production release. The tags are listed at ${MERCHANT_KIT_TAGS_URL}, but that page does not order them by date: the setup guide’s “Which tag to pin” section has a command that prints the newest tag, and its quickstart shows the run command.`,
+    `2. Read the merchant kit’s setup guide: ${MERCHANT_KIT_README_URL}`,
+    `3. ${MERCHANT_KIT_PILOT_LINE}`,
+    '4. Ask me where I host the merchant kit. Any host with HTTPS and a persistent disk works; the setup guide has Railway as a worked example.',
+    '5. Set these in the merchant kit’s environment:',
+    `   PAY_TO=${params.accountAddress}`,
+    '   NETWORK=eip155:84532',
+    `   HAVEN_SALES_URL=${params.salesUrl}`,
+    '6. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into HAVEN_MERCHANT_KEY. Never invent one.',
+  ].join('\n')
+}
+
+/**
+ * The worked example for a seller that runs its own MCP server or HTTP API
+ * (#5010) — the doc the second setup prompt links to.
+ */
+export const OWN_SERVER_WORKED_EXAMPLE_URL =
+  'https://github.com/d-hinders/Haven-AI/blob/dev/docs/product/selling-with-your-own-server.md'
+
+/**
+ * The second setup prompt's visible label (#5010). It lives here, not in the
+ * component, so the label is copy-linted with the rest of the catalog and
+ * `git grep "Set up your own server"` never matches a surface file.
+ */
+export const OWN_SERVER_SETUP_PROMPT_LABEL = 'Set up your own server with your coding agent'
+
+/**
+ * The second setup prompt's copy control (#5010). Its own accessible name, so
+ * the kit prompt's "Copy setup prompt" queries stay unambiguous.
+ */
+export const OWN_SERVER_SETUP_PROMPT_COPY = 'Copy own-server prompt'
+
+/**
+ * The "Set up your own server with your coding agent" prompt (#5010), beside
+ * `merchantKitSetupPrompt` and built the same way: one block a merchant pastes
+ * to their coding agent.
+ *
+ * It carries the worked example's URL, `payTo` (the Sales account's address),
+ * `NETWORK` in the CAIP-2 form the x402 challenge needs and `HAVEN_SALES_URL`
+ * (Haven's API origin). It NEVER carries a Sales key secret or a key prefix:
+ * the agent is told to ask the merchant for a key they create on Sales → Setup
+ * → Sales keys, and never to invent one.
+ *
+ * `salesUrl` must be an origin with no path — `lib/sales.ts` `havenApiOrigin()`
+ * is the one reading of it, as for the kit prompt.
+ */
+export function ownServerSetupPrompt(params: { accountAddress: string; salesUrl: string }): string {
+  return [
+    'Set up my own server to sell through Haven, so my Sales account can take payments.',
+    '',
+    `1. Read the worked example: ${OWN_SERVER_WORKED_EXAMPLE_URL}`,
+    '2. Ask each buyer to pay into my Sales account with an x402 challenge:',
+    `   payTo=${params.accountAddress}`,
+    '   NETWORK=eip155:84532',
+    `   HAVEN_SALES_URL=${params.salesUrl}`,
+    "   If you sell MCP tools, follow the worked example's MCP section: your server must answer initialize as a streamable HTTP MCP server, with sessions or without.",
+    '3. After each payment settles, report the sale to Haven:',
+    `   POST ${params.salesUrl}/merchant/sales`,
+    '4. Ask me for a Sales key. I create it on Sales → Setup → Sales keys and paste it into the Authorization header. Never invent one.',
+  ].join('\n')
+}
+
 export const en = {
   common: {
     comingSoon: 'Coming soon',
@@ -496,6 +647,213 @@ export const en = {
     },
 
     /**
+     * Settings → Business → Sales (#4904, epic #4885; reshaped by #4983): the
+     * third section, after Company details and Accounting connections (owner
+     * decision 1 on #4894).
+     *
+     * #4983 (owner decision 2026-11-19: "The settings sales part should be a
+     * separate section like Accounting with more context on the sales
+     * product") made it one `SettingsSection` like Accounting: the title sits
+     * above the card, the status and the switch are a `SettingsRow`, and the
+     * heading's link slot carries only the way to the Sales page. `description`
+     * is the product context shown while Sales is off or was never on — it
+     * names the seller from `SELLER_DEFINITION` above, because the merchant kit
+     * is one way to sell, not the only one.
+     *
+     * The dialog is the network choice, one passkey prompt and the result.
+     * Turning Sales off keeps the account and its history and stops the keys
+     * working (owner decision 5 on #4894), and turning it back on reuses the
+     * account with no network choice and no passkey prompt.
+     *
+     * Every refusal sentence says what the user can do about it and never
+     * shows a raw error code (the issue's acceptance criterion). The codes
+     * themselves live in `lib/merchant-services.ts`.
+     */
+    sales: {
+      title: 'Sales',
+      description: `Sales takes payments from customers and their agents into a separate Sales account, and the Sales page shows what each payment was for. ${SELLER_DEFINITION}`,
+      state: {
+        on: 'On',
+        off: 'Off',
+      },
+      detail: {
+        on: 'Customers and their agents can pay you. Payments arrive in your Sales account.',
+        off: 'Sales is off. The Sales account and its history are kept, and the Sales keys are not accepted.',
+        neverOn: 'Turn Sales on to take payments from customers and their agents.',
+      },
+      statusLabel: 'Status',
+      accountLabel: 'Sales account',
+      networkLabel: 'Network',
+      keysLabel: 'Sales keys',
+      keysRefused: 'Keys not accepted while off',
+      keysRefusedHelper: 'Sales reports from your seller are refused until Sales is on again.',
+      turnOn: 'Turn on Sales',
+      turnOff: 'Turn off Sales',
+      /** The heading's trailing link — a link, never a button (design-system.md § Detail-page section rule). */
+      openSalesPage: 'Open the Sales page',
+      loading: 'Loading Sales…',
+      loadError: 'Haven could not load Sales.',
+      retry: 'Try again',
+
+      /**
+       * Stripe deposit addresses (#4954, epic #4886; dev and Stripe sandbox).
+       * The address is the owner's word: Haven cannot check that a
+       * Stripe-controlled address is theirs, so every registration says
+       * "registered by you, not verified by Haven" (owner approval on #4902,
+       * 2026-11-18). Nothing here describes a Stripe balance: Haven reads no
+       * Stripe account, only payments on the chain. #5028: the section renders
+       * only on a testnet Sales account, and `refusal.testnet_only` is the
+       * route's 403 on any other chain.
+       */
+      depositAddresses: {
+        title: 'Stripe deposit addresses',
+        description:
+          'Payments your seller reports as paid to one of these addresses show on the Sales page as received in Stripe. They are never in a Haven balance.',
+        register: 'Register address',
+        notice:
+          'Registered by you, not verified by Haven. Haven cannot check that a Stripe address is yours, so only register an address Stripe gave you.',
+        loading: 'Loading Stripe deposit addresses…',
+        loadError: 'Haven could not load your Stripe deposit addresses.',
+        empty: 'No address registered. Register one before your first Stripe payment: a payment made to an address before it is registered is not counted.',
+        addressLabel: 'Address',
+        notVerified: 'Not verified by Haven',
+        retired: 'Retired',
+        registeredHelper: (date: string) => `Registered by you on ${date}, not verified by Haven.`,
+        retiredHelper: (registered: string, retired: string) =>
+          `Registered by you on ${registered}, not verified by Haven. Retired on ${retired}.`,
+        copy: 'Copy',
+        copied: 'Address copied',
+        retire: 'Retire',
+        registerDialog: {
+          title: 'Register a Stripe deposit address',
+          subtitle: (network: string) =>
+            `The address Stripe gave you to receive USDC on ${network}. Register it before the first payment to it.`,
+          label: 'Deposit address',
+          placeholder: '0x…',
+          helper: 'Registered by you, not verified by Haven.',
+          submit: 'Register address',
+          working: 'Registering…',
+          cancel: 'Cancel',
+          doneTitle: 'Address registered',
+          doneBody: 'Sales your seller reports as paid to it now show as received in Stripe.',
+          done: 'Done',
+        },
+        retireDialog: {
+          title: 'Retire this address?',
+          body: 'New payments to it stop counting as sales. The sales already received there stay. You can register it again later.',
+          confirm: 'Retire address',
+          cancel: 'Cancel',
+          working: 'Retiring…',
+        },
+        refusal: {
+          invalid: 'This is not an address. An address starts with 0x, followed by 40 letters and numbers.',
+          own_address:
+            'This is one of your own accounts or agents. A Stripe deposit address is one Stripe gives you, not a Haven address.',
+          already_registered: 'This address is already registered to a Sales account on this network.',
+          already_retired: 'This address is already retired.',
+          not_found: 'This address is no longer registered to your Sales account.',
+          sales_off: 'Turn Sales on before changing your Stripe deposit addresses.',
+          testnet_only:
+            'Stripe deposit addresses are available on a test network only. This Sales account is on a live network.',
+          rate_limited: 'Too many changes in a short time. Wait a minute, then try again.',
+          refused: 'Haven refused this change. Nothing changed.',
+          unknown_outcome: 'Haven did not answer. Close this dialog to see what is registered now, then try again if it is not listed.',
+        },
+      },
+
+      /**
+       * #5038: the Sales key and sale-record actions' failure sentences. The
+       * backend commits before it answers, so a lost answer may still have
+       * made the change: `unknownOutcome` says to check, never "nothing
+       * changed". A 4xx did not commit and keeps its own sentence.
+       */
+      actions: {
+        rateLimited: 'Too many attempts in a short time. Wait a minute, then try again.',
+        unknownOutcome: {
+          createKey:
+            'Haven did not answer, so the key may have been created. Close this and check the list: if there is a key you did not copy, revoke it.',
+          revokeKey:
+            'Haven did not answer, so the key may have been revoked. Close this and check the list before you try again.',
+          clearRecord:
+            'Haven did not answer, so the sale record may have been cleared. Close this and check the payment.',
+        },
+      },
+
+      dialog: {
+        title: 'Turn on Sales',
+        subtitle: 'A separate Haven account for the payments you take. It starts empty.',
+        networkLabel: 'Network',
+        networkHelp: 'The network cannot be changed later.',
+        networkLocked: (network: string) =>
+          `Sales is on ${network}. The network cannot be changed later.`,
+        facts: {
+          account: 'The account is named Sales. You can rename it later.',
+          passkey: 'Secured by the passkey you use next: your device asks for it once.',
+        },
+        submit: 'Turn on Sales',
+        waiting: 'Waiting for your passkey…',
+        creating: 'Turning on Sales…',
+        cancel: 'Cancel',
+        close: 'Close',
+        done: 'Done',
+        doneTitle: 'Sales is on',
+        doneBody: (network: string) =>
+          `Payments from customers and their agents arrive in your Sales account on ${network}.`,
+        openSales: 'Open Sales',
+        openAccount: 'Open account',
+        needsPasskeyTitle: 'Sales needs a passkey',
+        needsPasskeyBody:
+          'Sales is secured by a passkey from one of your accounts, and none of yours has one yet. Add a passkey from the Who can approve section on an account’s page, then come back here.',
+        passkeysLoading: 'Loading your passkeys…',
+        passkeysError:
+          'Couldn’t load your passkeys, so Haven can’t tell which account can secure Sales.',
+        refusals: {
+          source_not_found:
+            'Haven couldn’t find the account this passkey belongs to. Reload the page and try again.',
+          source_has_no_passkey:
+            'That account no longer has a passkey, so it can’t secure Sales. Reload the page to see your accounts as they are now.',
+          key_not_on_source:
+            'That passkey isn’t one of that account’s. Try again and pick a passkey saved for it.',
+          passkey_unsupported:
+            'This browser can’t use a passkey. Open Haven in Safari, Chrome, or Edge on the device that holds your passkey.',
+          passkey_failed: 'Your passkey couldn’t be read. Try again.',
+          cap_reached: (cap: number | null, network: string) =>
+            cap !== null
+              ? `You already have ${cap} accounts on ${network}, the most Haven allows on one network. Choose another network, or remove an account you no longer use from its page.`
+              : `You already have the most accounts Haven allows on ${network}. Choose another network, or remove an account you no longer use from its page.`,
+          unsupported_network: (supported: string) =>
+            supported === ''
+              ? 'Sales is not available on that network yet. Choose another network.'
+              : `Sales is not available on that network yet. Choose ${supported}.`,
+          other_network: (network: string) =>
+            `Sales is already on ${network}. The network cannot be changed later.`,
+          setup_details_required:
+            'Haven needs a network and a passkey to turn Sales on. Try again.',
+          address_unavailable:
+            'Haven couldn’t set up the Sales account just now. Try again in a moment.',
+          already_registered:
+            'The Sales account already exists. Reload the page to see it.',
+          rate_limited: 'Too many attempts in a short time. Wait a minute, then try again.',
+          could_not_turn_on: (detail: string | null) =>
+            detail === null
+              ? 'Haven couldn’t turn Sales on. Try again in a moment.'
+              : `Haven couldn’t turn Sales on. ${detail}`,
+          unknown_outcome:
+            'Haven couldn’t confirm Sales was turned on. Try again — it won’t create a second account.',
+        },
+      },
+
+      offDialog: {
+        title: 'Turn off Sales?',
+        body: 'The Sales account and its history are kept, and the Sales keys stop working. You can turn Sales back on at any time.',
+        confirm: 'Turn off Sales',
+        working: 'Turning off…',
+        cancel: 'Keep Sales on',
+        error: 'We could not turn Sales off. Try again in a moment.',
+      },
+    },
+
+    /**
      * General → "Your data" (#4358): one row. The CSV itself lives on
      * `/transactions` (its Export CSV) — this row only links there.
      */
@@ -520,7 +878,7 @@ export const en = {
     companyDetails: {
       title: 'Company details',
       description:
-        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into.',
+        'Add your legal name, country, organisation number and VAT number so they can appear on receipts your agents hand to merchants and feed the per-agent tax declaration an agent opts into. You can also save a receipt email and billing and shipping addresses.',
       // History: #3332's review rounds shaped a longer paragraph (VIES named,
       // the SE VAT encoding, a support-erasure sentence), and the "receipts"
       // sentence stays in `description` above.
@@ -556,6 +914,40 @@ export const en = {
         vatNumber: 'VAT number (optional)',
         vatNumberPlaceholder: 'e.g. SE556677889901',
         vatNumberHelp: 'Include the two-letter country prefix, e.g. "SE556677889901".',
+        // #4870. The sign-up email is a SUGGESTION here, never a stored
+        // value: nothing is saved until the owner saves, and nothing is sent
+        // to a merchant by this slice.
+        receiptEmail: 'Receipt email (optional)',
+        receiptEmailPlaceholder: 'e.g. name@example.com',
+        receiptEmailHelp: 'Where a merchant should send the receipt. We suggest your sign-up email; it is saved only when you save.',
+      },
+
+      /**
+       * #4870: the two structured addresses. The per-field labels are keyed
+       * `<address>.<field>` because the card renders the same five inputs
+       * twice and each label must be unique on the page — "Billing city" and
+       * "Shipping city", never two "City" labels a screen reader cannot tell
+       * apart.
+       */
+      addresses: {
+        billingTitle: 'Billing address (optional)',
+        shippingTitle: 'Shipping address (optional)',
+        sameAsBilling: 'Shipping address is the same as billing',
+        line1Placeholder: 'e.g. Sveavagen 1',
+        line2Placeholder: 'e.g. 4 tr',
+        postCodePlaceholder: 'e.g. 111 57',
+        cityPlaceholder: 'e.g. Stockholm',
+        countryPlaceholder: 'Choose a country',
+        'billing.line1': 'Billing street address',
+        'billing.line2': 'Billing street address line 2',
+        'billing.postCode': 'Billing postal code',
+        'billing.city': 'Billing city',
+        'billing.country': 'Billing country',
+        'shipping.line1': 'Shipping street address',
+        'shipping.line2': 'Shipping street address line 2',
+        'shipping.postCode': 'Shipping postal code',
+        'shipping.city': 'Shipping city',
+        'shipping.country': 'Shipping country',
       },
 
       validation: {
@@ -571,6 +963,16 @@ export const en = {
         // Matches `ORG_NUMBER_RE` (`^[A-Za-z0-9 .\-/]{1,32}$`) in the same file.
         orgNumberInvalidChars: 'Organisation number can only contain letters, numbers, spaces, and . - /',
         vatNumberTooLong: 'Enter a VAT number using 32 characters or fewer.',
+        // #4870. Matches `EMAIL_RE` and `ADDRESS_MAX_LENGTHS` in the same file.
+        receiptEmailInvalid: 'Enter a receipt email address, e.g. "name@example.com".',
+        receiptEmailTooLong: 'Enter a receipt email address using 254 characters or fewer.',
+        addressLine1Required: 'Enter a street address.',
+        addressLine1TooLong: 'Enter a street address using 70 characters or fewer.',
+        addressLine2TooLong: 'Enter a street address line using 70 characters or fewer.',
+        addressPostCodeTooLong: 'Enter a postal code using 16 characters or fewer.',
+        addressCityRequired: 'Enter a city.',
+        addressCityTooLong: 'Enter a city using 50 characters or fewer.',
+        addressCountryInvalid: 'Choose a country.',
       },
 
       save: 'Save',
@@ -594,7 +996,7 @@ export const en = {
         action: 'Remove company details',
         confirmTitle: 'Remove your company details?',
         confirmBody:
-          'This deletes your legal name, country, organisation number and VAT number from Haven. Receipts your agents hand to merchants after this will no longer state a buyer. You can add them again at any time.',
+          'This deletes your saved legal name, country, organisation number, VAT number, receipt email and addresses. Receipts your agents hand to merchants after this will no longer state a buyer. Receipts Haven already keeps for your bookkeeping, and the copies attached in your accounting connections, keep what they show. You can add your details again at any time.',
         confirm: 'Remove',
         cancel: 'Keep details',
         // #4570: the confirm button's own verb while the delete is in flight,

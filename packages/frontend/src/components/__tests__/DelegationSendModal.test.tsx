@@ -782,6 +782,76 @@ describe('DelegationSendModal — working, cancelled and failed (#4641)', () => 
     fireEvent.click(screen.getByRole('button', { name: /^Send / }))
     await waitFor(() => expect(screen.getByText('Haven could not send this payment. Try again.')).toBeTruthy())
   })
+
+  // #4820: the submit was rejected and nothing proves the transfer did not go
+  // through. The dialog must not offer a second send — the submit carries no
+  // idempotency key, so a retry is a second operation with the same recipient
+  // and amount. It must also not infer "nothing was sent" from an empty
+  // Activity: the operation can still land after the owner looks, so the copy
+  // tells them to check Activity again before sending again.
+  it('an unconfirmed send says the transfer may have gone through and offers only Close', async () => {
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    mockUseSend.mockReturnValue(base({ send }))
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview()
+    fireEvent.click(screen.getByRole('button', { name: /^Send / }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByText(
+          'We could not confirm this transfer. It may have gone through. Activity shows it if it landed, which can take a few minutes. Check Activity again before sending again.',
+        ),
+      ).toBeTruthy(),
+    )
+    // The copy never claims an empty Activity proves nothing was sent.
+    expect(screen.queryByText(/nothing was sent/)).toBeNull()
+    // Still on Review, but with one action and no way back into the form.
+    expect(screen.getByText("You're sending")).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Try again' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Back' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Send / })).toBeNull()
+    // Two Close buttons: the dialog's ✕ and the footer's one action. Nothing
+    // else is offered.
+    expect(screen.getAllByRole('button', { name: 'Close' })).toHaveLength(2)
+    expect(within(screen.getByTestId('delegation-send-modal')).getAllByRole('button')).toHaveLength(2)
+    // The approval already happened, so the "you approve it on the next step"
+    // note would be false here.
+    expect(screen.queryByText(/You approve it on the next step/)).toBeNull()
+  })
+
+  it('activating every rendered control in the unconfirmed state makes no further send call', async () => {
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: 'unconfirmed' })
+    const onClose = vi.fn()
+    mockUseSend.mockReturnValue(base({ send }))
+    render(<DelegationSendModal {...PROPS} onClose={onClose} />)
+    goToReview()
+    fireEvent.click(screen.getByRole('button', { name: /^Send / }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Close' })).toBeTruthy())
+
+    const panel = screen.getByTestId('delegation-send-modal')
+    const controls = within(panel).getAllByRole('button')
+    expect(controls.length).toBeGreaterThan(0)
+    for (const control of controls) fireEvent.click(control)
+
+    // By call count, not by label: no control can start a second operation.
+    expect(send).toHaveBeenCalledTimes(1)
+  })
+
+  it('the failed state still offers Try again, and a second press submits', async () => {
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: 'failed', message: 'The transfer was refused.' })
+      .mockResolvedValueOnce({ ok: true, txHash: '0xfeed' })
+    mockUseSend.mockReturnValue(base({ send }))
+    render(<DelegationSendModal {...PROPS} />)
+    goToReview()
+    fireEvent.click(screen.getByRole('button', { name: /^Send / }))
+    await waitFor(() => expect(screen.getByText('The transfer was refused.')).toBeTruthy())
+
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }))
+    await waitFor(() => expect(screen.getByText('1.5 USDC sent')).toBeTruthy())
+    expect(send).toHaveBeenCalledTimes(2)
+  })
 })
 
 describe('DelegationSendModal — success (#4641)', () => {

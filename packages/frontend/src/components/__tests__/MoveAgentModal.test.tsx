@@ -30,6 +30,7 @@ const AGENT: Agent = {
   labels: [],
   organization_id: null,
   tax_declaration_enabled: false,
+  checkout_details_sharing_enabled: false,
   avatar_tint: 1,
 }
 

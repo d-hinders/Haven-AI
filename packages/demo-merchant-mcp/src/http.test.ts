@@ -6,7 +6,21 @@ import { privateKeyToAccount } from 'viem/accounts'
 import { decodePaymentRequiredHeader, decodePaymentSignatureHeader, encodePaymentSignatureHeader } from '@x402/core/http'
 import type { PaymentPayload, PaymentRequired } from '@x402/core/types'
 import { createDemoMerchantServer } from './http.js'
+import { receiptNumberForTransaction } from './invoice.js'
 import { formatUsdc } from './products.js'
+import {
+  TAX_DECLARATION_DOMAIN,
+  TAX_DECLARATION_PRIMARY_TYPE,
+  TAX_DECLARATION_TYPES,
+  buildSignedTaxDeclaration,
+  encodeTaxDeclarationHeader,
+  taxPrincipalId,
+} from '@haven_ai/sdk/edge'
+import {
+  X_CHECKOUT_DETAILS_HEADER,
+  checkoutDetailsExtensionEntry,
+  type CheckoutDetailsField,
+} from '@haven_ai/merchant-payments'
 import {
   LEGACY_PAYMENT_SIGNATURE_HEADER,
   PAYMENT_REQUIRED_HEADER,
@@ -37,7 +51,13 @@ afterEach(async () => {
 
 async function startServer(
   client: Partial<SettlementClient> = {},
-  serverOptions: { readinessCacheMs?: number } = {},
+  serverOptions: {
+    readinessCacheMs?: number
+    /** #4873: the dev-only required-field hook; `null` means off. */
+    checkoutDetailsRequiredField?: CheckoutDetailsField | null
+    /** #4851: offer the CDP-settled joke product. */
+    cdpConfigured?: boolean
+  } = {},
 ) {
   const submit = vi.fn<SettlementClient['submit']>().mockResolvedValue(TX_HASH)
   const waitForReceipt = vi.fn<SettlementClient['waitForReceipt']>().mockResolvedValue(undefined)
@@ -60,6 +80,11 @@ async function startServer(
     // the CURRENT stub return value instead of a value cached from an earlier
     // call in the same test — no fake clock, no sleep.
     readinessCacheMs: serverOptions.readinessCacheMs ?? 0,
+    // #4873: absent means "read the environment", which is unset in tests.
+    ...(serverOptions.checkoutDetailsRequiredField !== undefined
+      ? { checkoutDetailsRequiredField: serverOptions.checkoutDetailsRequiredField }
+      : {}),
+    ...(serverOptions.cdpConfigured ? { cdpConfigured: true } : {}),
   })
   servers.push(server)
   await new Promise<void>((resolve, reject) => {
@@ -287,7 +312,7 @@ describe('demo merchant MCP x402 flow', () => {
     const receiptHeader = paid.headers.get('x-receipt-json')
     expect(receiptHeader).toBeTruthy()
     const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
-    expect(receipt.status).toBe('Betald')
+    expect(receipt.status).toBe('Paid')
     expect(receipt.blockkedje_referens).toContain(TX_HASH)
     expect(text).toContain(receipt.fakturanummer)
 
@@ -304,7 +329,9 @@ describe('demo merchant MCP x402 flow', () => {
 
     expect(duplicate.status).toBe(200)
     expect(duplicateText).toContain(TX_HASH)
-    expect(duplicateText.match(/FAK-2026-\d+/)?.[0]).toBe(text.match(/FAK-2026-\d+/)?.[0])
+    // #4880: either numbering; the number must exist, or the comparison proves nothing.
+    expect(text.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(duplicateText.match(/FAK-[\d-]+/)?.[0]).toBe(text.match(/FAK-[\d-]+/)?.[0])
     expect(submit).toHaveBeenCalledTimes(1)
     // #1273 + review finding on #1302: the cached-duplicate branch must carry
     // the SAME structured summary as the fresh purchase — an agent retrying a
@@ -352,7 +379,8 @@ describe('demo merchant MCP x402 flow', () => {
       settlement_tx_hash: TX_HASH,
     })
     expect(typeof summary.invoice_id).toBe('string')
-    expect(summary.invoice_id).toMatch(/^FAK-\d{4}-\d+$/)
+    // #4880: a payment settled on-chain is numbered from its transaction hash.
+    expect(summary.invoice_id).toBe(receiptNumberForTransaction(TX_HASH))
   })
 
   it('accepts the legacy X-PAYMENT retry header alias', async () => {
@@ -917,15 +945,15 @@ describe('demo merchant MCP x402 flow', () => {
       // transaction" status string, which itself contains the substring
       // "Betald", is allowed and expected — checked above).
       expect(text).not.toContain('Status: Paid\n')
-      expect(text).not.toContain('"status": "Betald"')
+      expect(text).not.toContain('"status": "Paid"')
       const zeroHash = `0x${'0'.repeat(64)}`
       expect(text).not.toContain(zeroHash)
 
       const receiptHeader = headers.get('x-receipt-json')
       expect(receiptHeader).toBeTruthy()
       const receipt = JSON.parse(Buffer.from(receiptHeader!, 'base64').toString('utf8'))
-      expect(receipt.status).toBe('Betald i tidigare transaktion — referens saknas')
-      expect(receipt.status).not.toBe('Betald')
+      expect(receipt.status).toBe('Paid in an earlier transaction — reference unavailable')
+      expect(receipt.status).not.toBe('Paid')
       expect(receipt.blockkedje_referens).toBeNull()
       expect(JSON.stringify(receipt)).not.toContain(zeroHash)
 
@@ -951,9 +979,9 @@ describe('demo merchant MCP x402 flow', () => {
 })
 
 // ── #1550: display locale + result_detail ────────────────────────────────────
-// English is the demo default; Swedish stays behind `locale: 'sv'`; and the
-// invoice DOCUMENT (x-receipt-json + the JSON block) stays Swedish on every
-// locale — it is a bookkeeping artifact, not display copy.
+// English is the demo default; Swedish stays behind `locale: 'sv'`. #4980:
+// the invoice DOCUMENT (x-receipt-json + the JSON block) keeps its Swedish
+// keys and codes on every locale, and its values follow the paid call's locale.
 describe('display locale and result detail (#1550)', () => {
   async function initSession(url: string): Promise<string> {
     const init = await postMcp(url, {
@@ -993,7 +1021,7 @@ describe('display locale and result detail (#1550)', () => {
     return { paymentHeader }
   }
 
-  it('defaults to English text while the invoice document stays Swedish', async () => {
+  it('defaults to English text and English receipt values, with the same keys and codes (#4980)', async () => {
     const { url } = await startServer()
     const sessionId = await initSession(url)
     const { paymentHeader } = await settle(url, sessionId)
@@ -1008,15 +1036,18 @@ describe('display locale and result detail (#1550)', () => {
     expect(text).not.toContain('Köp bekräftat')
     expect(text).not.toContain('FAKTURA')
 
-    // The bookkeeping document is untouched by the display locale: Swedish
-    // keys, Swedish values, Swedish line description — in the header AND in
-    // the embedded JSON block.
+    // #4980: Swedish keys and codes, English values and line description —
+    // in the header AND in the embedded JSON block.
     const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
-    expect(receipt.status).toBe('Betald')
-    expect(receipt.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
-    expect(receipt.rader[0].beskrivning).toContain('Grundläggande VPN-skydd')
+    expect(receipt.status).toBe('Paid')
+    expect(receipt.betalningssatt).toBe('Cryptocurrency (USDC on Base)')
+    expect(receipt.rader[0].beskrivning).toContain('Essential VPN protection')
+    expect(receipt.rader[0].beskrivning).toMatch(/\(1 month\)$/)
+    expect(receipt.momsbehandling).toBe('SE_25')
+    expect(receipt.kopare.typ).toBe('blockkedjeadress')
     expect(toolText(text)).toContain('"fakturanummer"')
-    expect(toolText(text)).toContain('Grundläggande VPN-skydd')
+    expect(toolText(text)).toContain('"status": "Paid"')
+    expect(toolText(text)).not.toContain('Grundläggande VPN-skydd')
   })
 
   it("locale: 'sv' renders the classic Swedish output", async () => {
@@ -1032,6 +1063,14 @@ describe('display locale and result detail (#1550)', () => {
     expect(text).toContain('FAKTURA')
     expect(text).toContain('Tack för ditt köp')
     expect(text).not.toContain('Purchase confirmed')
+
+    // #4980: the HTTP layer read the paid call's `locale`, so the receipt
+    // document's values are Swedish too, as before.
+    const receipt = JSON.parse(Buffer.from(paid.headers.get('x-receipt-json')!, 'base64').toString('utf8'))
+    expect(receipt.status).toBe('Betald')
+    expect(receipt.betalningssatt).toBe('Kryptovaluta (USDC på Base)')
+    expect(receipt.rader[0].beskrivning).toContain('Grundläggande VPN-skydd')
+    expect(toolText(text)).toContain('"status": "Betald"')
   })
 
   it("result_detail: 'summary' drops the invoice from the text but not from the contract", async () => {
@@ -1075,7 +1114,8 @@ describe('display locale and result detail (#1550)', () => {
     expect(enText).toContain('Purchase confirmed')
     expect(svText).toContain('Köp bekräftat')
     // Same invoice number across variants — one document, two renders.
-    expect(svText.match(/FAK-2026-\d+/)?.[0]).toBe(enText.match(/FAK-2026-\d+/)?.[0])
+    expect(enText.match(/FAK-[\d-]+/)?.[0]).toMatch(/^FAK-/)
+    expect(svText.match(/FAK-[\d-]+/)?.[0]).toBe(enText.match(/FAK-[\d-]+/)?.[0])
     // The replay is byte-identical per variant (ids differ per JSON-RPC call,
     // so compare the tool text, not the envelope).
     const toolText = (raw: string) =>
@@ -1146,5 +1186,354 @@ describe('display locale and result detail (#1550)', () => {
     }
     const svBasic = svBody.result.structuredContent.products.find((p) => p.product_id === 'vpn_basic')
     expect(svBasic?.description).toContain('Essential VPN protection')
+  })
+})
+
+// ── #4855: the buyer's signed tax declaration on the receipt ─────────────────
+// The declaration travels on the paid retry as `X-Tax-Declaration`, signed by
+// the same key that signs the EIP-3009 authorization. `buy_vpn basic` costs
+// 1000 atomic USDC: SE_25 is 800 net + 200 VAT; REVERSE_CHARGE is 1000 net and
+// a zero VAT amount.
+const TAX_CONTENT = {
+  version: 'x402-tax-1',
+  jurisdiction: 'SE',
+  taxableStatus: 'TAXABLE_PERSON',
+  taxId: 'SE559412345601',
+  validUntil: Date.now() + 30 * 24 * 60 * 60 * 1000,
+}
+
+function taxDeclarationHeader(
+  overrides: Partial<typeof TAX_CONTENT> = {},
+  opts: { key?: string; network?: string } = {},
+): string {
+  return encodeTaxDeclarationHeader(
+    buildSignedTaxDeclaration({
+      content: { ...TAX_CONTENT, ...overrides },
+      network: opts.network ?? 'eip155:8453',
+      delegateKey: opts.key ?? PAYER_KEY,
+    }),
+  )
+}
+
+/** A declaration signed by the payer over a WRONG attribution hash. */
+async function wrongAttributionHeader(): Promise<string> {
+  const declaration = {
+    ...TAX_CONTENT,
+    principalId: taxPrincipalId('eip155:8453', privateKeyToAccount(PAYER_KEY).address),
+    principalAttributionHash: `sha-256:${'00'.repeat(32)}`,
+  }
+  const signature = await privateKeyToAccount(PAYER_KEY).signTypedData({
+    domain: TAX_DECLARATION_DOMAIN,
+    types: TAX_DECLARATION_TYPES,
+    primaryType: TAX_DECLARATION_PRIMARY_TYPE,
+    message: { ...declaration, validUntil: BigInt(declaration.validUntil) },
+  })
+  return Buffer.from(JSON.stringify({ ...declaration, signature }), 'utf8').toString('base64url')
+}
+
+/** A valid header with its signature replaced by garbage. */
+function badSignatureHeader(): string {
+  const parsed = JSON.parse(Buffer.from(taxDeclarationHeader(), 'base64url').toString('utf8'))
+  parsed.signature = '0xdeadbeef'
+  return Buffer.from(JSON.stringify(parsed), 'utf8').toString('base64url')
+}
+
+interface PaidPurchase {
+  status: number
+  text: string
+  receipt: Record<string, unknown> | null
+  paymentHeader: string
+}
+
+async function buyVpn(
+  url: string,
+  headers: Record<string, string> = {},
+  args: Record<string, unknown> = { plan: 'basic' },
+): Promise<PaidPurchase> {
+  const unpaid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: 'buy_vpn', arguments: args },
+  })
+  const paymentRequired = await unpaid.json() as PaymentRequired
+  const paymentHeader = await signedHeader(paymentRequired)
+  const paid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 2,
+    method: 'tools/call',
+    params: { name: 'buy_vpn', arguments: args },
+  }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader, ...headers })
+  const text = await paid.text()
+  const receiptHeader = paid.headers.get('x-receipt-json')
+  return {
+    status: paid.status,
+    text,
+    receipt: receiptHeader
+      ? JSON.parse(Buffer.from(receiptHeader, 'base64').toString('utf8')) as Record<string, unknown>
+      : null,
+    paymentHeader,
+  }
+}
+
+describe('buyer tax declaration on the receipt (#4855)', () => {
+  it('an accepted Swedish declaration puts the buyer block on the receipt and keeps SE_25', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(url, { 'X-Tax-Declaration': taxDeclarationHeader() })
+
+    expect(status).toBe(200)
+    expect(receipt).not.toBeNull()
+    expect(receipt!.momsbehandling).toBe('SE_25')
+    expect(receipt!.kopare).toMatchObject({
+      deklaration: {
+        land: 'SE',
+        moms_nr: 'SE559412345601',
+        status: 'TAXABLE_PERSON',
+        giltig_till: new Date(TAX_CONTENT.validUntil).toISOString().slice(0, 10),
+      },
+    })
+    // SE_25 VAT lines are unchanged from today.
+    expect(receipt!.belopp_exkl_moms).toBe('0.0008')
+    expect(receipt!.moms_procent).toBe(25)
+    expect(receipt!.moms_belopp).toBe('0.0002')
+    expect(receipt!.totalt_inkl_moms).toBe('0.001')
+    // The rendered invoice in the purchase text carries the same buyer block.
+    expect(text).toContain('Country: SE')
+    expect(text).toContain('VAT reg. no: SE559412345601')
+  })
+
+  it('an accepted declaration from another EU country is REVERSE_CHARGE, with both VAT numbers in English and Swedish', async () => {
+    const { url } = await startServer()
+    const header = taxDeclarationHeader({ jurisdiction: 'DE', taxId: 'DE123456789' })
+    const { status, text, receipt, paymentHeader } = await buyVpn(url, { 'X-Tax-Declaration': header })
+
+    expect(status).toBe(200)
+    expect(receipt!.momsbehandling).toBe('REVERSE_CHARGE')
+    // Net = total = the product price; VAT rate 0 and VAT amount 0.
+    expect(receipt!.belopp_exkl_moms).toBe('0.001')
+    expect(receipt!.totalt_inkl_moms).toBe('0.001')
+    expect(receipt!.moms_procent).toBe(0)
+    expect(receipt!.moms_belopp).toBe('0')
+
+    expect(text).toContain('Reverse charge')
+    expect(text).toContain('SE559412345601')
+    expect(text).toContain('DE123456789')
+
+    // The same settled payment, rendered in Swedish: the note names both VAT
+    // numbers in Swedish too.
+    const sv = await postMcp(url, {
+      jsonrpc: '2.0',
+      id: 3,
+      method: 'tools/call',
+      params: { name: 'buy_vpn', arguments: { plan: 'basic', locale: 'sv' } },
+    }, { [PAYMENT_SIGNATURE_HEADER]: paymentHeader, 'X-Tax-Declaration': header })
+    const svText = await sv.text()
+    expect(sv.status).toBe(200)
+    expect(svText).toContain('Omvänd betalningsskyldighet')
+    expect(svText).toContain('SE559412345601')
+    expect(svText).toContain('DE123456789')
+  })
+
+  it('a purchase without a declaration has no buyer block and keeps SE_25', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(url)
+
+    expect(status).toBe(200)
+    expect(receipt!.momsbehandling).toBe('SE_25')
+    expect((receipt!.kopare as Record<string, unknown>).deklaration).toBeUndefined()
+    expect(receipt!.belopp_exkl_moms).toBe('0.0008')
+    expect(receipt!.moms_procent).toBe(25)
+    expect(receipt!.moms_belopp).toBe('0.0002')
+    expect(text).not.toContain('Country:')
+    expect(text).not.toContain('Reverse charge')
+  })
+
+  it('treats every refused declaration as absent and still completes the purchase', async () => {
+    const { url, submit } = await startServer()
+    const cases: Array<[string, string]> = [
+      ['bad signature', badSignatureHeader()],
+      ['signer is not the payer', taxDeclarationHeader({}, { key: `0x${'02'.repeat(32)}` })],
+      ['principalId names another chain', taxDeclarationHeader({}, { network: 'eip155:84532' })],
+      ['attribution hash does not recompute', await wrongAttributionHeader()],
+      ['expired validUntil', taxDeclarationHeader({ validUntil: Date.now() - 1_000 })],
+    ]
+
+    for (const [label, header] of cases) {
+      const { status, receipt } = await buyVpn(url, { 'X-Tax-Declaration': header })
+      expect(status, label).toBe(200)
+      expect(receipt!.momsbehandling, label).toBe('SE_25')
+      expect((receipt!.kopare as Record<string, unknown>).deklaration, label).toBeUndefined()
+      expect(receipt!.belopp_exkl_moms, label).toBe('0.0008')
+    }
+    // Every purchase settled: the declaration never gates the payment.
+    expect(submit).toHaveBeenCalledTimes(cases.length)
+  })
+})
+
+// ── Checkout details (#4873) ─────────────────────────────────────────────────
+
+/** Every offered product, with the tool call that selects it. */
+const PRODUCT_CALLS: Array<{ productId: string; tool: string; args: Record<string, unknown> }> = [
+  { productId: 'vpn_basic', tool: 'buy_vpn', args: { plan: 'basic' } },
+  { productId: 'vpn_legacy', tool: 'buy_vpn', args: { plan: 'legacy' } },
+  { productId: 'vpn_pro', tool: 'buy_vpn', args: { plan: 'pro' } },
+  { productId: 'vpn_ultra', tool: 'buy_vpn', args: { plan: 'ultra' } },
+  { productId: 'storage_50gb', tool: 'buy_cloud_storage', args: { tier: '50gb' } },
+  { productId: 'storage_200gb', tool: 'buy_cloud_storage', args: { tier: '200gb' } },
+  { productId: 'storage_1tb', tool: 'buy_cloud_storage', args: { tier: '1tb' } },
+  { productId: 'joke', tool: 'buy_joke', args: {} },
+]
+
+/** The 402 challenge a product's unpaid tool call answers with. */
+async function challengeFor(url: string, tool: string, args: Record<string, unknown>): Promise<PaymentRequired> {
+  const unpaid = await postMcp(url, {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'tools/call',
+    params: { name: tool, arguments: args },
+  })
+  expect(unpaid.status).toBe(402)
+  return (await unpaid.json()) as PaymentRequired
+}
+
+/** The `X-Checkout-Details` header value for `details`. */
+function checkoutDetailsHeader(details: Record<string, unknown>): string {
+  return Buffer.from(JSON.stringify({ version: 1, ...details }), 'utf8').toString('base64url')
+}
+
+const CHECKOUT_BILLING = {
+  line1: 'Sveavagen 1',
+  line2: '4 tr',
+  city: 'Stockholm',
+  postCode: '111 57',
+  subdivision: 'SE-AB',
+  country: 'SE',
+}
+
+describe('checkout details (#4873)', () => {
+  it('only the chosen product’s challenge carries the request; every other product’s is unchanged', async () => {
+    const { url } = await startServer({}, { cdpConfigured: true })
+    for (const { productId, tool, args } of PRODUCT_CALLS) {
+      const challenge = await challengeFor(url, tool, args)
+      const extensions = challenge.extensions as Record<string, unknown>
+      if (productId === 'vpn_pro') {
+        expect(extensions['haven-checkout-details'], productId).toEqual(
+          checkoutDetailsExtensionEntry({
+            fields: { receipt_email: { required: false }, billing_address: { required: false } },
+          }),
+        )
+      } else {
+        // Byte-identical to the challenge before this product asked: the base
+        // block and nothing else.
+        expect(Object.keys(extensions), productId).toEqual(['haven-demo'])
+      }
+    }
+  })
+
+  it('a paid request with the header shows the email and the address on the receipt', async () => {
+    const { url } = await startServer()
+    const { status, text, receipt } = await buyVpn(
+      url,
+      {
+        [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({
+          receipt_email: 'philip@example.se',
+          billing_address: CHECKOUT_BILLING,
+        }),
+      },
+      { plan: 'pro' },
+    )
+
+    expect(status).toBe(200)
+    expect(receipt!.kopare).toMatchObject({
+      receipt_email: 'philip@example.se',
+      billing_address: CHECKOUT_BILLING,
+    })
+    // The rendered invoice in the purchase text carries the same values.
+    expect(text).toContain('philip@example.se')
+    expect(text).toContain('Sveavagen 1')
+    expect(text).toContain('111 57 Stockholm')
+  })
+
+  it('a paid request without the header produces today’s receipt', async () => {
+    const { url } = await startServer()
+    const { status, receipt } = await buyVpn(url, {}, { plan: 'pro' })
+
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('treats a malformed or oversized header as absent and serves the purchase', async () => {
+    const { url, submit } = await startServer()
+    const cases: Array<[string, string]> = [
+      ['not base64url(JSON)', 'not-a-header'],
+      ['JSON but not an object', Buffer.from('"hello"', 'utf8').toString('base64url')],
+      ['an unknown version', checkoutDetailsHeader({ version: 2, receipt_email: 'philip@example.se' })],
+      ['oversized', checkoutDetailsHeader({ receipt_email: `${'a'.repeat(2000)}@example.se` })],
+    ]
+
+    for (const [label, header] of cases) {
+      const { status, receipt } = await buyVpn(url, { [X_CHECKOUT_DETAILS_HEADER]: header }, { plan: 'pro' })
+      expect(status, label).toBe(200)
+      expect(Object.keys(receipt!.kopare as Record<string, unknown>), label).toEqual(['identifierare', 'typ', 'roll'])
+    }
+    // Every purchase settled: the header never gates the payment.
+    expect(submit).toHaveBeenCalledTimes(cases.length)
+  })
+
+  it('serves a paid request for the required-field product that arrives without the header', async () => {
+    const { url } = await startServer({}, { checkoutDetailsRequiredField: 'receipt_email' })
+
+    // The challenge asks for the field as required...
+    const challenge = await challengeFor(url, 'buy_vpn', { plan: 'pro' })
+    const entry = (challenge.extensions as Record<string, unknown>)['haven-checkout-details'] as {
+      info: { fields: Record<string, { required: boolean }> }
+    }
+    expect(entry.info.fields.receipt_email).toEqual({ required: true })
+
+    // ...and a paid request without it is still served, with no buyer details.
+    const { status, receipt } = await buyVpn(url, {}, { plan: 'pro' })
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('ignores the header on a product that asks for nothing', async () => {
+    const { url } = await startServer()
+    const { status, receipt } = await buyVpn(
+      url,
+      { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({ receipt_email: 'philip@example.se' }) },
+      { plan: 'basic' },
+    )
+    expect(status).toBe(200)
+    expect(Object.keys(receipt!.kopare as Record<string, unknown>)).toEqual(['identifierare', 'typ', 'roll'])
+  })
+
+  it('never logs the values it received', async () => {
+    const { url } = await startServer()
+    const logged: string[] = []
+    const sinks = ['log', 'info', 'warn', 'error'] as const
+    const spies = sinks.map((sink) =>
+      vi.spyOn(console, sink).mockImplementation((...args: unknown[]) => {
+        logged.push(args.map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg))).join(' '))
+      }),
+    )
+    try {
+      const { status } = await buyVpn(
+        url,
+        {
+          [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader({
+            receipt_email: 'philip@example.se',
+            billing_address: CHECKOUT_BILLING,
+          }),
+        },
+        { plan: 'pro' },
+      )
+      expect(status).toBe(200)
+    } finally {
+      spies.forEach((spy) => spy.mockRestore())
+    }
+    const all = logged.join('\n')
+    expect(all).not.toContain('philip@example.se')
+    expect(all).not.toContain('Sveavagen')
+    expect(all).not.toContain('111 57')
   })
 })

@@ -124,4 +124,99 @@ describe('useAccountSigners is account-scoped (#1089)', () => {
     )
     expect(mockPost.mock.calls.every(([url]) => !String(url).startsWith('/agents/'))).toBe(true)
   })
+
+  // ── #4821: a rejected SUBMIT is classified, not folded into `failed` ──────
+  const USER_OP_HASH = '0x' + 'dd'.repeat(32)
+
+  /** A submit rejection carrying the route's body. */
+  function submitError(status: number, body: Record<string, unknown>) {
+    return Object.assign(new Error(String(body.error ?? 'failed')), {
+      name: 'ApiRequestError',
+      status,
+      body,
+    })
+  }
+
+  async function removeOnce() {
+    mockPost.mockImplementation((url: string) => {
+      if (url.includes('/prepare')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_operation: { nonce: '1n' } })
+      }
+      return Promise.reject(
+        submitError(502, {
+          error: 'The signer change may have gone through',
+          error_code: 'submission_outcome_unknown',
+          user_op_hash: USER_OP_HASH,
+        }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ab'.repeat(200))
+    const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.removePasskey(SIGNERS.passkeys[0].key_id)
+    })
+    return outcome
+  }
+
+  it("the route's outcome-unknown answer is `unconfirmed`, with the operation hash", async () => {
+    expect(await removeOnce()).toEqual({
+      ok: false,
+      reason: 'unconfirmed',
+      message: 'The signer change may have gone through',
+      userOpHash: USER_OP_HASH,
+    })
+  })
+
+  it('a submit that got no HTTP answer is `unconfirmed`: the change may have landed', async () => {
+    mockPost.mockImplementation((url: string) => {
+      if (url.includes('/prepare')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_operation: { nonce: '1n' } })
+      }
+      return Promise.reject(new TypeError('Failed to fetch'))
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ab'.repeat(200))
+    const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.removePasskey(SIGNERS.passkeys[0].key_id)
+    })
+    expect(outcome).toEqual({ ok: false, reason: 'unconfirmed', message: 'Failed to fetch' })
+  })
+
+  it("the route's known-failure code is `failed`: nothing moved, retrying is safe", async () => {
+    mockPost.mockImplementation((url: string) => {
+      if (url.includes('/prepare')) {
+        return Promise.resolve({ signature_scheme: 'webauthn_userop', user_operation: { nonce: '1n' } })
+      }
+      return Promise.reject(
+        submitError(502, { error: 'Signer change failed', error_code: 'onchain_execution_failed' }),
+      )
+    })
+    mockSignUserOp.mockResolvedValue('0x' + 'ab'.repeat(200))
+    const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.removePasskey(SIGNERS.passkeys[0].key_id)
+    })
+    expect(outcome).toEqual({ ok: false, reason: 'failed', message: 'Signer change failed' })
+  })
+
+  it('a refused PREPARE is still `blocked` — nothing was submitted', async () => {
+    mockPost.mockRejectedValue(submitError(409, { error: 'This account has no EOA owner to sign with' }))
+    const { result } = renderHook(() => useAccountSigners(SAFE_ADDRESS, 84532, 'x@y.z'))
+    await waitFor(() => expect(result.current.ready).toBe(true))
+    let outcome: unknown
+    await act(async () => {
+      outcome = await result.current.removePasskey(SIGNERS.passkeys[0].key_id)
+    })
+    expect(outcome).toEqual({
+      ok: false,
+      reason: 'blocked',
+      message: 'This account has no EOA owner to sign with',
+    })
+  })
 })

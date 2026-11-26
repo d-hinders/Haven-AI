@@ -43,7 +43,10 @@
  * Deposits (inbound rows) have no meaningful agent/merchant counterparty, so
  * they group per local day under the counterparty key `'deposit'` — except a
  * transfer from another of the user's own accounts, keyed `own:<from>` and
- * named by that account (#4099).
+ * named by that account (#4099), and a sale into the Sales account (#5000,
+ * the row's `sale` marker), keyed `'sale'`. Sales of different products merge
+ * into one group per day; the group names a product only when every member
+ * has the same recorded `productId`.
  *
  * A move between two of the user's own accounts arrives already folded into
  * its outbound leg (#4268: the route runs #4265's `foldOwnAccountTransfers`
@@ -258,13 +261,18 @@ export function activityOutcome(tx: {
  * account (#4117), so one group has one sender and can name it: without it,
  * two own accounts' unattributed sends to one recipient on one day merged.
  * Inbound rows stay unsplit — their day's deposits are one group whichever
- * account received them. A folded own-account move (#4268) keys on its two
- * accounts, `move:<from>:<to>`: it is neither a send to a counterparty nor a
- * deposit.
+ * account received them — except a sale (#5000), which keys `'sale'` beside
+ * them so "Sale ×N" and "Deposit ×N" are two rows. The own-account check runs
+ * first: own money is never a sale. A folded own-account move (#4268) keys on
+ * its two accounts, `move:<from>:<to>`: it is neither a send to a
+ * counterparty nor a deposit.
  */
 function counterpartyKey(tx: EnrichedTransaction, fromOwnAccount: boolean): string {
   if (tx.ownTransfer) return `move:${tx.accountId}:${tx.ownTransfer.toAccountId}`
-  if (tx.direction === 'in') return fromOwnAccount ? `own:${tx.from.toLowerCase()}` : 'deposit'
+  if (tx.direction === 'in') {
+    if (fromOwnAccount) return `own:${tx.from.toLowerCase()}`
+    return tx.sale ? 'sale' : 'deposit'
+  }
   const counterparty =
     tx.source === 'x402' && tx.x402ResourceUrl ? tx.x402ResourceUrl : tx.to.toLowerCase()
   return `out:${tx.accountId}:${counterparty}`
@@ -314,6 +322,12 @@ export interface DashboardActivityGroup {
    * readable out row.
    */
   ownTransfer?: { fromAccountName: string; toAccountName: string }
+  /**
+   * #5000: present only on a group of sales into the Sales account. Names the
+   * product (the Sales page's label) only when every member has the same
+   * recorded product; null otherwise, and on a sale without a product.
+   */
+  sale?: { productName: string | null }
   activityType: string | null
   direction: 'in' | 'out'
   status: ActivityOutcome
@@ -351,6 +365,14 @@ export interface BuildActivityGroupsParams {
    * `merchantName` before "Deposit" (#4099 frontend half).
    */
   resolveOwnAccountName?: (address: string, chainId: number) => string | null
+  /**
+   * #4882: the row's recipient name in the ONE naming order
+   * (`counterparty-name.ts`: own account, contact, catalog, receipt), without
+   * the resource host, which rides beside it as `x402ResourceUrl`. When wired
+   * it names every outbound group and every inbound one from an own account;
+   * the two lookups above stay the fallback for callers that do not wire it.
+   */
+  resolveRecipientName?: (tx: EnrichedTransaction) => string | null
 }
 
 /**
@@ -398,6 +420,7 @@ export async function buildActivityGroups(
     now = Date.now(),
     resolveMerchantName,
     resolveOwnAccountName,
+    resolveRecipientName,
   } = params
 
   /**
@@ -409,7 +432,9 @@ export async function buildActivityGroups(
   const ownSenderName = (tx: EnrichedTransaction): string | null => {
     if (tx.direction !== 'in') return null
     const ownName = resolveOwnAccountName?.(tx.from, tx.chainId) ?? null
-    return ownName === null ? null : (resolveMerchantName?.(tx.from) ?? ownName)
+    if (ownName === null) return null
+    if (resolveRecipientName) return resolveRecipientName(tx) ?? ownName
+    return resolveMerchantName?.(tx.from) ?? ownName
   }
 
   // One instant comparison, no tz: the rolling window `[now − 168h, now)` is
@@ -463,14 +488,15 @@ export async function buildActivityGroups(
         source: sample.source ?? null,
         x402ResourceUrl: sample.x402ResourceUrl ?? null,
         to: sample.to,
-        // Contacts and receipts first, then the user's own accounts (#4099)
-        // — the export's order. A deposit is named only when it came from
-        // another own account; its group holds that sender alone.
+        // #4882: the one naming order (`resolveRecipientName`, wired by the
+        // route); the contact-then-own-account lookups are only the fallback
+        // for a caller that does not wire it. A deposit is named only when it
+        // came from another own account; its group holds that sender alone.
         merchantName:
           sample.direction === 'out'
-            ? (resolveMerchantName?.(sample.to) ??
-              resolveOwnAccountName?.(sample.to, sample.chainId) ??
-              null)
+            ? resolveRecipientName
+              ? resolveRecipientName(sample)
+              : (resolveMerchantName?.(sample.to) ?? resolveOwnAccountName?.(sample.to, sample.chainId) ?? null)
             : ownSenderName(sample),
         activityType: sample.activityType ?? null,
         direction: sample.direction,
@@ -519,6 +545,14 @@ export async function buildActivityGroups(
         const approx = values[currency.toLowerCase() as 'usd' | 'eur' | 'sek']
         wire.approxCurrency = currency
         wire.approxAmount = approx == null ? null : approx.toFixed(4)
+      }
+
+      // #5000: the `sale` key holds only sale rows, so the sample marks the
+      // group. "Same product" compares the recorded id, never the label.
+      if (sample.sale && sample.direction === 'in' && ownSenderName(sample) === null) {
+        const productIds = new Set(group.members.map((tx) => tx.sale?.productId ?? null))
+        const [only] = productIds
+        wire.sale = { productName: productIds.size === 1 && only !== null ? sample.sale.productName : null }
       }
 
       if (truncated) {

@@ -39,6 +39,9 @@ import dashboardRoutes from './routes/dashboard.js'
 import dashboardBudgetRemainingRoutes from './routes/dashboard-budget-remaining.js'
 import agentRoutes from './routes/agents.js'
 import agentTaxDeclarationRoutes from './routes/agent-tax-declaration.js'
+// #4871: the per-agent checkout-details sharing switch and the agent's read —
+// its own route FILE, for the reason at `agent-tax-declaration.ts:123-127`.
+import agentCheckoutDetailsRoutes from './routes/agent-checkout-details.js'
 import labelRoutes from './routes/labels.js'
 import agentLabelRoutes from './routes/agent-labels.js'
 import agentOrganizationRoutes from './routes/agent-organizations.js'
@@ -96,6 +99,12 @@ import { opsOnchainReaders } from './modules/ops/onchain-readers.js'
 import catalogRoutes from './routes/catalog.js'
 import catalogSubmissionRoutes from './routes/catalog-submissions.js'
 import merchantRoutes from './routes/merchants.js'
+import merchantServiceRoutes from './routes/merchant-services.js'
+import merchantKeyRoutes from './routes/merchant-keys.js'
+import merchantCatalogueRoutes from './routes/merchant-catalogue.js'
+import merchantSalesRoutes from './routes/merchant-sales.js'
+import merchantSalesReadRoutes from './routes/merchant-sales-reads.js'
+import merchantDepositAddressRoutes from './routes/merchant-deposit-addresses.js'
 import analyticsRoutes from './routes/analytics.js'
 import analyticsOverviewRoutes from './routes/analytics-overview.js'
 import accountingRoutes from './routes/accounting.js'
@@ -110,6 +119,7 @@ import type { QueryableLike } from './modules/catalog/index.js'
 import { registerAgentToolAuditHooks } from './middleware/agentToolAudit.js'
 import { registerClientCompatHooks } from './middleware/client-compat.js'
 import { registerAgentLastSeenHook } from './middleware/agentAuth.js'
+import { registerMerchantLastUsedHook } from './middleware/merchantAuth.js'
 // dep-lint-exempt: composition root — owns the pool for the /health liveness probe (SELECT 1) and injects it into `startBackgroundJobs` at boot (catalog refresh needs it); it wires infrastructure rather than running tenant SQL
 import pool from './db.js'
 
@@ -280,6 +290,11 @@ installRequestValidation(app, {
     // new module never enters shadow (no existing caller a stricter schema
     // could break). GET only: no request body, one uuid path parameter.
     'routes/agent-tax-declaration.ts',
+    // #4871: the checkout-details sharing module is born ENFORCED for the same
+    // reason — a genuinely new module never enters shadow (no existing caller
+    // a stricter schema could break). The owner PUT carries one boolean body;
+    // the agent GET has no body and one uuid path parameter.
+    'routes/agent-checkout-details.ts',
     'routes/agent-rekey.ts',
     'routes/agent-connection-setups.ts',
     'routes/agent-passports.ts',
@@ -299,6 +314,37 @@ installRequestValidation(app, {
     // yet — born ENFORCED, same rule as `routes/receive.ts` / `routes/ops.ts`
     // above (no existing caller a stricter schema could break).
     'routes/feedback.ts',
+    // #4895: merchant services is a BRAND NEW module — born ENFORCED on the
+    // same rule. It is money-path (it creates a spend-capable account and
+    // decides which account merchant payments land in), and its request body
+    // is closed (`additionalProperties: false`) so a body naming an account to
+    // mark is refused by the schema, not by a handler check.
+    'routes/merchant-services.ts',
+    // #4896: the Sales key's dashboard routes — create, list by prefix, revoke.
+    // A BRAND NEW module, born ENFORCED on the same rule. It is money-path (it
+    // mints and revokes the credential the merchant routes accept), and its
+    // create body is closed (`additionalProperties: false`) so a body naming an
+    // account to bind the key to is refused by the schema, not by a handler
+    // check.
+    'routes/merchant-keys.ts',
+    // #4899: the merchant catalogue's routes — save the kit deployment's
+    // address, read the catalogue, refresh it. A BRAND NEW module, born
+    // ENFORCED on the same rule. It is money-path (it decides what labels the
+    // account's sales and stores data a merchant supplies), and its save body
+    // is closed (`additionalProperties: false`) so a body carrying anything
+    // but the address is refused by the schema, not by a handler check.
+    'routes/merchant-catalogue.ts',
+    // #4897: the sales ingest — the merchant key's one write. BRAND NEW, born
+    // ENFORCED on the same rule, with a closed body (`additionalProperties:
+    // false`) so a record is exactly the section 5 shape.
+    'routes/merchant-sales.ts',
+    // #4897: the owner's sales reads and the clear route — BRAND NEW, born
+    // ENFORCED: the period, the cursor, the limit and the transaction hash are
+    // all declared in the spec and refused there when malformed.
+    'routes/merchant-sales-reads.ts',
+    // #4952: the Stripe deposit-address registry's routes (owner session only)
+    // — BRAND NEW, born ENFORCED: the body is closed and the id is a uuid.
+    'routes/merchant-deposit-addresses.ts',
   ],
 })
 
@@ -334,14 +380,15 @@ await app.register(fastifyJwt, {
 })
 
 // Rate limiting (#794): registered non-global — only routes that opt in via
-// `config.rateLimit` (money-path writes and the public demo reads) are
-// limited; dashboard reads stay unthrottled. Keyed per presented credential
-// (Authorization or X-API-Key — see rateLimitKeyFor) so each agent gets its
-// own bucket regardless of network path; unauthenticated requests fall back
-// to per-IP. With TRUST_PROXY_HOPS unset that per-IP fallback collapses to
-// the proxy address behind Railway — acceptable for the public demo routes,
-// where a shared throttle still beats an open faucet, and the reason the
-// auth tier (#1670) refuses to arm itself until the proxy is trusted.
+// `config.rateLimit` (money-path writes, the auth front door and the other
+// public tiers) are limited; dashboard reads stay unthrottled. Keyed on the
+// identity the route's auth verified — the agent, the Sales key, the ops
+// operator or the owner's JWT `sub` — never on raw header text (#4955, see
+// rateLimitKeyFor), so each caller gets its own bucket regardless of network
+// path and a junk header cannot pick a fresh one. A route with no auth is
+// keyed per IP. With TRUST_PROXY_HOPS unset that per-IP key collapses to the
+// proxy address behind Railway — the reason the auth tier (#1670) and the
+// other public tiers refuse to arm themselves until the proxy is trusted.
 // #1680: the shared Postgres-backed store replaces the plugin's in-process
 // LRU. With the default store each replica counted only its own share of the
 // traffic, so the real ceiling was `max × replicas` and it ROSE with load —
@@ -385,6 +432,12 @@ registerClientCompatHooks(app)
 // onResponse hook so it runs after route handlers, never interleaving with
 // their queries.
 registerAgentLastSeenHook(app)
+
+// Record merchant-key liveness (last_used_at) after each ACCEPTED merchant
+// request, at most once a minute per key (#4896). Root scope, so the merchant
+// routes (#4897) inherit it without remembering to register it; it only fires
+// when `merchantAuthMiddleware` set `request.merchant`.
+registerMerchantLastUsedHook(app)
 
 // --- Routes ---
 registerHealthRoutes(app, {
@@ -531,6 +584,9 @@ await app.register(dashboardBudgetRemainingRoutes, { prefix: '/dashboard' })
 // tombstone below — the prefix survives only because that 410 does.
 await app.register(agentRoutes, { prefix: '/agents' })
 await app.register(agentTaxDeclarationRoutes, { prefix: '/agents' })
+// #4871: the per-agent checkout-details sharing switch (owner PUT) and the
+// agent's own read (agent GET) — one module, two credentials, same prefix.
+await app.register(agentCheckoutDetailsRoutes, { prefix: '/agents' })
 await app.register(hybridAccountRoutes, { prefix: '/accounts' })
 await app.register(agentDelegationRoutes, { prefix: '/agents' })
 await app.register(agentRekeyRoutes, { prefix: '/agents' })
@@ -582,6 +638,27 @@ await app.register(catalogRoutes, { prefix: '/catalog' })
 await app.register(catalogSubmissionRoutes, { prefix: '/catalog' })
 // #3078: the merchant layer over the catalog — read-only, same auth door.
 await app.register(merchantRoutes, { prefix: '/merchants' })
+// #4895: turning merchant services on and off, and the dashboard read. The
+// turn-on route creates a dedicated account through the create-additional
+// path and marks it as the merchant account, in one transaction.
+await app.register(merchantServiceRoutes, { prefix: '/merchant-services' })
+// #4896: the Sales key's dashboard routes — create (secret returned once),
+// list by prefix, revoke. The key itself authenticates only the merchant
+// routes (#4897), through `middleware/merchantAuth.ts`.
+await app.register(merchantKeyRoutes, { prefix: '/merchant-keys' })
+// #4899: the merchant catalogue — the kit deployment's address, the product
+// list read from its discovery document, and the refresh. The list lives in
+// its own table, never `merchant_catalog`; the read only labels.
+await app.register(merchantCatalogueRoutes, { prefix: '/merchant-catalogue' })
+// #4897: the sales ingest — the merchant key's one write. Authenticated by the
+// Sales key alone (`merchantAuthMiddleware`); the account is the key's.
+await app.register(merchantSalesRoutes, { prefix: '/merchant' })
+// #4897: the owner's sales reads (summary, paged payments, one payment) and the
+// clear route. Dashboard JWT only; the Sales key never reaches them.
+await app.register(merchantSalesReadRoutes, { prefix: '/merchant-sales' })
+// #4952: the Stripe deposit-address registry (dev, Stripe sandbox). Dashboard
+// JWT only; the Sales key never reaches it.
+await app.register(merchantDepositAddressRoutes, { prefix: '/merchant-deposit-addresses' })
 await app.register(analyticsRoutes, { prefix: '/analytics' })
 // #2946 (epic #2944, slice B): a SEPARATE module under the SAME prefix — the
 // internal onboarding funnel above owns `/analytics/funnel`, this owns

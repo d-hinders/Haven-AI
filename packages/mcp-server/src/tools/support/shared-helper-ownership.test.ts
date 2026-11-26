@@ -74,6 +74,7 @@ import {
 import * as capPrice from './cap-price.js'
 import * as catalogEntry from './catalog-entry.js'
 import * as allowanceBlock from './allowance-block.js'
+import * as checkoutDetails from './checkout-details.js'
 import * as errors from './errors.js'
 import * as guidance from './guidance.js'
 import * as mcpContext from './mcp-context.js'
@@ -144,6 +145,8 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // branch (every slice reaches it) and the catalog prepare preflight's
   // DELEGATION_EXPIRED refusal (s2810), which must use the same words.
   DELEGATION_EXPIRED_OMITTED_REASON: { module: 'errors', slices: ['s2809', 's2810', 's2811', 's2812'] },
+  // #4872: the checkout-details refusal's omitted reason, read by normalizeError.
+  CHECKOUT_DETAILS_OMITTED_REASON: { module: 'errors', slices: ['s2810', 's2812'] },
   // tools/support/guidance.ts — agent guidance and purchase summaries.
   buildAgentGuidance: { module: 'guidance', slices: ['s2809', 's2810', 's2811', 's2812'] },
   buildPurchaseSummary: { module: 'guidance', slices: ['s2810', 's2812'] },
@@ -263,6 +266,14 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   budgetEndedWarningMessage: { module: 'quote-response', slices: ['s2810', 's2811'] },
   runQuoteBudgetPrecheck: { module: 'quote-response', slices: ['s2810', 's2811'] },
   merchantDenialWarnings: { module: 'quote-response', slices: ['s2810', 's2811'] },
+  // #4830: the expected_amount comparison and the not-compared answer, called
+  // by haven_quote_x402 (s2811) only — the two MCP quote tools take no
+  // expectation. Kept in shared support because the local surface mirrors the
+  // same decision procedure and the prose must not drift between them.
+  compareExpectedAmount: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedNextAction: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedOmittedReason: { module: 'quote-response', slices: ['s2811'] },
+  expectedAmountNotComparedReason: { module: 'quote-response', slices: ['s2811'] },
   // tools/support/catalog-entry.ts — catalog refusal contract, shared by the
   // #2810 quote/preflight paths whose error shape the #2811 resume tests pin.
   getUsableCatalogMcpEntry: { module: 'catalog-entry', slices: ['s2810'] },
@@ -270,6 +281,20 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
   // s2811's haven_pay_x402_quote (both branches) and s2810's
   // haven_pay_mcp_tool (both branches).
   delegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
+  // #4872 part 2: checkout details on the hosted paid paths. The pay tools
+  // (s2810, and s2811's haven_pay_x402_quote since part 2b) refuse before any
+  // intent; the settle leg (s2812) builds the answer for the paid request it
+  // sends, and the plain-HTTP haven_submit (s2809, part 2b) builds it into the
+  // retry headers. One module, so all of them read the same SDK decision.
+  refuseUnshareableCheckoutDetails: { module: 'checkout-details', slices: ['s2810', 's2811'] },
+  checkoutDetailsBeforeSpend: { module: 'checkout-details', slices: ['s2812'] },
+  checkoutDetailsAfterSubmit: { module: 'checkout-details', slices: ['s2809', 's2812'] },
+  checkoutDetailsWhilePending: { module: 'checkout-details', slices: ['s2809', 's2812'] },
+  checkoutDetailsBeforeSubmit: { module: 'checkout-details', slices: ['s2809'] },
+  storedChallengeForSubmit: { module: 'checkout-details', slices: ['s2809'] },
+  checkoutDetailsForFundedDelivery: { module: 'checkout-details', slices: ['s2812'] },
+  SettleCheckoutDetails: { module: 'checkout-details', slices: ['s2812'] },
+  StoredCheckoutRequest: { module: 'checkout-details', slices: ['s2812'] },
   // The block's shape type — type-only, mapped for ownership (see TYPE_ONLY_EXPORTS).
   DelegationAllowanceBlock: { module: 'allowance-block', slices: ['s2810', 's2811'] },
 }
@@ -293,6 +318,41 @@ const HELPER_OWNERSHIP: Record<string, { module: string; slices: Slice[] }> = {
  * support helper and are expected to remain shared even after the carve-out.
  */
 const SINGLE_SLICE_RETAINED: Record<string, string /* reason */> = {
+  checkoutDetailsBeforeSpend:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  checkoutDetailsBeforeSubmit:
+    '#4872 part 2b: the plain-HTTP haven_submit (s2809) half of the decision whose pay-time half every pay tool (s2810, s2811) calls — kept beside them so the submit-time answer and the pay-time refusal read the same SDK decision (budget, block, reasons) and cannot drift apart.',
+  storedChallengeForSubmit:
+    '#4872 part 2b: the plain-HTTP haven_submit (s2809) half of the decision whose pay-time half every pay tool (s2810, s2811) calls — kept beside them so the submit-time answer and the pay-time refusal read the same SDK decision (budget, block, reasons) and cannot drift apart.',
+  checkoutDetailsForFundedDelivery:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  SettleCheckoutDetails:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  StoredCheckoutRequest:
+    '#4872 part 2: the two halves of ONE decision — the pay tools (s2810) refuse before any intent and the settle leg (s2812) builds the answer for the paid request — kept in one module so both read the same SDK decision (budget, block, reasons) and cannot drift apart; splitting them across two capability modules is how the hosted pay-time check and the settle-time answer would come to disagree.',
+  // s2811 (#4830): the expected_amount comparison and the not-compared answer.
+  // Only haven_quote_x402 calls them (the two MCP quote tools take no
+  // expectation), but they stay in shared support DELIBERATELY: the local
+  // surface (`packages/mcp/src/tools.ts`) mirrors the same decision procedure
+  // and the same prose, and it cannot import mcp-server support — so the
+  // hosted copy is the reference the local twin is reviewed against. Moving
+  // them into plain-http-x402.ts would put the reference inside the capability
+  // that the local package cannot see, which is exactly how the two surfaces
+  // drifted apart before #4830.
+  compareExpectedAmount:
+    'DELIBERATE: the local @haven_ai/mcp quote mirrors this decision procedure and its prose; ' +
+    'the hosted copy is the reference the local twin is reviewed against, and the local package ' +
+    'cannot import mcp-server support. Moving it into plain-http-x402.ts would hide the reference ' +
+    'from the surface that must match it.',
+  expectedAmountNotComparedNextAction:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote carries the same ' +
+    'cause-following step, and the two must not drift.',
+  expectedAmountNotComparedOmittedReason:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote emits the same ' +
+    'next_tool_omitted_reason text.',
+  expectedAmountNotComparedReason:
+    'DELIBERATE, same reason as compareExpectedAmount: the local quote emits the same prose, ' +
+    'and the not-compared wording is a money-path contract both surfaces must state identically.',
   // s2810 (#2810 catalog/quote/prepare capability — LANDED; each of the four
   // was re-argued rather than moved, the way #2809 re-argued its own):
   isMerchantEndpointMiss:
@@ -476,6 +536,17 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
   // block into `haven_pay_mcp_tool` (s2810) made it a two-slice helper —
   // moved VERBATIM, call sites unchanged.
   'allowance-block': ['delegationAllowanceBlock', 'DelegationAllowanceBlock'],
+  'checkout-details': [
+    'refuseUnshareableCheckoutDetails',
+    'checkoutDetailsBeforeSpend',
+    'checkoutDetailsAfterSubmit',
+    'checkoutDetailsBeforeSubmit',
+    'checkoutDetailsForFundedDelivery',
+    'checkoutDetailsWhilePending',
+    'storedChallengeForSubmit',
+    'SettleCheckoutDetails',
+    'StoredCheckoutRequest',
+  ],
   errors: [
     'HostedToolError',
     'runTool',
@@ -487,6 +558,7 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'SETTLEMENT_PROOF_HEADER_MISSING_CODE', // #4061
     'isMissingProofHeaderRefusal', // #4061
     'DELEGATION_EXPIRED_OMITTED_REASON', // #4458
+    'CHECKOUT_DETAILS_OMITTED_REASON', // #4872
   ],
   guidance: [
     'buildAgentGuidance',
@@ -539,6 +611,11 @@ const SUPPORT_MODULE_EXPORTS: Record<string, string[]> = {
     'runQuoteBudgetPrecheck',
     'merchantDenialWarnings',
     'budgetEndedWarningMessage', // #4458
+    // #4830: the expected_amount comparison + the not-compared answer.
+    'compareExpectedAmount',
+    'expectedAmountNotComparedNextAction',
+    'expectedAmountNotComparedOmittedReason',
+    'expectedAmountNotComparedReason',
   ],
   // #3419: the task-budget twin rides s3329's two handoff sites; the min-version
   // constant is reported on those results and pinned cross-package.
@@ -599,7 +676,7 @@ const REGISTRATION_SURFACE_EXPORTS = new Set([
 ])
 
 /** Type-only exports: mapped for ownership, absent at runtime by design. */
-const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock'])
+const TYPE_ONLY_EXPORTS = new Set(['MaxAmountCap', 'ResolvedMerchantCallContext', 'DelegationAllowanceBlock', 'SettleCheckoutDetails', 'StoredCheckoutRequest'])
 
 /**
  * Exact-name exclusion for symbols that appear on a module namespace at
@@ -614,6 +691,7 @@ const SUPPORT_MODULE_OBJECTS: Record<string, Record<string, unknown>> = {
   'cap-price': capPrice,
   'catalog-entry': catalogEntry,
   'allowance-block': allowanceBlock,
+  'checkout-details': checkoutDetails,
   errors,
   guidance,
   'mcp-context': mcpContext,

@@ -73,6 +73,31 @@ export async function getServeTimeFiatValues(
   }
 }
 
+/**
+ * Today's spot rates for a set of symbols. One `getTokenPrice` call per symbol
+ * (shared 60 s CoinGecko cache); a failed read or a zero quote is `null` — the
+ * wire distinguishes "no rate" from a 0 rate (owner decision 1: a
+ * NULL-booked-fiat row is priced at today's rate and the total is marked ≈, so
+ * a rate must never silently undercount).
+ */
+export async function loadTokenRates(symbols: Iterable<string>): Promise<Map<string, FiatValues | null>> {
+  const rateBySymbol = new Map<string, FiatValues | null>()
+  for (const symbol of symbols) {
+    if (!rateBySymbol.has(symbol)) rateBySymbol.set(symbol, null)
+  }
+  for (const symbol of rateBySymbol.keys()) {
+    try {
+      const price = await getTokenPrice(symbol)
+      const pick = (value: number): number | null => (value > 0 ? value : null)
+      rateBySymbol.set(symbol, { usd: pick(price.usd), eur: pick(price.eur), sek: pick(price.sek) })
+    } catch {
+      rateBySymbol.set(symbol, null)
+    }
+  }
+  return rateBySymbol
+}
+
+
 /** Where a captured FX rate came from. Spot at settlement for now (open Q #1). */
 export const FX_SOURCE_SPOT = 'coingecko_spot'
 

@@ -33,6 +33,14 @@ const json = (status: number, body: unknown) => (async () => new Response(JSON.s
 export const SIGN_CONTEXT_SITES = [
   { site: 'sign-context.ts transport timeout', fetch: (async () => { throw Object.assign(new Error('aborted'), { name: 'TimeoutError' }) }) as typeof fetch, expect: { code: 'SIGN_CONTEXT_TIMEOUT', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64' } },
   { site: 'sign-context.ts unreachable', fetch: (async () => { throw new Error('ECONNREFUSED') }) as typeof fetch, expect: { code: 'SIGN_CONTEXT_UNREACHABLE', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64' } },
+  // #4829: the non-answer class — Haven answered, but not usably. Same code,
+  // same step and same relay as the transport failure above, plus the status
+  // Haven sent. A gateway's HTML 502 and the money-path rate limit's 429 used
+  // to land in SIGN_CONTEXT_REFUSED, telling the agent Haven had refused a
+  // payment it never looked at.
+  { site: 'sign-context.ts non-answer HTML 502', fetch: (async () => new Response('<html>Bad Gateway</html>', { status: 502, headers: { 'Content-Type': 'text/html' } })) as typeof fetch, expect: { code: 'SIGN_CONTEXT_UNREACHABLE', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64', http_status: 502 } },
+  { site: 'sign-context.ts non-answer JSON 500', fetch: json(500, { error: 'internal error' }), expect: { code: 'SIGN_CONTEXT_UNREACHABLE', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64', http_status: 500 } },
+  { site: 'sign-context.ts non-answer 429', fetch: json(429, { error: 'rate limited' }), expect: { code: 'SIGN_CONTEXT_UNREACHABLE', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64', http_status: 429 } },
   { site: 'sign-context.ts refused 410 (expired)', fetch: json(410, { error: 'expired', error_code: 'expired' }), expect: { code: 'SIGN_CONTEXT_REFUSED', next_action: 'payment_window_expired', retry_with_new_quote: true, http_status: 410, backend_error_code: 'expired' } },
   { site: 'sign-context.ts refused other', fetch: json(409, { error: 'already executed', error_code: 'already_executed' }), expect: { code: 'SIGN_CONTEXT_REFUSED', next_action: 'stop_and_tell_user', http_status: 409, backend_error_code: 'already_executed' } },
   { site: 'sign-context.ts malformed body', fetch: json(200, { nonsense: true }), expect: { code: 'SIGN_CONTEXT_MALFORMED', next_action: 'stop_and_tell_user', fallback: 'typed_data_b64' } },
@@ -45,6 +53,10 @@ const EXPIRED_REASON = 're-run the hosted quote tool you called with the same id
 const STEP: Record<string, Record<string, unknown>> = {
   'sign-context.ts transport timeout': { next_tool_omitted_reason: TRANSPORT_REASON },
   'sign-context.ts unreachable': { next_tool_omitted_reason: TRANSPORT_REASON },
+  // #4829: the non-answer class takes the SAME step as the transport failure.
+  'sign-context.ts non-answer HTML 502': { next_tool_omitted_reason: TRANSPORT_REASON },
+  'sign-context.ts non-answer JSON 500': { next_tool_omitted_reason: TRANSPORT_REASON },
+  'sign-context.ts non-answer 429': { next_tool_omitted_reason: TRANSPORT_REASON },
   'sign-context.ts refused 410 (expired)': { next_tool_omitted_reason: EXPIRED_REASON },
   'sign-context.ts refused other': { next_tool: 'mcp__haven__haven_get_payment_status', next_tool_server: 'haven', next_tool_name: 'haven_get_payment_status', next_tool_server_role: 'hosted', next_arguments: { payment_id: 'pay_3103' } },
   'sign-context.ts malformed body': { next_tool_omitted_reason: TRANSPORT_REASON },

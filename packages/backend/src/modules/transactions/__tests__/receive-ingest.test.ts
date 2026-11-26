@@ -16,7 +16,7 @@ import type { FastifyBaseLogger } from 'fastify'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import { describeDb, initDbHarness, resetDb } from '../../../infra/__tests__/helpers/db-harness.js'
 import db from '../../../db.js'
-import { ingestInboundTransfers } from '../receive.js'
+import { explorerRowsToLegs, ingestInboundTransfers } from '../receive.js'
 import { usdcAddressForChain } from '../off-ramp.js'
 import type { RawERC20Transfer } from '../../../infra/explorer-api.js'
 
@@ -76,9 +76,15 @@ describeDb('receive ingest token identity (#3333 round-2 F-1)', () => {
     const seeded = await seedAccount(100)
     const strangerAddress = `0x${'c'.repeat(40)}`
 
+    const account = {
+      id: seeded.accountId,
+      userId: seeded.userId,
+      accountAddress: seeded.address,
+      chainId: 100,
+    }
     const inserted = await ingestInboundTransfers(
-      { id: seeded.accountId, userId: seeded.userId, accountAddress: seeded.address, chainId: 100 },
-      [
+      account,
+      explorerRowsToLegs(account, [
         // The settlement asset by registry address — persisted.
         leg(seeded.address),
         // Same contract, checksummed differently in the explorer payload —
@@ -101,7 +107,7 @@ describeDb('receive ingest token identity (#3333 round-2 F-1)', () => {
         }),
         // The settlement asset, but inbound to a DIFFERENT address.
         leg(strangerAddress, { hash: `0x${'5'.repeat(64)}` }),
-      ],
+      ]),
       log,
     )
 

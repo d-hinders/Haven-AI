@@ -25,6 +25,7 @@
 
 import pool from '../../db.js'
 import type { Executor } from '../transaction.js'
+import { MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS, MERCHANT_RECEIPT_WAIT_MIN } from '../../domain/merchant-receipt-wait.js'
 import {
   DIRECT_PAYMENT_OUTSIDE_ADDRESS_SQL,
   DIRECT_PAYMENT_RAIL_SQL,
@@ -411,6 +412,8 @@ export interface DueRetryRow {
  *   $5 stale claim ms a `pending` row older than this is due (released first)
  *   $6 grace minutes  the #3767 deferral window (the resolved MERCHANT_REPORT_GRACE_MIN)
  *   $7 limit
+ *   $8 receipt wait minutes  the #4876 receipt window (MERCHANT_RECEIPT_WAIT_MIN)
+ *   $9 horizon days  how far back the #4876 rows are taken (MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS)
  *
  * MUTATION TARGETS (accounting-feed-syncs.test.ts): `c.status = 'connected'`
  * (the needs_reauthorisation test), `s.attempts < $2` (the cap test), the
@@ -436,6 +439,17 @@ export interface DueRetryRow {
  * dropped there without a claim. The pin (`accounting_booked_tx_hash`) is
  * excluded because a pinned payment has already been claimed once — its
  * sync row exists and the first arm owns it.
+ *
+ * #4876: the same arm also selects an x402 payment the RECEIPT WAIT held —
+ * eip3009 or erc7710, no sync row, past the receipt window ($8,
+ * `MERCHANT_RECEIPT_WAIT_MIN`) — because nothing else feeds a payment whose
+ * merchant receipt never arrives. An eip3009 payment additionally needs its
+ * settlement recorded or the #3767 grace passed, exactly as before; an
+ * erc7710 payment books an immutable hash and has no grace. These #4876 rows
+ * are taken only inside a horizon ($9): the arm re-selects a row every tick
+ * while `feedSettledPayment` declines it, and a payment older than the
+ * horizon is left to Sync now and the backfill. MUTATION TARGETS
+ * (receipt-wait.db.test.ts): the erc7710 arm, the $8 window, the $9 horizon.
  */
 export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT * FROM (
      SELECT s.id, s.user_id, s.provider, s.payment_id, s.status::text AS status, s.attempts,
@@ -463,10 +477,25 @@ export const LIST_DUE_RETRY_SYNCS_SQL = `SELECT * FROM (
        AND (c.settings -> 'auto_feed') IS DISTINCT FROM 'false'::jsonb
        AND (c.feed_from IS NULL OR COALESCE(mpe.confirmed_at, mpe.created_at) >= c.feed_from)
        AND (mpe.amount_sek IS NOT NULL OR mpe.fx_rates IS NOT NULL)
-       AND pi.machine_metadata->>'settlement_scheme' = 'eip3009'
-       AND pi.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
+       AND pi.machine_metadata->>'settlement_scheme' IN ('eip3009', 'erc7710')
        AND pi.machine_metadata->>'accounting_booked_tx_hash' IS NULL
-       AND COALESCE(mpe.confirmed_at, mpe.created_at) + make_interval(mins => $6::int) <= $1::timestamptz
+       AND COALESCE(mpe.confirmed_at, mpe.created_at) + make_interval(mins => $8::int) <= $1::timestamptz
+       AND (
+         -- #3767, unchanged: an eip3009 payment with no recorded settlement,
+         -- past the grace. No horizon, as before.
+         (pi.machine_metadata->>'settlement_scheme' = 'eip3009'
+            AND pi.machine_metadata->>'merchant_settlement_tx_hash' IS NULL
+            AND COALESCE(mpe.confirmed_at, mpe.created_at) + make_interval(mins => $6::int) <= $1::timestamptz)
+         -- #4876: a payment only the receipt wait held — erc7710, or eip3009
+         -- with its settlement recorded — inside the sweep horizon ($9 days).
+         -- The horizon bounds what the arm re-selects when the feed keeps
+         -- declining a row for a reason this query does not mirror (an
+         -- entitlement, a ledger-currency FX gap), and keeps a deploy from
+         -- pushing old history into closed periods.
+         OR ((pi.machine_metadata->>'settlement_scheme' = 'erc7710'
+              OR pi.machine_metadata->>'merchant_settlement_tx_hash' IS NOT NULL)
+            AND COALESCE(mpe.confirmed_at, mpe.created_at) >= $1::timestamptz - make_interval(days => $9::int))
+       )
        AND NOT EXISTS (
          SELECT 1 FROM accounting_feed_syncs s2
          WHERE s2.user_id = mpe.user_id AND s2.provider = c.provider
@@ -548,6 +577,10 @@ export async function listDueRetrySyncs(
     // so this repository does not depend on a module.
     graceMinMinutes,
     limit,
+    // #4876: the receipt wait, from its domain leaf (shared with the feed's
+    // pre-claim deferral).
+    MERCHANT_RECEIPT_WAIT_MIN,
+    MERCHANT_RECEIPT_SWEEP_HORIZON_DAYS,
   ])
   return result.rows
 }

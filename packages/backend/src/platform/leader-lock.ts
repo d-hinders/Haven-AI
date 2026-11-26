@@ -105,6 +105,31 @@ export const LEADER_LOCK_KEYS = {
    * the ops console's #3602) filters `expires_at > NOW()` itself.
    */
   feedbackSweep: 811012,
+  /**
+   * RESERVED, unused since #5012. It gated the scheduled merchant inbound index
+   * (#4903), whose row #5012 removed: the index now runs only while its owner
+   * views Sales, throttled per account by `claimInboundIndexRefresh` rather
+   * than by a leader lock. The number stays here so it is never handed to
+   * another job.
+   */
+  merchantInboundIndex: 811013,
+  /**
+   * Merchant catalogue refresh (#4899, epic #4885) — reads every configured
+   * kit deployment's discovery document and keeps its product list. Leader-gated
+   * because the tick is otherwise replicated: two replicas would read the same
+   * merchant's deployment at once and race the product upserts. Correctness does
+   * not depend on it (the writes are upserts in one transaction), but the
+   * merchant's access log would show Haven reading twice for no reason.
+   */
+  merchantCatalogueRefresh: 811014,
+  /**
+   * Delegate-sweep confirmer (#5035) — resolves a sweep booked
+   * `outcome_unknown` (broadcast, receipt not confirmed) from the token's
+   * `authorizationState(from, nonce)`, independent of which hash mined.
+   * Leader-gated because the RPC reads are the expensive part; correctness does
+   * not depend on it (both terminal writes are CASes on `outcome_unknown`).
+   */
+  sweepConfirmer: 811015,
 } as const
 
 /**

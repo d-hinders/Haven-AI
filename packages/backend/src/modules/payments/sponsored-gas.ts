@@ -4,10 +4,11 @@
  * `POST /payments/:id/sign` calls `recordSponsoredUserOpGas` around the
  * `submitDelegationPayment` seam — on the success path (the receipt's
  * `actualGasCost`), on a landed-but-REVERTED op (the cost rides the widened
- * `SubmittedUserOpFailedError`), and on `receipt_unconfirmed` (cost NULL:
- * no receipt was ever seen). It sits OUTSIDE the `confirmSubmittedIntent`
- * booking flow — the route calls it directly on the submit seam, never
- * inside the booking — so a metric write can never gate a booking.
+ * `SubmittedUserOpFailedError`), and on `receipt_unconfirmed` (cost NULL: no
+ * receipt was ever seen — the send's answer was lost, or the receipt wait
+ * errored). It sits OUTSIDE the `confirmSubmittedIntent` booking flow — the
+ * route calls it directly on the submit seam, never inside the booking — so a
+ * metric write can never gate a booking.
  *
  * Failure direction: AWAITED-AND-SWALLOWED. The route awaits the call (the
  * write is deterministic in tests and lands before the response), and every

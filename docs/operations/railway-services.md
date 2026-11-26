@@ -6,7 +6,8 @@ covers:
   - packages/mcp-server/Dockerfile
   - packages/demo-merchant-mcp/package.json
   - packages/backend/src/config.ts
-last-verified: "2026-11-06"
+  - packages/paywall-proxy/demo/opper-products.json
+last-verified: "2026-11-18"
 ---
 
 # Railway Services
@@ -33,11 +34,13 @@ One Railway project, **Haven AI**, with two environments of the same shape:
 |---|---|---|---|---|
 | `@haven/backend` | `packages/backend/Dockerfile`; watch `/packages/backend/**`, `/packages/sdk/**` | `node packages/backend/dist/index.js` | off / off | none set (probe `GET /health`) |
 | `Haven-AI-Hosted-MCP` | `packages/mcp-server/Dockerfile` | none: the Dockerfile `CMD` | **on** / off | `/healthz` |
-| `Demo-merchant` | root `/`, build `npm ci && npm run build -w packages/demo-merchant-mcp` | `node packages/demo-merchant-mcp/dist/index.js` | **on** / **on** | none set (probe `GET /healthz`) |
+| `Demo-merchant` | builder **Railpack** (reported in #5071; environment not recorded), root `/`, build `npm ci && npm run build -w packages/demo-merchant-mcp` | `node packages/demo-merchant-mcp/dist/index.js` | **on** / **on** | none set (probe `GET /healthz`) |
 | `Postgres` | image `ghcr.io/railwayapp-templates/postgres-ssl:18` | none | off / off | none |
 
 Sleep settings and start commands verified against both environments on
-2026-11-04; builds and healthchecks on 2026-10-06.
+2026-11-04; builds and healthchecks on 2026-10-06. Demo-merchant's builder
+(Railpack) is as reported in #5071 (2026-11-24), which did not say which
+environment it read; it has not been read from Railway for this page.
 
 ### Start commands run `node`, never `npm run start`
 
@@ -53,28 +56,61 @@ The commands are relative to the repo root because both services run from it
 Dockerfile `CMD`. Neither process depends on its working directory: configuration comes from Railway
 service variables, and Demo-merchant reads no files from disk.
 
+### Demo-merchant builds with Railpack, not Nixpacks (#5071)
+
+Set the builder to **Railpack** when you create a demo-merchant service. A new
+Railway service defaults to Nixpacks, and with Nixpacks the documented build
+command fails at `npm ci`:
+
+```
+npm error code EBUSY
+npm error syscall rmdir
+npm error path /app/node_modules/.cache
+npm error EBUSY: resource busy or locked, rmdir '/app/node_modules/.cache'
+```
+
+Railway mounts a build cache at `/app/node_modules/.cache`, and `npm ci` tries
+to remove it. The error points at npm, but the fix is the builder: switch the
+service to Railpack (in the service's build settings, or with the
+`serviceInstanceUpdate` mutation and `builder: "RAILPACK"`) and redeploy. The
+same commit (`b9657c08`) with the same build command failed on Nixpacks and
+built green on Railpack, and the service then served `/healthz` (#5071). The
+existing `Demo-merchant` service uses Railpack, as #5071 reports.
+
+The [paywall-proxy demo](#paywall-proxy-the-4892-demo) is not deployed yet but
+uses the same pattern (root `/`, `npm ci && npm run build -w …`), so set its
+builder to Railpack too when it is created.
+
 ### Demo-merchant builds the SDK first (#4723)
 
 The Demo-merchant build command stays `npm ci && npm run build -w
 packages/demo-merchant-mcp` — **do not change it in Railway.** Since #4723 the
 package imports `@haven_ai/sdk` at runtime (the merchant-side passport
-verifier), and its own `build`, `test` and `typecheck` scripts now build
-`packages/core` and `packages/sdk` first, the same way the backend's scripts
-do. So the Railway command is unchanged and the SDK is always built before the
-merchant that consumes it.
+verifier), and since #4890 `@haven_ai/merchant-payments` (the shared receipt
+and payment core). Its own `build`, `test` and `typecheck` scripts build
+`packages/core`, `packages/sdk` and `packages/merchant-payments` first, the
+same way the backend's scripts do. So the Railway command is unchanged and both
+are always built before the merchant that consumes them.
 
 `ci.yml`'s `demo_merchant_checks` job runs `npm run smoke:start -w
 packages/demo-merchant-mcp` after the build: it spawns the built
 `dist/index.js` with a throwaway config and waits for the startup banner, which
 is printed inside `server.listen`'s callback. A green `tsup` alone would not
-prove the emitted entrypoint can resolve its workspace dependency.
+prove the emitted entrypoint can resolve its workspace dependency. Since #4851
+the throwaway config includes a fake CDP key pair: the smoke then asks the
+local `/healthz` and fails if CDP is not reported or if the key secret (or,
+since #5079, the settlement key) appears in the startup output or `/healthz`.
+Since #5079 a second case, run after the
+first, spawns the same entrypoint with a `MERCHANT_ADDRESS` that is not an
+address and fails unless it refuses startup: a non-zero exit, no banner, stderr
+beginning `MERCHANT_ADDRESS is not a valid EVM address`, and no secret printed.
 
 **Operator step — the passport env flip.** The demo merchant advertises
 `haven-passport` only when BOTH of these are set on the service:
 
 | Variable | Value |
 |---|---|
-| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against (e.g. the dev backend's public URL) |
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against and, with the Sales settings, to report Sales to (#4950) (e.g. the dev backend's public URL) |
 | `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
 
 With either missing it advertises only `haven-demo`, exactly as before. Set
@@ -82,11 +118,129 @@ both **together, on a service that is not mid-quote**: the merchant's echo rule
 refuses a payment whose extensions do not contain every advertised key, so a
 402 quoted before the flip and paid after it is refused — and on the EIP-3009
 bridge that happens after funding, so the funds strand until a sweep. The
-window is one quote lifetime (`maxTimeoutSeconds`, 300 s).
+window is about 10 minutes: the 300 s quote (`maxTimeoutSeconds`) plus the
+300 s forward margin Haven's SDK adds when it signs
+(`X402_SETTLEMENT_FORWARD_MARGIN_SECONDS`).
 
 Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks this pin: the merchant will
 answer `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER`
 is updated. See [secret-rotation.md](secret-rotation.md).
+
+**Operator step — the CDP key (#4851, epic #4849).** The demo merchant offers
+its CDP-settled joke product only when BOTH of these are set on the service:
+
+| Variable | Value |
+|---|---|
+| `CDP_API_KEY_ID` | the key ID of a Coinbase Developer Platform secret API key used only by the demo merchant |
+| `CDP_API_KEY_SECRET` | that key's secret |
+
+**Creating the key.** The Coinbase Developer Platform portal has no projects:
+a secret API key belongs to the whole account, which has a **Live** and a
+**Sandbox** mode. So the key cannot be isolated in a project of its own;
+isolate it by giving the demo merchant its own key, with nothing ticked that
+it does not need:
+
+- **Mode:** Live. A Live key settled the joke on Base Sepolia in #4852's dev
+  run; a Sandbox key has not been tried.
+- **IP allowlist:** tick *Allow requests from any IP address*. An allowlist
+  works only with fixed outbound IPs, which a Railway service has only when
+  static outbound IPs are enabled on it.
+- **Permissions** (*Advanced settings*): leave *Trade*, *Transfer* and
+  *Receive* (Coinbase App & Advanced Trade) and *Export* and *Manage*
+  (Non-custodial) unticked: #4852's dev run settled with a key set up this
+  way, and with them a leaked key could move the Coinbase account's funds
+  (*Transfer*) or export or re-permission its CDP wallets (*Export*, *Manage*).
+  *View* is ticked by default and unticking it has not been tried — the dev
+  key that settled may have had it ticked — so if verify or settle is refused
+  without it, tick *View*. A key with *View* can read the account's CDP
+  wallets, so keep wallets out of this account or accept that.
+- **Signature algorithm:** the default, Ed25519.
+- One key per environment, so dev and production can be revoked apart.
+
+Paste the values straight into the service variables, never into chat, an
+issue, a file or a log, then redeploy: the pair is read once, at startup. With
+neither set the merchant is exactly as before to buyers and on `/healthz` (the
+startup banner gains a `CDP: not configured` line). With one set, or with both
+set but the Coinbase client failing to build, it logs a warning (naming the
+variables, or the error class only) and does not offer the joke; every other
+product is unaffected.
+
+**Setting** the pair needs no coordination with in-flight quotes: no joke quote
+can exist before it, and every other product's 402 is rebuilt from the product
+on each request, so it is unchanged. **Removing** it does: a joke quoted before
+the removal and paid after it gets "unknown tool" — nothing settles, so the
+merchant is not paid — but on Haven's EIP-3009 bridge, the joke's only path,
+the refusal comes after the funding leg, so 0.01 USDC strands on the agent's
+delegate until it is swept. Remove the pair on a service that is not mid-quote;
+the window is the same 10 minutes as for the passport flip above. Either redeploy
+also drops every in-memory MCP session, which buyers recover from by
+re-initialising, as after any redeploy.
+
+Check the result with `GET /healthz`, which carries a `cdp` block
+(`configured: true`, no credential) only when CDP is on — it also catches the
+client-build failure above. See [secret-rotation.md](secret-rotation.md) for
+the key's inventory row.
+
+### Paywall-proxy (the #4892 demo)
+
+**Not deployed yet.** It waits on Haven's Opper API key, which does not exist
+yet, and on the receiving address. This is the configuration it is created
+with. When it is created, move it into the table above and record the date.
+
+The merchant kit's paywall proxy in front of Opper's inference API, run by
+Haven as an internal technical demo on Base Sepolia (#4892, owner decision
+2026-11-16: the owner accepted the added running cost). It exists in **dev
+only**: it is created in the dev environment and never in production.
+
+**Why it keeps building from source, and does not run the published image
+(#5007).** The kit's image is published to
+`ghcr.io/d-hinders/haven-paywall-proxy`, and it sets
+`PRODUCTS_FILE=/config/products.json` — the merchant's own file, mounted
+read-only. This demo's products file is
+`packages/paywall-proxy/demo/opper-products.json`, a file in the repository, and
+the image deliberately does not carry it: the published image is the kit, not
+Haven's demo configuration. Railway cannot mount a single repository file into a
+container (a volume mounts a directory, and copying the file onto it by hand
+would take it out of version control), so running the image here would mean
+either baking Haven's demo config into every merchant's image or maintaining an
+unversioned copy on a volume. The source build reads the file from the
+repository root, which is what the service already does. When the demo is
+created, if Railway gains a way to mount a repository file, moving it to the
+image is a one-row change: the same `/data` volume, and `PRODUCTS_FILE` pointing
+at the mounted file.
+
+The merchant's own Railway recipe, which deploys the published image with the
+merchant's products file copied in by a two-line Dockerfile, is in the kit's
+README § *Host it on Railway*.
+
+| Setting | Value |
+|---|---|
+| Build | builder **Railpack**, set when the service is created ([why](#demo-merchant-builds-with-railpack-not-nixpacks-5071)); root `/`, `npm ci && npm run build -w packages/paywall-proxy` (the package's build script builds the SDK and `@haven_ai/merchant-payments` first); watch `/packages/paywall-proxy/**`, `/packages/merchant-payments/**`, `/packages/sdk/**`, so an unrelated push to `dev` does not restart it |
+| Start command | `node packages/paywall-proxy/dist/index.js` |
+| Volume | one volume, mounted at `/data`, for `PAYMENTS_DB`. Not backed up: it holds test-money payments only, and losing it loses only the one-call rule for those (design §12 asks a real merchant to back it up) |
+| Replicas | one. The proxy locks `PAYMENTS_DB` and a second process refuses to start, so a deploy must stop the old container before starting the new one. Check this on the first redeploy. Railway's rule for a volume-backed service is in the kit's README § *Host it on Railway* |
+| Sleep | on |
+| Healthcheck | `/healthz` |
+
+Variables, named, with values only for those that are not secret:
+
+| Variable | Value |
+|---|---|
+| `NETWORK` | `eip155:84532` |
+| `PAY_TO` | the receiving Sales account's address: the Sales account the demo reports sales to, so its sales land on that account's Sales page. A Haven dev account until Opper has its own, then Opper's |
+| `OPERATOR_NAME` | `Haven (internal technical demo)` |
+| `ENDPOINT_NAME` | `Haven inference demo (Opper)` |
+| `ENDPOINT_DESCRIPTION` | `Internal technical demo run by Haven on Base Sepolia. Test money only. Not a Haven product and not listed in any directory.` |
+| `PRODUCTS_FILE` | `packages/paywall-proxy/demo/opper-products.json`, relative to the repository root, which is the process's working directory because the service root is `/`. This is the one service that depends on its working directory |
+| `PAYMENTS_DB` | `/data/payments.sqlite` |
+| `UPSTREAM_BASE_URL` | `https://api.opper.ai` (Opper's key goes in `Authorization: Bearer`, the proxy's default) |
+| `UPSTREAM_API_KEY` | secret: Haven's Opper key, pasted in by the owner ([secret-rotation.md](secret-rotation.md)) |
+| `CDP_API_KEY_ID`, `CDP_API_KEY_SECRET` | references to Demo-merchant's dev values, `${{Demo-merchant.CDP_API_KEY_ID}}` and `${{Demo-merchant.CDP_API_KEY_SECRET}}`, so the secret is set in one place |
+| `RPC_URL` | a reference to the dev backend's `${{@haven/backend.RPC_URL_BASE_SEPOLIA}}` (the Alchemy URL, which embeds a key) |
+| `PUBLIC_BASE_URL` | the service's `https://` Railway domain. Haven's signer answers a retry challenge only for an `https` origin |
+| `CLIENT_IP_HEADER` | `X-Real-IP`, the client address Railway's edge sets. Check it against a request on the first deploy |
+| `VAT_RULE` | `SE_25_WITH_EU_REVERSE_CHARGE` |
+| `SELLER_NAME`, `SELLER_ADDRESS`, `SELLER_ORG_NR`, `SELLER_VAT_NR`, `SELLER_IBAN`, `SELLER_BIC` | Haven's demo seller, the demo merchant's `DEMO_SELLER`: `Haven Demo AB`, `Birger Jarlsgatan 57, 113 56 Stockholm`, `559412-3456`, `SE559412345601`, `SE35 5000 0000 0549 1000 0003`, `ESSESESS`. Never the pilot partner's details while Haven runs the endpoint |
 
 ### Sleep
 
@@ -94,7 +248,11 @@ A sleeping service (Railway "serverless") stops after about 10 minutes without
 outbound traffic and cold-starts on the next request. It is on for both
 Demo-merchants and the dev hosted MCP. Dev Demo-merchant joined them on
 2026-10-05. It sees QA traffic and the dev backend's hourly catalog probe,
-which wakes it once an hour. Since #4281 that probe runs under the SSRF
+which wakes it once an hour. With Stripe recording on (#4856; dev only, since
+Stripe is dev and sandbox only), the merchant
+also reads a USDC→SEK rate from CoinGecko at startup and every 30 minutes;
+that interval is above the idle threshold, so it does not keep the service
+awake. Since #4281 that probe runs under the SSRF
 guard with a 15 s total deadline (`CATALOG_REFRESH_PROBE_TIMEOUT_MS`). That
 covers the cold start (3.8–5.0 s, measured 2026-10-22), so a cold start
 alone does not fail the probe, and an entry is only marked degraded after

@@ -80,10 +80,16 @@ describe('refusalRowSubline — the "no money moved" rule', () => {
 })
 
 describe('refusalRowView — the row inputs', () => {
-  it('titles the merchant host first', () => {
+  it('titles the merchant host when the server named nobody', () => {
     expect(refusalRowView(refusal(), resolveAddress, accountNamesByAddress).title).toBe(
       'research.example',
     )
+  })
+
+  it('#4883 — the server’s name for the attempted payee wins over the host', () => {
+    expect(
+      refusalRowView(refusal({ counterparty_name: 'NordShield VPN' }), resolveAddress, accountNamesByAddress).title,
+    ).toBe('NordShield VPN')
   })
 
   it('an addressed refusal falls through to the recipient resolution, not "Agent payment"', () => {

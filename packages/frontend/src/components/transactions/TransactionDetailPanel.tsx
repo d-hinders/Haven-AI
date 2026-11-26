@@ -2,6 +2,7 @@
 
 import { type ReactNode } from 'react'
 import { ChevronDown, ExternalLink } from 'lucide-react'
+import { HAVEN_FALLBACK_NAME } from '@haven_ai/core'
 import { SidePanel } from '@/components/ui/SidePanel'
 import { Amount, DirectionMark, NoticeRow } from '@/components/haven'
 import { Button } from '@haven_ai/ui/Button'
@@ -10,6 +11,7 @@ import { Icon } from '@/components/ui/Icon'
 import { Monogram } from '@/components/ui/Monogram'
 import { StatusBadge } from '@/components/ui/StatusBadge'
 import { AccountingBadge } from '@/components/accounting/AccountingBadge'
+import { useOptionalMerchantServicesContext } from '@/context/MerchantServicesContext'
 import { getExplorerUrlOrNull } from '@/lib/chains'
 import NetworkPill from '@/components/NetworkPill'
 import { formatDateTime, truncate } from '@/lib/format'
@@ -40,7 +42,7 @@ interface Props {
  * the opened block reads as part of the panel. `note` is a one-line
  * explanation under the value.
  */
-function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
+export function DetailRow({ label, value, note }: { label: string; value: ReactNode; note?: string }) {
   return (
     <div className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-3 border-b border-[var(--v2-table-row-border)] py-2.5 last:border-b-0">
       {/* `max-content`: a label never wraps ("Settlement transaction"). */}
@@ -63,7 +65,7 @@ function DetailRow({ label, value, note }: { label: string; value: ReactNode; no
  * two-line wraps the shortened form stops. A row on a chain the registry does
  * not know keeps the copy and drops the link.
  */
-function OnChainValue({
+export function OnChainValue({
   chainId,
   type,
   value,
@@ -275,6 +277,8 @@ export default function TransactionDetailPanel({
   resolveAddress,
   accountNamesByAddress,
 }: Props) {
+  // #5000: the "View in Sales" link exists only while the Sales page does.
+  const salesEnabled = useOptionalMerchantServicesContext()?.enabled === true
   if (!tx) return null
 
   const kind = rowKind(tx)
@@ -288,7 +292,7 @@ export default function TransactionDetailPanel({
   // address; a folded move reads as the ledger row does.
   const title =
     kind === 'move'
-      ? 'Moved between your accounts'
+      ? HAVEN_FALLBACK_NAME.movedBetweenAccounts
       : counterpartyLabel(tx, resolveAddress, accountNamesByAddress, { noAddress: true })
   // No seconds, and the date renders whole (`whitespace-nowrap` below), so a
   // wrapping line never strands "AM" on its own.
@@ -300,7 +304,7 @@ export default function TransactionDetailPanel({
   // move between your own accounts and a send nothing names ("New recipient",
   // or an x402 row with no resource URL) have no counterparty to draw, so
   // they take the direction mark the ledger row shows.
-  const unnamed = title === 'New recipient' || title === paymentSourceTitle(tx.source)
+  const unnamed = title === HAVEN_FALLBACK_NAME.newRecipient || title === paymentSourceTitle(tx.source)
   const leading =
     kind === 'move' || kind === 'receive' || kind === 'sweep' || unnamed ? (
       <DirectionMark direction={kind === 'move' ? 'move' : tx.direction} />
@@ -341,6 +345,14 @@ export default function TransactionDetailPanel({
         value={savedName(tx, tx.from, resolveAddress, accountNamesByAddress) ?? 'An outside wallet'}
       />,
     )
+    // #5000: a sale's record, only the fields that were recorded.
+    if (tx.sale?.productName) details.push(<DetailRow key="product" label="Product" value={tx.sale.productName} />)
+    if (tx.sale?.receiptNumber) {
+      details.push(<DetailRow key="receipt-number" label="Receipt number" value={tx.sale.receiptNumber} />)
+    }
+    if (tx.sale?.merchantReference) {
+      details.push(<DetailRow key="merchant-reference" label="Merchant reference" value={tx.sale.merchantReference} />)
+    }
   } else if (kind === 'move') {
     // "You" only for a recorded owner send; otherwise the wallet set (#2097).
     details.push(
@@ -468,8 +480,10 @@ export default function TransactionDetailPanel({
       onClose={onClose}
       leading={leading}
       title={title}
-      // "Deposit" titles a deposit already; the kind would only repeat it.
-      subtitle={kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
+      // "Deposit" titles a deposit already; the kind would only repeat it. A
+      // sale (#5000) has none: "Deposit" under "Sale · …" would contradict the
+      // title, and "Sale" would only repeat it.
+      subtitle={tx.sale || kindLabel(tx, kind) === title ? undefined : kindLabel(tx, kind)}
       footer={
         explorerUrl ? (
           // `-ml-3.5` cancels the button's own padding: the label starts on
@@ -521,6 +535,13 @@ export default function TransactionDetailPanel({
       </div>
 
       <dl data-testid="transaction-detail-details">{details}</dl>
+      {tx.sale && salesEnabled ? (
+        // #5000: the Sales page has no URL for one payment, so the link opens
+        // the page itself. `-ml-3.5` puts the label on the content edge.
+        <Button variant="tertiary" size="sm" href="/sales" className="-ml-3.5 mt-2">
+          View in Sales
+        </Button>
+      ) : null}
 
       <details data-testid="transaction-technical-details" className="group mt-5 border-t border-[var(--v2-border)] pt-3">
         <summary className="flex w-full cursor-pointer select-none list-none items-center justify-between rounded py-1 text-sm font-medium text-[var(--v2-ink)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/80 [&::-webkit-details-marker]:hidden">

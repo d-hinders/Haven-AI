@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { useToast } from '@/components/ui/Toast'
 import { Button } from '@/components/ui/Button'
 import { CopyButton } from '@/components/ui/CopyButton'
+import { ShowOnceCredentialBlock } from '@/components/ui/ShowOnceCredentialBlock'
 import { Modal } from '@/components/ui/Modal'
 import { timeAgo } from '@/lib/format'
 import { api } from '@/lib/api'
@@ -41,17 +42,15 @@ interface Props {
  * footer, per `docs/product/design-system.md` § Dialog actions.
  */
 export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRotated }: Props) {
-  const [showCredential, setShowCredential] = useState(false)
   const [rotating, setRotating] = useState(false)
   const { toast } = useToast()
 
-  // Reset toggles + copy state every time the modal opens so we don't
-  // leak "Show" state from a previous open into a fresh view.
-  // Also reset `rotating` so a mid-flight rotation that was closed doesn't
-  // leave the button stuck in spinner state on reopen.
+  // Reset `rotating` every time the modal opens, so a mid-flight rotation that
+  // was closed doesn't leave the button stuck in spinner state on reopen. The
+  // credential's Show state lives in ShowOnceCredentialBlock, which `Modal`
+  // unmounts on close, so every open starts masked (pinned by the reopen test).
   useEffect(() => {
     if (open) {
-      setShowCredential(false)
       setRotating(false)
     }
   }, [open])
@@ -97,49 +96,38 @@ export default function PaymentCredentialsModal({ open, onClose, agent, onKeyRot
           Your agent uses this credential to talk to Haven — treat it like an API key, keep it
           private. Haven only shows the full credential when you create the agent.
         </p>
-        <div className="mt-3 rounded-[10px] border border-[var(--v2-border)] bg-[var(--v2-surface)] p-3">
-          <code className="block break-all font-mono text-xs text-[var(--v2-ink-2)]">
-            {fullCredential && showCredential ? fullCredential : maskedCredential}
-          </code>
-          {fullCredential ? (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button size="sm" variant="ghost" onClick={() => setShowCredential((value) => !value)}>
-                {showCredential ? 'Hide' : 'Show'}
-              </Button>
-              {/* #4573: the shared copy primitive. A one-time credential
-                  must never fail silently, so the failure is a toast; the
-                  success is the button's own inline "Copied", not a toast
-                  as well. */}
-              <CopyButton
-                value={fullCredential}
-                label="credential"
-                text="Copy"
-                onCopyFailed={() => toast.error('Could not copy credential')}
-              />
-            </div>
-          ) : (
-            <div className="mt-3 space-y-2">
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={() => void rotateKey()}
-                disabled={rotating}
-                className="text-[var(--v2-warning)] hover:text-warning/80"
-              >
-                {rotating ? (
-                  <span className="flex items-center gap-1.5">
-                    <Spinner size="sm" />
-                    Rotating…
-                  </span>
-                ) : (
-                  'Rotate API key'
-                )}
-              </Button>
-              <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
-                Rotating generates a new key immediately. The old key stops working right away.
-              </p>
-            </div>
-          )}
+        <div className="mt-3">
+          {/* #4905: the shared show-once block. Its failed copy is a toast
+              (#4573): a one-time credential must never fail silently. */}
+          <ShowOnceCredentialBlock
+            value={fullCredential}
+            maskedValue={maskedCredential}
+            label="credential"
+            revealable
+            fallback={
+              <div className="space-y-2">
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => void rotateKey()}
+                  disabled={rotating}
+                  className="text-[var(--v2-warning)] hover:text-warning/80"
+                >
+                  {rotating ? (
+                    <span className="flex items-center gap-1.5">
+                      <Spinner size="sm" />
+                      Rotating…
+                    </span>
+                  ) : (
+                    'Rotate API key'
+                  )}
+                </Button>
+                <p className="text-xs leading-relaxed text-[var(--v2-ink-3)]">
+                  Rotating generates a new key immediately. The old key stops working right away.
+                </p>
+              </div>
+            }
+          />
         </div>
       </section>
 

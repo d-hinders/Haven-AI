@@ -74,6 +74,16 @@ const BACKEND_ROUTES = {
       resource_url: 'https://merchant.dev/api',
     }),
   },
+  // #5086: the MCP endpoint Haven stored with each payment — an explicit
+  // merchant_url is delivered to only when it is this one.
+  'GET /x402/pay_x402/merchant-call-context': {
+    status: 200,
+    body: { payment_id: 'pay_x402', merchant_url: 'https://merchant.dev/api', tool_name: 'create_text', arguments: {} },
+  },
+  'GET /x402/pay_7710/merchant-call-context': {
+    status: 200,
+    body: { payment_id: 'pay_7710', merchant_url: 'https://merchant.dev/api', tool_name: 'create_text', arguments: {} },
+  },
 }
 
 function hostedHandlers(overrides?: { merchantEgress?: MerchantEgressPolicy }): Record<HostedToolName, (input: unknown) => Promise<ToolPayload>> {

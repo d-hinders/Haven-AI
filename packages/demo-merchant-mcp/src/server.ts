@@ -10,10 +10,15 @@ import {
   CHAIN_ID,
   HOSTED_DEMO_MERCHANT_URLS,
   buildProductMetadata,
+  checkoutDetailsForProduct,
   formatUsdc,
   merchantEnvironmentForChain,
   networkDisplayName,
+  offeredProducts,
+  productBillingPeriod,
   productDescription,
+  productReceivingAddress,
+  productSettlementKind,
   type MerchantLocale,
   type ProductId,
   type SettlementMethod,
@@ -29,6 +34,8 @@ import {
   type PassportStanding,
 } from '@haven_ai/sdk'
 import type { Address } from 'viem'
+import type { ReceiptSellerDetails } from '@haven_ai/merchant-payments'
+import type { CheckoutDetailsField } from '@haven_ai/merchant-payments'
 
 const paymentStorage = new AsyncLocalStorage<SettledPayment | undefined>()
 
@@ -49,6 +56,34 @@ export interface MerchantConfig {
    * advertises only `haven-demo` and reports `passport: null`.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4851: Coinbase's facilitator is configured, so the `cdp` product (the
+   * joke) is offered: listed, and its `buy_joke` tool registered. Absent, the
+   * server is exactly what it was before the product existed.
+   */
+  cdpConfigured?: boolean
+  /**
+   * #4853: the Stripe deposit address, when Stripe recording is on. It is the
+   * receiving address of the product Stripe records (the joke), so the in-band
+   * quote names the same address the HTTP 402 does. Absent, that product keeps
+   * `merchantAddress`.
+   */
+  stripeDepositAddress?: Address
+  /**
+   * #4950: the Haven Sales account, when the Sales settings are set. Only then
+   * is the Sales product (`field_notes`) offered: listed, its
+   * `buy_field_notes` tool registered, and its in-band quote naming this
+   * address. Absent, the server is exactly what it was before the product.
+   */
+  salesAddress?: Address
+  /** #4856: the seller every receipt carries; absent, the demo seller. */
+  receiptSeller?: ReceiptSellerDetails
+  /**
+   * #4873: the dev-only hook that makes one of the checkout-details product's
+   * optional fields required. The in-band quote must advertise the same
+   * request the HTTP 402 does, so it travels with the session's config.
+   */
+  checkoutDetailsRequiredField?: CheckoutDetailsField | null
 }
 
 // #1550: the confirmation text now varies by (locale, result_detail), so the
@@ -67,6 +102,18 @@ type ResultDetail = (typeof RESULT_DETAILS)[number]
 interface MerchantStrings {
   monthSubscription: string
   monthStorage: string
+  /** #4851: what one `buy_joke` buys. */
+  oneJoke: string
+  /** #4851: appended to the list footer only when the joke is offered. */
+  jokeFooter: string
+  /** #4851: label for the delivered joke in the confirmation. */
+  jokeLabel: string
+  /** #4950: what one `buy_field_notes` buys. */
+  oneFieldNote: string
+  /** #4950: appended to the list footer only when the Sales product is offered. */
+  fieldNotesFooter: string
+  /** #4950: label for the delivered note in the confirmation. */
+  fieldNoteLabel: string
   availableProductsHeading: string
   priceLabel: string
   perMonth: string
@@ -109,6 +156,14 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
   en: {
     monthSubscription: '1 month subscription',
     monthStorage: '1 month of storage',
+    oneJoke: 'one joke',
+    jokeFooter:
+      " Use buy_joke for a joke (EIP-3009 only; verified and settled by Coinbase's hosted facilitator, so it " +
+      'needs a budget that is not pinned to one recipient).',
+    jokeLabel: 'Your joke',
+    oneFieldNote: 'one field note',
+    fieldNotesFooter: ' Use buy_field_notes for one field note on running agent payments (paid into a Haven Sales account).',
+    fieldNoteLabel: 'Your field note',
     availableProductsHeading: 'Available products:',
     priceLabel: 'Price',
     perMonth: '/month',
@@ -141,6 +196,15 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
   sv: {
     monthSubscription: '1 månads abonnemang',
     monthStorage: '1 månads lagring',
+    oneJoke: 'ett skämt',
+    jokeFooter:
+      ' Använd buy_joke för ett skämt (endast EIP-3009; verifieras och avräknas av Coinbases facilitator, så ' +
+      'det kräver en budget som inte är låst till en mottagare).',
+    jokeLabel: 'Ditt skämt',
+    oneFieldNote: 'en fältanteckning',
+    fieldNotesFooter:
+      ' Använd buy_field_notes för en fältanteckning om agentbetalningar (betalas till ett Haven-försäljningskonto).',
+    fieldNoteLabel: 'Din fältanteckning',
     availableProductsHeading: 'Tillgängliga produkter:',
     priceLabel: 'Pris',
     perMonth: '/månad',
@@ -177,7 +241,7 @@ export const STRINGS: Record<MerchantLocale, MerchantStrings> = {
 const LOCALE_PARAM = z
   .enum(MERCHANT_LOCALES)
   .optional()
-  .describe("Display language for text output; 'en' (default) or 'sv'. The invoice JSON stays Swedish (bookkeeping document) either way.")
+  .describe("Display language for text output and the invoice JSON's values; 'en' (default) or 'sv'. The invoice JSON's keys and codes are the same either way.")
 const RESULT_DETAIL_PARAM = z
   .enum(RESULT_DETAILS)
   .optional()
@@ -373,7 +437,12 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
       const t = STRINGS[locale ?? DEFAULT_MERCHANT_LOCALE]
       // #1274: one builder shared per product so metadata and its display text
       // can never drift from each other or from the erc7710 gate resolved upstream.
-      const metadata = Object.values(PRODUCTS).map((p) =>
+      // #4851: only what this merchant offers — the joke only with CDP configured.
+      const offered = offeredProducts({
+        cdpConfigured: Boolean(config.cdpConfigured),
+        salesConfigured: Boolean(config.salesAddress),
+      })
+      const metadata = offered.map((p) =>
         buildProductMetadata(p, {
           enabledSettlementMethods: settlementMethods,
           mcpUrl: `${config.baseUrl}/mcp`,
@@ -381,12 +450,12 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         }),
       )
 
-      const text = Object.values(PRODUCTS)
+      const text = offered
         .map((p, i) => {
           const m = metadata[i]
           return (
             `[${m.product_id}] ${m.display_name}\n` +
-            `  ${t.priceLabel}: ${m.display.price_formatted}${t.perMonth}\n` +
+            `  ${t.priceLabel}: ${m.display.price_formatted}${productBillingPeriod(p) === 'monthly' ? t.perMonth : ''}\n` +
             `  x402: ${m.network} USDC, settlement_methods=${m.supported_settlement_methods.join(',')}, default=${m.default_settlement_method}\n` +
             `  Merchant MCP URL: ${m.mcp_url}\n` +
             `  Hosted routing: dev=${HOSTED_DEMO_MERCHANT_URLS.dev}/mcp, prod=${HOSTED_DEMO_MERCHANT_URLS.prod}/mcp\n` +
@@ -400,7 +469,10 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
         content: [
           {
             type: 'text',
-            text: `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}`,
+            text:
+              `${t.availableProductsHeading}\n\n${text}\n\n${t.listFooter(defaultSettlementMethod, config.chainId)}` +
+              (config.cdpConfigured ? t.jokeFooter : '') +
+              (config.salesAddress ? t.fieldNotesFooter : ''),
           },
         ],
         structuredContent: {
@@ -464,7 +536,103 @@ export function buildMerchantMcpServer(config: MerchantConfig): McpServer {
     },
   )
 
+  // ── buy_joke (#4851) ───────────────────────────────────────────────────────
+  // Registered only when Coinbase's facilitator is configured, so a merchant
+  // without it lists exactly the tools it always did.
+  if (config.cdpConfigured) {
+    server.tool(
+      'buy_joke',
+      `Buy one joke for $${formatUsdc(PRODUCTS.joke.price_usdc)} USDC on ${networkDisplayName(config.chainId, 'en')}. ` +
+        "Paid with EIP-3009 only and verified and settled by Coinbase's hosted x402 facilitator (CDP), so it needs a " +
+        'budget that is not pinned to one recipient. Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ' +
+        'On success, report the purchase from the structured `summary` object; the joke is in the text. ' +
+        "Text output is English by default (locale: 'sv' for Swedish); pass result_detail: 'summary' to omit the rendered invoice + bookkeeping JSON from the text.",
+      {
+        locale: LOCALE_PARAM,
+        result_detail: RESULT_DETAIL_PARAM,
+      },
+      async ({ locale, result_detail }) => {
+        const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
+        return completePurchase(config, 'joke', {
+          description: `${PRODUCTS.joke.name} — ${STRINGS[resolvedLocale].oneJoke}`,
+          locale: resolvedLocale,
+          detail: result_detail ?? 'full',
+        })
+      },
+    )
+  }
+
+  // ── buy_field_notes (#4950) ────────────────────────────────────────────────
+  // Registered only when the Sales settings are set, so a merchant without
+  // them lists exactly the tools it always did.
+  if (config.salesAddress) {
+    server.tool(
+      'buy_field_notes',
+      `Buy one field note on running agent payments for $${formatUsdc(PRODUCTS.field_notes.price_usdc)} USDC on ` +
+        `${networkDisplayName(config.chainId, 'en')}, paid into the merchant's Haven Sales account. ` +
+        'Requires a valid PAYMENT-SIGNATURE or X-PAYMENT header. ' +
+        'On success, report the purchase from the structured `summary` object; the note is in the text. ' +
+        "Text output is English by default (locale: 'sv' for Swedish); pass result_detail: 'summary' to omit the rendered invoice + bookkeeping JSON from the text.",
+      {
+        locale: LOCALE_PARAM,
+        result_detail: RESULT_DETAIL_PARAM,
+      },
+      async ({ locale, result_detail }) => {
+        const resolvedLocale = locale ?? DEFAULT_MERCHANT_LOCALE
+        return completePurchase(config, 'field_notes', {
+          description: `${PRODUCTS.field_notes.name} — ${STRINGS[resolvedLocale].oneFieldNote}`,
+          locale: resolvedLocale,
+          detail: result_detail ?? 'full',
+        })
+      },
+    )
+  }
+
   return server
+}
+
+/**
+ * #4950: the Sales product's goods. Chosen from the payment's nonce, like the
+ * joke, so a retried call for one payment delivers the same note.
+ */
+const FIELD_NOTES: Record<MerchantLocale, readonly string[]> = {
+  en: [
+    'Give each agent its own budget. One shared budget makes every agent as risky as the most careless one.',
+    'Pin a budget to one recipient when the agent only ever pays one merchant: anything else then reverts on-chain.',
+    'Keep a backup signer on any account you fund. A single passkey has no recovery.',
+  ],
+  sv: [
+    'Ge varje agent en egen budget. En delad budget gör varje agent lika riskabel som den mest vårdslösa.',
+    'Lås en budget till en mottagare när agenten bara betalar en handlare: allt annat återförs då på kedjan.',
+    'Ha en reservsignerare på varje konto du sätter in pengar på. En enda passkey går inte att återställa.',
+  ],
+}
+
+export function fieldNoteFor(payment: SettledPayment, locale: MerchantLocale): string {
+  const notes = FIELD_NOTES[locale]
+  return notes[Number(BigInt(payment.nonce) % BigInt(notes.length))]
+}
+
+/**
+ * #4851: the goods. Chosen from the payment's own nonce, so a retried or
+ * duplicate call for one payment always delivers the same joke.
+ */
+const JOKES: Record<MerchantLocale, readonly string[]> = {
+  en: [
+    'Why did the agent keep its budget on-chain? Because it did not trust itself with a spreadsheet.',
+    'An AI agent walks into a bar. The bartender asks for payment. It replies with HTTP 402 and a signed authorization.',
+    'How many settlement keys does it take to change a light bulb? None. The facilitator pays the gas.',
+  ],
+  sv: [
+    'Varför höll agenten sin budget på kedjan? För att den inte litade på sig själv med ett kalkylark.',
+    'En AI-agent går in på en bar. Bartendern ber om betalning. Den svarar med HTTP 402 och en signerad auktorisation.',
+    'Hur många avräkningsnycklar behövs för att byta en glödlampa? Inga. Facilitatorn betalar gasen.',
+  ],
+}
+
+export function jokeFor(payment: SettledPayment, locale: MerchantLocale): string {
+  const jokes = JOKES[locale]
+  return jokes[Number(BigInt(payment.nonce) % BigInt(jokes.length))]
 }
 
 async function completePurchase(
@@ -480,6 +648,12 @@ async function completePurchase(
   const { description, settlementMethod, locale, detail } = options
   const t = STRINGS[locale]
   const product = PRODUCTS[productId]
+  // #4850: the address THIS product is paid to; the merchant-wide one is its default.
+  // #4853: the Stripe-recorded product is paid to the deposit address when on.
+  const receivingAddress = productReceivingAddress(product, config.merchantAddress, {
+    stripeDepositAddress: config.stripeDepositAddress,
+    salesAddress: config.salesAddress,
+  })
   const resource = `${config.baseUrl}/mcp`
   const payment = paymentStorage.getStore()
 
@@ -488,11 +662,18 @@ async function completePurchase(
     // only after receiving a settle-less receipt. Same suffix the discovery
     // document and list_products carry, so all three read as one fact.
     const requirements = config.buildPaymentRequired({
-      merchantAddress: config.merchantAddress,
+      merchantAddress: receivingAddress,
       amountUsdc: product.price_usdc,
       resource,
       description: isSkipSettleProduct(productId) ? `${description}${QA_FIXTURE_DESCRIPTION_SUFFIX}` : description,
       settlementMethod,
+      // #4851: a CDP product's in-band requirements name only what it accepts
+      // (EIP-3009), as its HTTP 402 does. The other products are unchanged here.
+      ...(productSettlementKind(product) === 'cdp' ? { settlementMethods: product.x402.settlementMethods } : {}),
+      // #4873: the same checkout-details request the HTTP 402 advertises.
+      checkoutDetails: checkoutDetailsForProduct(product, {
+        requiredField: config.checkoutDetailsRequiredField,
+      }),
     })
     return {
       isError: true,
@@ -502,7 +683,7 @@ async function completePurchase(
           text:
             `${t.paymentRequired(product.name)}\n\n` +
             `${t.priceLine(formatUsdc(product.price_usdc))}\n` +
-            `${t.paymentAddress}: ${config.merchantAddress}\n` +
+            `${t.paymentAddress}: ${receivingAddress}\n` +
             `${t.network}: eip155:${CHAIN_ID}\n\n` +
             `${t.paymentRequirementsHeading}\n${JSON.stringify(requirements, null, 2)}\n\n` +
             t.resendHint,
@@ -516,7 +697,17 @@ async function completePurchase(
   // every call is cheap and deterministic (invoiceForPayment memoizes per
   // payment), so the summary below can never disagree between a fresh
   // purchase and a retried/duplicate one.
-  const invoice = invoiceForPayment(payment, productId, config.chainId)
+  // #4856: the HTTP layer built this payment's invoice first, with the
+  // Stripe context, so this call replays it; the seller is passed so the two
+  // can never disagree on it.
+  const invoice = invoiceForPayment(payment, productId, {
+    receivingAddress,
+    chainId: config.chainId,
+    seller: config.receiptSeller,
+    // #4980: used only when this call builds the invoice (no HTTP layer ran
+    // first, as in a direct handler test); otherwise the cached one replays.
+    locale,
+  })
   // #4723: advisory, AFTER settlement, cached per payment. Never a condition
   // of the purchase — the goods are already owed by the time this runs.
   const passport = await passportSummaryFor(payment, {
@@ -563,7 +754,11 @@ async function completePurchase(
     `Nonce:    ${payment.nonce}\n` +
     // #4723: only when the payment carried a reference. "checked" is the
     // claim; "verified" is reserved for L2, which is not issuable.
-    (passportLine ? `${passportLine}\n` : '')
+    (passportLine ? `${passportLine}\n` : '') +
+    // #4851: the joke is the goods — delivered in the text, on every variant.
+    (productId === 'joke' ? `\n${t.jokeLabel}: ${jokeFor(payment, locale)}\n` : '') +
+    // #4950: the field note is the Sales product's goods, on every variant.
+    (productId === 'field_notes' ? `\n${t.fieldNoteLabel}: ${fieldNoteFor(payment, locale)}\n` : '')
 
   const text =
     detail === 'summary'

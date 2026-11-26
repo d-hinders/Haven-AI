@@ -46,7 +46,7 @@ covers:
   - packages/mcp-server/src/tools/plain-http-x402.ts
   - packages/mcp-server/src/tools/contracts.ts
   - packages/backend/src/modules/mpp/sweep.ts
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Edge Signer
@@ -346,7 +346,11 @@ unchanged to `haven_sign` — its OWN reason says so directly, rather than
 looping the agent back through `payment_id` again. The route covers two
 DISTINCT refusal shapes: (1) any refusal carrying `fallback: 'typed_data_b64'`,
 whatever its code — a currently-published `@haven_ai/signer` sets that field
-only on a transport failure, a malformed body, or a 404 on an older backend;
+only on a transport failure, a malformed body, or a 404 on an older backend.
+Since #4829 the transport-failure code `SIGN_CONTEXT_UNREACHABLE` also covers
+Haven's NON-ANSWER class — a body that is not a JSON object at any non-2xx
+status, any 5xx, and a 429 — so a gateway's HTML 502 and the money-path rate
+limit's 429 route here too, with `http_status` carried;
 (2) `SIGN_CONTEXT_REFUSED` with `backend_error_code: 'sign_context_unavailable'`
 and NO `fallback` field, which only a signer predating #3271 produces (it has
 no direct-fetch fallback of its own to try). On either path a current signer now runs the UserOp binding check before signing
@@ -443,6 +447,12 @@ signature rides the paid EIP-3009 merchant retry to the seller only as
 `X-Tax-Declaration`. It is an attestation, not an authority: nothing is
 redeemed, spent or unlocked by it, so it sits beside the guards rather than in
 their allowlist.
+
+Checkout details (#4872, [`13-checkout-details.md`](13-checkout-details.md))
+are the opposite case: the answer is **unsigned**, so the edge entry builds
+nothing for it and no new signing surface exists. The SDK attaches
+`X-Checkout-Details` to the paid request from the agent's own read of the
+owner's saved details; the delegate key is not involved.
 
 **An over-budget direct payment is DECLINED, not queued** (#2130). The old text
 here said the result carries `payload_hash: null` and told the agent to "wait

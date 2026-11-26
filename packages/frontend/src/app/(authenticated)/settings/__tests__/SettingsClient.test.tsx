@@ -102,6 +102,7 @@ const SIGNERS = [
 
 function serveAccounting(connections: unknown[]) {
   mockApi.get.mockImplementation((url: string) => {
+    if (url === '/merchant-services') return Promise.resolve(MERCHANT_SERVICES_OFF)
     if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
     if (url === '/accounting/connections') return Promise.resolve({ connections })
     if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)
@@ -115,9 +116,30 @@ function serveAccounting(connections: unknown[]) {
   })
 }
 
+/**
+ * #4904: the shell reads the merchant-services setting once, and the Settings
+ * page's Business tab depends on it. Every route table below answers it OFF
+ * with no account — the state every user starts in — so the Sales card renders
+ * its "Turn on Sales" state and the tab's visibility rule sees content.
+ */
+const MERCHANT_SERVICES_OFF = {
+  enabled: false,
+  enabled_at: null,
+  disabled_at: null,
+  merchant_account: null,
+}
+
+/** A route table that answers the shell's merchant-services read first. */
+function routeGet(handler: (url: string) => unknown) {
+  mockApi.get.mockImplementation((url: string) => {
+    if (url === '/merchant-services') return Promise.resolve(MERCHANT_SERVICES_OFF)
+    return handler(url)
+  })
+}
+
 /** The flag-ON company-details answers (#4359): `null` = nothing saved. */
 function serveCompanyDetails(body: unknown) {
-  mockApi.get.mockImplementation((url: string) => {
+  routeGet((url: string) => {
     if (url === '/user/company-details') return Promise.resolve(body)
     return Promise.reject(new Error(`unexpected GET ${url}`))
   })
@@ -129,17 +151,24 @@ vi.mock('@/hooks/usePreferences', () => ({
 
 import SettingsClient from '@/app/(authenticated)/settings/SettingsClient'
 import { ConnectOutcomeForwarder } from '@/components/accounting/ConnectOutcomeForwarder'
+import { MerchantServicesProvider } from '@/context/MerchantServicesContext'
 
 function renderSettings() {
   // #main-content is the shell's own landmark (`AuthenticatedShell`); the
   // "no Coming soon" assertions are scoped to it because the SIDEBAR's
   // Accounting pill legitimately carries `common.comingSoon` — and the
   // sidebar is not rendered here, the wrapper is what stands in for it.
+  //
+  // #4904: `MerchantServicesProvider` is mounted by `AuthenticatedShell` in
+  // the app; the Settings page reads the setting through it, so the test
+  // mounts it too (the real provider, with the API client mocked).
   return render(
     <div id="main-content">
       <LocaleProvider>
         <ThemeProvider>
-          <SettingsClient />
+          <MerchantServicesProvider>
+            <SettingsClient />
+          </MerchantServicesProvider>
         </ThemeProvider>
       </LocaleProvider>
     </div>,
@@ -236,7 +265,9 @@ describe('SettingsClient', () => {
       <div id="main-content">
         <LocaleProvider>
           <ThemeProvider>
-            <SettingsClient />
+            <MerchantServicesProvider>
+              <SettingsClient />
+            </MerchantServicesProvider>
           </ThemeProvider>
         </LocaleProvider>
       </div>,
@@ -253,7 +284,9 @@ describe('SettingsClient', () => {
       <div id="main-content">
         <LocaleProvider>
           <ThemeProvider>
-            <SettingsClient />
+            <MerchantServicesProvider>
+              <SettingsClient />
+            </MerchantServicesProvider>
           </ThemeProvider>
         </LocaleProvider>
       </div>,
@@ -288,6 +321,7 @@ describe('SettingsClient', () => {
     /** Flag-off accounting + flag-off company details — NOTHING can show. */
     function serveAllOff() {
       mockApi.get.mockImplementation((url: string) => {
+        if (url === '/merchant-services') return Promise.resolve(MERCHANT_SERVICES_OFF)
         if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
         if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
         if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
@@ -310,19 +344,22 @@ describe('SettingsClient', () => {
       expect(mockReplace).not.toHaveBeenCalled()
     })
 
-    it('both reads empty: ?tab=business falls back to the General body, and the URL keeps tab=business', async () => {
+    it('company details and accounting empty: the Business tab STAYS, because Sales lives there (#4904)', async () => {
       setTabParam('business')
       serveAllOff()
       renderSettings()
-      await waitFor(() => expect(screen.getByRole('heading', { name: 'Profile' })).toBeInTheDocument())
-      expect(screen.queryByRole('tab', { name: 'Business' })).not.toBeInTheDocument()
-      expect(screen.queryByRole('heading', { name: 'Accounting' })).not.toBeInTheDocument()
-      // The deep link still works once data arrives: tab=business STAYS.
+      // #4904: the Sales card always has something to show once its read
+      // settles, and Settings → Business is the only place Sales can be turned
+      // on — so the tab is no longer conditional on the two cards that came
+      // first. The deep link lands on Business, not General.
+      expect(await screen.findByRole('tab', { name: 'Business' })).toHaveAttribute('aria-selected', 'true')
+      expect(await screen.findByRole('heading', { name: 'Sales' })).toBeInTheDocument()
+      expect(screen.queryByRole('heading', { name: 'Profile' })).not.toBeInTheDocument()
       expect(mockReplace).not.toHaveBeenCalled()
     })
 
     it('the tab appears once company details have content, even with the feed off', async () => {
-      mockApi.get.mockImplementation((url: string) => {
+      routeGet((url: string) => {
         if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
         if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
         if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
@@ -338,7 +375,7 @@ describe('SettingsClient', () => {
     })
 
     it('an ERROR from the company-details read counts as something to show', async () => {
-      mockApi.get.mockImplementation((url: string) => {
+      routeGet((url: string) => {
         if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
         if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
         if (url === '/accounting/feed/status') return Promise.resolve(FEED_COMING_SOON)
@@ -419,7 +456,7 @@ describe('SettingsClient', () => {
 
     it('drops the network suffix when every approved account is on one chain', async () => {
       setTabParam('security')
-      mockApi.get.mockImplementation((url: string) => {
+      routeGet((url: string) => {
         if (url === '/accounting/providers') return Promise.resolve({ providers: [FORTNOX, ...COMING_SOON] })
         if (url === '/accounting/connections') return Promise.resolve({ connections: [] })
         if (url === '/accounting/feed/status') return Promise.resolve(FEED_ON)

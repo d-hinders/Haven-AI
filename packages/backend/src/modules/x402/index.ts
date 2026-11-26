@@ -23,6 +23,7 @@ export { settleX402 } from './settle.js'
 export { getX402SignContext } from './sign-context.js'
 export { getX402IntentByIdempotencyKey } from './intent-by-key.js'
 export { getX402MerchantCallContext } from './merchant-call-context.js'
+export { getX402StoredPaymentRequired } from './stored-challenge.js'
 
 /**
  * The passive settlement sweep (#2117). Public because the composition root

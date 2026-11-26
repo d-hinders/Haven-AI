@@ -17,8 +17,20 @@
 
 export { ETH_ADDRESS_RE, UUID_RE, isAddress } from './address.js'
 
-// The shared x402 resource-hostname parser (#4332) — step 1 of the analytics
-// naming order and the frontend ledger's title, from one definition.
+// Haven's own fallback words for an unnamed counterparty (#4932) — the ONE
+// list the frontend renders and the backend refuses a receipt seller name
+// against. Pure data; see the module header.
+export {
+  HAVEN_FALLBACK_NAME,
+  HAVEN_FALLBACK_NAMES,
+  HAVEN_FALLBACK_NAME_PREFIX,
+  HAVEN_FALLBACK_NAME_PREFIXES,
+  type HavenFallbackName,
+  type HavenFallbackNamePrefix,
+} from './fallback-names.js'
+
+// The shared x402 resource-hostname parser (#4332) — the host step of the one
+// naming order (#4882) and the frontend ledger's title, from one definition.
 export { parseX402Hostname } from './x402-hostname.js'
 
 // Pure atomic<->decimal token amount conversion (#994) — the shared

@@ -33,6 +33,8 @@ jobs:
       signer: ${{ steps.filter.outputs.signer }}
       cli: ${{ steps.filter.outputs.cli }}
       demo_merchant: ${{ steps.filter.outputs.demo_merchant }}
+      merchant_payments: ${{ steps.filter.outputs.merchant_payments }}
+      paywall_proxy: ${{ steps.filter.outputs.paywall_proxy }}
       core: ${{ steps.filter.outputs.core }}
       qa_agent: ${{ steps.filter.outputs.qa_agent }}
       packages: ${{ steps.filter.outputs.packages }}
@@ -282,6 +284,81 @@ jobs:
       - name: Smoke-test the built service
         run: npm run smoke:start -w packages/demo-merchant-mcp
 
+  merchant_payments_checks:
+    name: Merchant payments checks
+    needs: changes
+    if: needs.changes.outputs.merchant_payments == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # #4890: the shared merchant payment core. Its scripts build the SDK
+      # first (the declaration check imports @haven_ai/sdk/edge).
+      - name: Type-check merchant payments
+        run: npm run typecheck -w packages/merchant-payments
+
+      - name: Run merchant payments unit tests
+        run: npm run test -w packages/merchant-payments
+
+      - name: Build merchant payments
+        run: npm run build -w packages/merchant-payments
+
+  paywall_proxy_checks:
+    name: Paywall proxy checks
+    needs: changes
+    if: needs.changes.outputs.paywall_proxy == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # #4893: the merchant kit's paywall proxy. Its scripts build the SDK and
+      # merchant-payments first. Tests run against a mocked facilitator and a
+      # mocked upstream; no vendor access.
+      - name: Type-check paywall proxy
+        run: npm run typecheck -w packages/paywall-proxy
+
+      - name: Run paywall proxy unit tests
+        run: npm run test -w packages/paywall-proxy
+
+      - name: Build paywall proxy
+        run: npm run build -w packages/paywall-proxy
+
+      # #5007: the container image. `push: false` — this job only proves the
+      # Dockerfile builds from the repository root, so a broken one is red on the
+      # PR. Publishing is publish-paywall-proxy-image.yml's job, on dev and main.
+      # Same pattern as the MCP-server job's build below.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Docker build (paywall proxy) — catches a broken Dockerfile before publish
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: packages/paywall-proxy/Dockerfile
+          push: false
+          load: false
+          tags: haven-paywall-proxy:ci
+
   core_checks:
     name: Core checks
     needs: changes
@@ -464,10 +541,19 @@ jobs:
     needs: changes
     if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
-    # 12, not 8: on 2026-10-07 passing runs took 7-7.7 min (unit tests ~5.5,
-    # build ~0.5) and the 8-minute ceiling cancelled a dev push (run
-    # 37628537263) and PR runs that had already passed every test. The same
-    # move #2556 made for Frontend checks; a hang still fails fast.
+    # 12 (raised from 8 on 2026-10-07, when passing runs took 7-7.7 min and
+    # the 8-minute ceiling cancelled runs that had passed every test; the
+    # same move #2556 made for Frontend checks). By 2026-11-18 the ceiling sat
+    # inside the normal spread again: SLOW-runner jobs (`npm ci` ~35 s; fast
+    # runners take ~20 s) spent 411-587 s in the unit tests and were
+    # cancelled at 733-738 s with every test green. The cause was ~230 full
+    # migration runs per job, one per real-DB test FILE, serialised on one
+    # advisory lock (#4971). With the schema keyed on the pool slot, the PR's
+    # own run (job 136259105368, a slow runner: `npm ci` 40 s) applied the
+    # migration set 4 times in the test step (the reference plus one per pool
+    # slot, 3 slots), and took 393 s for the unit tests and 582 s (9.7 min)
+    # for the whole job. That leaves ~2.3 min of slow-class headroom, so the
+    # ceiling stays 12; a hang still fails fast.
     timeout-minutes: 12
 
     services:
@@ -643,14 +729,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Runtime import cycles across the eleven packages (#4763)
+      - name: Runtime import cycles across the packages dep-lint does not scan (#4763)
         # Blocking and unwaivable, like `no-circular` everywhere else. Rule 7 of
         # docs/architecture/10-module-boundaries.md was checked on backend and
-        # core only; this pass covers the other eleven packages under the
+        # core only; this pass covers every other package under the
         # owner's RUNTIME definition (type-only imports are not edges). It runs
         # here, not in backend_checks, because a PR touching only frontend, ui,
-        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp or
-        # qa-agent never triggers that job — which is how the SDK's runtime
+        # ops, connect, mcp, mcp-server, signer, cli, demo-merchant-mcp,
+        # merchant-payments, paywall-proxy or qa-agent never triggers that job — which is how the SDK's runtime
         # cycle survived. Self-tested for the same reason as lint:deps above:
         # a gate that cannot fire is worse than no gate.
         run: |
@@ -1248,7 +1334,7 @@ jobs:
 
   ci:
     name: Lint, Type-check & Build
-    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
+    needs: [changes, sdk_checks, cli_checks, demo_merchant_checks, merchant_payments_checks, paywall_proxy_checks, core_checks, qa_agent_checks, backend_checks, packages_checks, mcp_checks, connect_checks, install_smoke, mcp_server_checks, signer_checks, frontend_checks, ui_checks, ops_checks, ci_config_checks]
     if: always()
     runs-on: ubuntu-latest
 
@@ -1332,6 +1418,16 @@ jobs:
 
           if [ "${{ needs.changes.outputs.demo_merchant }}" = "true" ] && [ "${{ needs.demo_merchant_checks.result }}" != "success" ]; then
             echo "Demo merchant checks result: ${{ needs.demo_merchant_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.merchant_payments }}" = "true" ] && [ "${{ needs.merchant_payments_checks.result }}" != "success" ]; then
+            echo "Merchant payments checks result: ${{ needs.merchant_payments_checks.result }}"
+            exit 1
+          fi
+
+          if [ "${{ needs.changes.outputs.paywall_proxy }}" = "true" ] && [ "${{ needs.paywall_proxy_checks.result }}" != "success" ]; then
+            echo "Paywall proxy checks result: ${{ needs.paywall_proxy_checks.result }}"
             exit 1
           fi
 

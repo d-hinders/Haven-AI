@@ -18,7 +18,7 @@
  * went with it.
  */
 
-import { Check } from 'lucide-react'
+import { Check, OctagonAlert } from 'lucide-react'
 import { SafeAreaBand } from '@/components/ui/SafeAreaBand'
 import { Icon } from '@/components/ui/Icon'
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
@@ -32,6 +32,7 @@ import { useDeployableChains } from '@/hooks/useDeployableChains'
 import { HavenMark } from '@/components/brand/HavenMark'
 import { Button } from '@/components/ui/Button'
 import { Card } from '@/components/ui/Card'
+import { EmptyState } from '@/components/ui/EmptyState'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Select } from '@/components/ui/Select'
 import { RouteLoading } from '@/components/ui/RouteLoading'
@@ -44,7 +45,7 @@ type Phase = 'create' | 'success'
 export const SUCCESS_REDIRECT_MS = 2000
 
 export default function OnboardingClient() {
-  const { user, loading, updateUser, refreshUser, logout } = useAuth()
+  const { user, loading, loadError, retryLoad, updateUser, refreshUser, logout } = useAuth()
   const router = useRouter()
 
   const [phase, setPhase] = useState<Phase>('create')
@@ -85,12 +86,13 @@ export default function OnboardingClient() {
     [],
   )
 
-  // Redirect if not logged in
+  // Redirect if not logged in. #4827: a failed READ is not a signed-out
+  // session — `loadError` renders the load-error page below instead.
   useEffect(() => {
-    if (!loading && !user) {
+    if (!loading && !loadError && !user) {
       router.replace('/login')
     }
-  }, [loading, user, router])
+  }, [loading, loadError, user, router])
 
   // Redirect if the user already had an account before onboarding started.
   useEffect(() => {
@@ -135,13 +137,32 @@ export default function OnboardingClient() {
     setPhase('success')
   }
 
-  if (loading || !user) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-[var(--v2-bg)] flex items-center justify-center">
         <RouteLoading />
       </div>
     )
   }
+
+  // #4827: the load-error shape of EmptyState (design-system § EmptyState).
+  // The page wrapper is this call site's, as for `RouteLoading` above; the
+  // state itself is the shared primitive, so there is no new component.
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-[var(--v2-bg)] flex items-center justify-center px-6">
+        <EmptyState
+          tone="danger"
+          icon={<Icon icon={OctagonAlert} className="h-full w-full" />}
+          title="Your account could not load"
+          body="You are still signed in, and nothing has changed."
+          action={<Button onClick={retryLoad}>Try again</Button>}
+        />
+      </div>
+    )
+  }
+
+  if (!user) return null
 
   const name = displayName(user)
   const networkName = getChainConfig(selectedChainId).name

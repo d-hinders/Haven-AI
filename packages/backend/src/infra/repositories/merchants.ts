@@ -510,3 +510,124 @@ export async function listMerchantFundingTargets(
   ])
   return result.rows.map(resolveFundingTarget).filter((t): t is MerchantFundingTarget => t !== null)
 }
+
+// ── Recipient naming: the catalog step (#4882) ──────────────────────────────
+//
+// READ-ONLY reverse lookups for the recipient-naming order
+// (`modules/transactions/counterparty-name.ts`). Nothing here is payment
+// authority, and neither statement shares `MERCHANT_FUNDING_AGGREGATES_SQL`,
+// which feeds `resolveFundingTarget` (spend-authority derivation).
+
+/** One catalog merchant named at one receiving address on one chain. */
+export interface CatalogRecipientNameRow {
+  /** `bigint` in SQL (a CAIP-2 chain id can exceed int4), so pg may return a string. */
+  chain_id: number | string
+  pay_to: string
+  name: string
+}
+
+/**
+ * The catalog merchant at each `(network, pay_to)` among `$1`, when it is
+ * unambiguous and Haven's own (owner decision 1 of 2026-11-17 on #4882):
+ *
+ * - every live row (status other than `delisted`, any source) at that address
+ *   on that network belongs to ONE merchant, and all of those rows are
+ *   `operator` rows (never a seller-listed `bazaar` row);
+ * - at least one is an active, verified x402 row — the rows whose challenge
+ *   recorded the `pay_to`;
+ * - the merchant's active, verified x402 offers on that network AGREE on this
+ *   one address, none of them unstated — the same "verified payTo" the
+ *   funding derivation requires (`resolveFundingTarget`: no `conflicting`,
+ *   no `unstated`), so naming never calls an address verified that funding
+ *   would not.
+ *
+ * An address shared by two merchants names neither; a row with no recorded
+ * `pay_to` matches nothing. `pay_to` is stored lowercase (CHECK in migration
+ * 101), so the caller passes lowercased addresses.
+ */
+export const CATALOG_RECIPIENT_NAMES_SQL = `
+  WITH candidates AS (
+    SELECT mc.network, mc.pay_to
+    FROM merchant_catalog mc
+    WHERE mc.pay_to = ANY($1::text[])
+      AND mc.status <> 'delisted'
+      AND mc.network ~ '^eip155:[0-9]{1,18}$'
+    GROUP BY mc.network, mc.pay_to
+    HAVING COUNT(DISTINCT mc.merchant_id) = 1
+       AND bool_and(mc.source = 'operator')
+       AND bool_or(mc.rail = 'x402' AND mc.status = 'active' AND mc.verified_at IS NOT NULL)
+  )
+  SELECT substring(c.network FROM '^eip155:([0-9]+)$')::bigint AS chain_id,
+         c.pay_to,
+         m.name
+  FROM candidates c
+  JOIN merchant_catalog mc ON mc.network = c.network AND mc.pay_to = c.pay_to AND mc.status <> 'delisted'
+  JOIN merchants m ON m.id = mc.merchant_id
+  WHERE NOT EXISTS (
+    SELECT 1 FROM merchant_catalog o
+    WHERE o.merchant_id = mc.merchant_id
+      AND o.network = c.network
+      AND o.rail = 'x402'
+      AND o.status = 'active'
+      AND o.verified_at IS NOT NULL
+      AND (o.pay_to IS NULL OR o.pay_to <> c.pay_to)
+  )
+  GROUP BY c.network, c.pay_to, m.name`
+
+export async function listCatalogRecipientNames(
+  addresses: string[],
+  db: Executor = pool,
+): Promise<CatalogRecipientNameRow[]> {
+  if (addresses.length === 0) return []
+  const result = await db.query<CatalogRecipientNameRow>(CATALOG_RECIPIENT_NAMES_SQL, [
+    [...new Set(addresses.map((a) => a.toLowerCase()))],
+  ])
+  return result.rows
+}
+
+/**
+ * The comparison key the receipt-borrowing rule matches names by, in SQL: the
+ * name's compatibility decomposition (NFKD), lower-cased, with everything but
+ * ASCII letters and digits removed — so spacing, punctuation, zero-width
+ * characters and accents cannot separate a borrowed name from the original.
+ * `recipientNameKey` (`modules/transactions/counterparty-name.ts`) is the
+ * same key in TypeScript; the two must stay identical.
+ */
+const NAME_KEY_SQL = (column: string) => `regexp_replace(lower(normalize(${column}, NFKD)), '[^a-z0-9]', '', 'g')`
+
+/** A catalog merchant's name key, one address a live row of it records (null when none), and that row's source. */
+export interface CatalogMerchantNameAddressRow {
+  name_key: string
+  pay_to: string | null
+  source: string
+}
+
+/**
+ * For the receipt-borrowing rule (#4882): every catalog merchant — ANY source,
+ * any live row — whose name key is among `$1`, with each receiving address
+ * its rows record and the row's source. The caller decides per name key
+ * (`recipient-name-index.ts`): when any curated (`operator`) row holds the
+ * name, only curated rows' addresses are allowed, so a seller-listed copy of
+ * a curated name cannot vouch for its own address; when only seller-listed
+ * rows hold it, their own addresses are allowed, so an honest seller's
+ * receipt still names its own payments.
+ */
+export const CATALOG_MERCHANT_NAME_ADDRESSES_SQL = `
+  SELECT DISTINCT ${NAME_KEY_SQL('m.name')} AS name_key,
+         mc.pay_to,
+         mc.source
+  FROM merchants m
+  JOIN merchant_catalog mc ON mc.merchant_id = m.id
+  WHERE mc.status <> 'delisted'
+    AND ${NAME_KEY_SQL('m.name')} = ANY($1::text[])`
+
+export async function listCatalogMerchantNameAddresses(
+  nameKeys: string[],
+  db: Executor = pool,
+): Promise<CatalogMerchantNameAddressRow[]> {
+  if (nameKeys.length === 0) return []
+  const result = await db.query<CatalogMerchantNameAddressRow>(CATALOG_MERCHANT_NAME_ADDRESSES_SQL, [
+    [...new Set(nameKeys)],
+  ])
+  return result.rows
+}

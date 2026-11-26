@@ -61,6 +61,18 @@ export {
   RECONCILIATION_EVENT_TYPES,
 } from './reconciliation.js'
 export { prepareSweep, submitSweep } from './sweep.js'
+export {
+  runSweepConfirmerTick,
+  confirmOutcomeUnknownSweep,
+  SWEEP_CONFIRMER_MAX_CANDIDATES_PER_TICK,
+  SWEEP_CONFIRMER_LOG_LOOKBACK_BLOCKS,
+  type SweepConfirmerDeps,
+  type SweepConfirmerLogger,
+  type SweepConfirmerTickResult,
+  type SweepConfirmDecision,
+  type SweepConfirmOutcome,
+  type OutcomeUnknownSweepInput,
+} from './sweep-confirmer.js'
 export { handleBudgetPrecheck } from './budget-precheck.js'
 export { budgetPrecheckBodyError } from './budget-precheck-guards.js'
 export { parseBalanceCoverageQuery } from './balance-coverage-guards.js'

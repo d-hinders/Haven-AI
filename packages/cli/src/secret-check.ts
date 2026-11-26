@@ -30,6 +30,7 @@ export const MAX_FEEDBACK_TEXT_LENGTH = 4000
 
 export type SecretCheckReason =
   | 'agent_api_key'
+  | 'merchant_api_key'
   | 'setup_token'
   | 'session_jwt'
   | 'labelled_parameter'
@@ -62,6 +63,8 @@ function refusal(layer: SecretCheckRefusal['layer'], reason: SecretCheckReason, 
 
 const LABELLED_PATTERNS: ReadonlyArray<{ reason: SecretCheckReason; re: RegExp }> = [
   { reason: 'agent_api_key', re: /sk_agent_[A-Za-z0-9]/ },
+  // #4896: the receive-only merchant key. Its own prefix, its own reason.
+  { reason: 'merchant_api_key', re: /sk_merchant_[A-Za-z0-9]/ },
   { reason: 'setup_token', re: /hv_setup_[A-Za-z0-9]/ },
   // A session JWT: three dot-separated base64url parts, each non-empty.
   // `\beyJ` (not the looser `\bey`), which is the base64url encoding of `{"`

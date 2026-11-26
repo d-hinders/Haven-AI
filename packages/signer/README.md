@@ -425,7 +425,7 @@ carries no x402 context to fund a merchant retry with, so it surfaces the
 | `code` | When | `next_action` | `fallback` | extra |
 |---|---|---|---|---|
 | `SIGN_CONTEXT_TIMEOUT` | The fetch (or its body read) did not finish within `SIGN_CONTEXT_TIMEOUT_MS` | `stop_and_tell_user` | `typed_data_b64` | — |
-| `SIGN_CONTEXT_UNREACHABLE` | The fetch failed before any response (DNS, connection refused, TLS, …) | `stop_and_tell_user` | `typed_data_b64` | — |
+| `SIGN_CONTEXT_UNREACHABLE` | Haven did not answer usably: the fetch failed before any response (DNS, connection refused, TLS, …), or Haven answered with a body that is not a JSON object at any non-2xx status, any 5xx, or a 429 (#4829). A 429's reason says to re-call the same signer tool with the same arguments once after the wait, citing `Retry-After` when it is whole seconds; the signer never sleeps or re-fetches | `stop_and_tell_user` | `typed_data_b64` on the x402 and direct fetches; none on the task-budget and sub-budget fetches (nothing else to sign) | `http_status` when Haven answered; no `backend_error_code` |
 | `SIGN_CONTEXT_MALFORMED` | The response body was missing `sign_data.typed_data` / `x402_expected` (a pre-#1263 backend), or — on the direct-payment fetch — an unsupported `direct_sign_context_version` or a `signature_scheme` other than `eip712_userop` | `stop_and_tell_user` | `typed_data_b64` | — |
 | `SIGN_CONTEXT_REFUSED` (x402: 410 or `expired`; direct: `expired` only) | x402: the quote's window closed. Direct: the payment's window closed — call `haven_send` / `haven_pay` again with the same `idempotency_key` | `payment_window_expired` | — | x402 only: `retry_with_new_quote: true`; both: `http_status`, and `backend_error_code: 'expired'` when the backend sent one |
 | `SIGN_CONTEXT_REFUSED` (404, direct fetch) | The `payment_id` is not this agent's, or the backend predates #3271 and has no direct route | `stop_and_tell_user` | `typed_data_b64` | `http_status`, `backend_error_code` |
@@ -435,8 +435,10 @@ carries no x402 context to fund a merchant retry with, so it surfaces the
 | `TYPED_DATA_NOT_ALLOWED` | Typed data without an x402 context that is not a bound direct-payment `PackedUserOperation` (#3272): wrong chain, not this signer's own account, a call other than `execute` → DelegationManager → `redeemDelegations`, or a redemption whose delegations are empty, not made to this account, or in a non-default mode — see the allowlist paragraph above. Reachable by `payment_id` when Haven serves such a payload | `stop_and_tell_user` | — | no `http_status` — a local shape check, not a backend refusal |
 
 `fallback: 'typed_data_b64'` appears only where signing OTHER bytes is a
-remedy — a transport failure or a body this signer could not read, plus one
-backend refusal: a 404 from the direct-payment fetch (an older backend with
+remedy — a transport failure, a body this signer could not read, or (since
+#4829) a non-answer from Haven (a 5xx, a 429, or a body that is not a JSON
+object) on the x402 and direct fetches — plus one backend refusal: a 404 from
+the direct-payment fetch (an older backend with
 no direct route, #3271). For x402 it is **not** in the default quote result
 since #1272: obtain it by re-running the SAME quote tool with the SAME
 `idempotency_key` plus `include_signing_payload: true`, then pass

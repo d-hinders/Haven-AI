@@ -89,11 +89,12 @@ export type FoldedTransactionCsvColumn =
 
 export interface TransactionCsvLookups {
   /**
-   * Human-readable counterparty name — address book first, then the user's
-   * own accounts. Returns null when unknown. Mirrors the dashboard table's
-   * resolution so the file and the on-screen rows agree.
+   * Human-readable counterparty name in the ONE naming order (#4882,
+   * `counterparty-name.ts`: own account, contact, catalog merchant, receipt
+   * seller, resource host). Returns null when unknown. The same order every
+   * dashboard surface uses, so the file and the on-screen rows agree.
    */
-  resolveName: (address: string, chainId: number) => string | null
+  resolveName: (tx: EnrichedTransaction) => string | null
   /**
    * The currency the file reports its converted figures in (#3127). Fixed
    * SEK on the export route — the accounting semantics this file exists for
@@ -137,7 +138,7 @@ export function transactionCsvRow(
     type: rowType(tx),
     status: rowStatus(tx),
     direction: tx.direction,
-    counterparty_name: lookups.resolveName(cp, tx.chainId) ?? '',
+    counterparty_name: lookups.resolveName(tx) ?? '',
     counterparty_address: cp,
     token_symbol: tx.tokenSymbol ?? tx.asset ?? '',
     token_address: tx.tokenAddress ?? '',

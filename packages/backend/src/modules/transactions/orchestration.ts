@@ -236,8 +236,12 @@ export interface TransactionFilterOptions {
    *
    * #4095: the feed takes them too now — the browser-side filter over the
    * loaded page is gone, so list, count, totals and CSV all agree.
+   *
+   * #5001: `sales` is a FILTER value, not a row direction — it keeps the
+   * inbound rows carrying #5000's sale marker. A row's own `direction` stays
+   * `in` or `out` on the wire.
    */
-  direction?: 'in' | 'out'
+  direction?: 'in' | 'out' | 'sales'
   chainId?: number
   /**
    * #4095: free-text search over what a row shows (counterparty resolved
@@ -265,7 +269,14 @@ export function filterEnrichedTransactions(
   return transactions.filter((tx) => {
     // A move is neither money in nor money out of the user's wallet set.
     if (options.direction && tx.ownTransfer) return false
-    if (options.direction && tx.direction !== options.direction) return false
+    // #5001: `sales` narrows Incoming to the rows #5000 marked as sales —
+    // including sales without a product. It is a filter value, never a row
+    // direction, so the comparison below would drop every row for it.
+    if (options.direction === 'sales') {
+      if (tx.direction !== 'in' || tx.sale === undefined) return false
+    } else if (options.direction && tx.direction !== options.direction) {
+      return false
+    }
     if (options.chainId !== undefined && tx.chainId !== options.chainId) return false
 
     if (options.window) {

@@ -28,6 +28,7 @@ function fakeInvoice(overrides: Partial<Invoice['json']> = {}): Invoice {
       moms_procent: 25,
       moms_belopp: '0.0001',
       totalt_inkl_moms: '0.0005',
+      momsbehandling: 'SE_25',
       valuta: 'USDC',
       betalningssatt: 'Kryptovaluta (USDC på Base)',
       blockkedje_referens: `Tx: ${TX_HASH}`,
@@ -51,6 +52,7 @@ function fakeSettledPayment(overrides: Partial<SettledPayment> = {}): SettledPay
     paymentResponseHeader: 'irrelevant',
     settlement: 'settled_onchain',
     passportReference: null,
+    merchantReference: 'sale_TEST',
     ...overrides,
   }
 }

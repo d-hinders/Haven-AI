@@ -15,6 +15,18 @@ required") is refused — reword to "no update needed", or quote it in a code sp
 
 ## Unreleased
 
+## 0.15.0-alpha.0 — 2026-11-26
+
+### Changed
+
+- **The runtime this connector installs moves to `0.15.0-alpha.0`.** A setup, a re-run or a `--doctor` repair now wires the `@haven_ai/sdk`, `@haven_ai/mcp` and `@haven_ai/signer` releases that answer a merchant's checkout-details request (#4872), refuse task budgets on a `--local` install instead of naming a removed signer (#4825), and report a gateway 502 or a 429 on the sign-context fetch as unreachable rather than refused (#4829). No update needed.
+
+- **The connector redacts the Sales key (#4896).** `redactSecrets` now replaces
+  a `sk_merchant_…` credential — the receive-only key a merchant's server uses
+  to report sales to Haven — with `sk_merchant_[redacted]`, the same way it
+  already redacts an agent key. Log lines and `--json` records cannot carry one.
+  No update needed.
+
 ## 0.14.0-alpha.0 — 2026-11-11
 
 ### Changed

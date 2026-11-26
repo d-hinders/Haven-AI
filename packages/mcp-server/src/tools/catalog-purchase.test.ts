@@ -130,6 +130,49 @@ describe('haven_discover_tools', () => {
     }
   })
 
+  it('hints a self-submitted (ingestion) MCP row at the by-URL quote tool, never the catalog-id dead end (#4823)', async () => {
+    const base = {
+      description: 'd', category: 'api', rail: 'x402', price_display: null, price_atomic: null,
+      asset: null, network: null, status: 'active', verified_at: '2026-11-12T10:00:00.000Z',
+      domain_verified: true, verified_payable: true,
+    }
+    stubFetch({
+      'GET /catalog': {
+        status: 200,
+        body: {
+          entries: [
+            // Self-submitted: listed to agents, but GET /catalog/:id answers an
+            // agent 404, so haven_quote_catalog_purchase { catalog_id } was a
+            // dead end for exactly this row.
+            { ...base, id: 'cat_ingested', name: 'Self-submitted', resource_url: 'https://self.example.com/mcp', protocol: 'mcp', tool_name: 'summarize', tool_arguments: null, source: 'ingestion' },
+            // Control: an operator MCP row keeps the catalog-id hint.
+            { ...base, id: 'cat_operator', name: 'Curated', resource_url: 'https://mcp.merchant.test/mcp', protocol: 'mcp', tool_name: 'create_text', tool_arguments: { prompt: 'hello' }, source: 'operator' },
+          ],
+        },
+      },
+    })
+    const result = ok<Array<{ id: string; suggested_tool?: StrictInputToolName; suggested_arguments?: Record<string, unknown> }>>(
+      await handlers().haven_discover_tools({}),
+    )
+
+    const ingested = result.data.find((e) => e.id === 'cat_ingested')!
+    expect(ingested.suggested_tool).toBe('haven_quote_mcp_tool')
+    expect(ingested.suggested_arguments).toEqual({
+      merchant_url: 'https://self.example.com/mcp',
+      tool_name: 'summarize',
+    })
+    // The hint parses under the named tool's strict schema, and it names no
+    // catalog id — the id the agent detail read answers 404.
+    expect(() => parseStrict('haven_quote_mcp_tool', ingested.suggested_arguments)).not.toThrow()
+    expect(ingested.suggested_arguments).not.toHaveProperty('catalog_id')
+
+    // Control: provenance decides, not protocol — an operator MCP row is
+    // served on the detail read and keeps its catalog-id hint.
+    const operator = result.data.find((e) => e.id === 'cat_operator')!
+    expect(operator.suggested_tool).toBe('haven_quote_catalog_purchase')
+    expect(operator.suggested_arguments).toEqual({ catalog_id: 'cat_operator' })
+  })
+
   it('marks catalog prices as indicative (not authoritative)', async () => {
     stubFetch({
       'GET /catalog': {
@@ -141,7 +184,7 @@ describe('haven_discover_tools', () => {
               name: 'create_text',
               description: 'Generate text',
               category: 'ai',
-              resource_url: 'https://mcp.soundside.ai/mcp',
+              resource_url: 'http://merchant.test/mcp',
               rail: 'x402',
               protocol: 'mcp',
               tool_name: 'create_text',
@@ -374,7 +417,7 @@ describe('haven_quote_mcp_tool', () => {
       amount: '1.5',
       token: 'USDC',
       decimals: 6,
-      resource_url: 'https://merchant.test/paid',
+      resource_url: 'http://merchant.test/mcp',
       merchant_address: PAYMENT_REQUIRED.accepts[0].payTo,
       mcp_transport: { handshake_required: true, source: 'path' },
       quote_is_informational: true,
@@ -1578,9 +1621,15 @@ describe('#3527 — settled EIP-3009 replay', () => {
   const paymentRequiredHeader = btoa(JSON.stringify(PAYMENT_REQUIRED))
   const DELEGATION_AGENT_RESPONSE = { ...AGENT_RESPONSE, execution_rail: 'delegation' }
 
-  // Deliberately DIFFERENT from PAYMENT_REQUIRED.resource.url
-  // ('https://merchant.test/paid') — the discovered merchant URL and the
-  // merchant's own declared resource are two different facts on this scheme.
+  // The discovered merchant URL and the merchant's own declared resource are
+  // two different facts on this scheme (#3527). Since #5086 they may differ on
+  // a payable EIP-3009 purchase (delivery is bound to the stored endpoint), so
+  // the forwarding test below uses a challenge that declares its own address
+  // and pins that the pre-check forwards it, never the endpoint.
+  const DECLARED_ADDRESS = 'mcp://tool/create_text'
+  const declaredHeader = btoa(
+    JSON.stringify({ ...PAYMENT_REQUIRED, resource: { ...PAYMENT_REQUIRED.resource, url: DECLARED_ADDRESS } }),
+  )
   const CATALOG_ENTRY_RESPONSE = {
     id: 'cat_3009',
     name: 'Cat 3009',
@@ -1615,7 +1664,7 @@ describe('#3527 — settled EIP-3009 replay', () => {
     it('forwards the quote\'s resource.url (never merchantUrl) and the EFFECTIVE idempotency key on the 3009 branch', async () => {
       stubFetch({
         'GET /catalog/cat_3009': { status: 200, body: CATALOG_ENTRY_RESPONSE },
-        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader } },
+        'POST /mcp': { status: 402, responseHeaders: { 'PAYMENT-REQUIRED': declaredHeader } },
         'GET /machine-payments/agent': { status: 200, body: DELEGATION_AGENT_RESPONSE },
         'POST /machine-payments/budget-precheck': { status: 200, body: { sufficient: true, remaining_atomic: '5000000' } },
         'POST /x402': { status: 201, body: X402_INTENT_RESPONSE },
@@ -1625,7 +1674,7 @@ describe('#3527 — settled EIP-3009 replay', () => {
       // quote's own derived one, the same one step 9 authorizes with.
       await handlers().haven_prepare_catalog_purchase({ catalog_id: 'cat_3009', max_amount: '2000000' })
 
-      expect(precheckBody()).toMatchObject({ resourceUrl: PAYMENT_REQUIRED.resource.url })
+      expect(precheckBody()).toMatchObject({ resourceUrl: DECLARED_ADDRESS })
       expect(precheckBody()?.resourceUrl).not.toBe(CATALOG_ENTRY_RESPONSE.resource_url)
       expect(typeof precheckBody()?.idempotencyKey).toBe('string')
       expect(precheckBody()?.idempotencyKey).toBe(xBody()?.idempotencyKey)
@@ -2072,7 +2121,10 @@ describe('#3527 — settled EIP-3009 replay', () => {
 
 
 describe('merchant MCP endpoint discovery (#1271)', () => {
-  const paymentRequiredHeader = () => btoa(JSON.stringify(PAYMENT_REQUIRED))
+  // #5084: a merchant names its own endpoint as resource.url, so a custom
+  // endpoint path gets a challenge that names that path.
+  const paymentRequiredHeader = (url: string = PAYMENT_REQUIRED.resource.url) =>
+    btoa(JSON.stringify({ ...PAYMENT_REQUIRED, resource: { ...PAYMENT_REQUIRED.resource, url } }))
   const DISCOVERY_DOC = { name: 'Haven Demo Merchant', mcp_url: 'http://merchant.test/mcp' }
   const havenStubs = () => ({
     'GET /machine-payments/agent': { status: 200 as const, body: AGENT_RESPONSE },
@@ -2140,7 +2192,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
       },
       'POST /v1': {
         status: 402,
-        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader('http://merchant.test/v1') },
       },
       ...havenStubs(),
     })
@@ -2169,7 +2221,7 @@ describe('merchant MCP endpoint discovery (#1271)', () => {
     stubFetch({
       'POST /v1': {
         status: 402,
-        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader() },
+        responseHeaders: { 'PAYMENT-REQUIRED': paymentRequiredHeader('http://merchant.test/v1') },
       },
       ...havenStubs(),
     })

@@ -854,6 +854,10 @@ export const FIXTURE_TXS = [
   // photographs THIS row's drawer.
   tx(7, {
     agentName: 'Research agent', source: 'x402', x402ResourceUrl: 'https://api.example.dev/datasets',
+    // #4931: the server names this row's counterparty (#4883), and the name
+    // differs from the resource host — the evidence capture shows the row
+    // title and the drawer heading reading the NAME, not `api.example.dev`.
+    recipientName: 'Klara Data AB',
     settlementScheme: 'eip3009',
     fundingTxHash: `0x${String(7).repeat(4).padStart(8, '0')}${'ab'.repeat(28)}`.slice(0, 66),
     value: '1000000', valueFormatted: '1.00',
@@ -950,6 +954,8 @@ export const FIXTURE_AGENTS = [
     // #3426: the opt-in defaults OFF; the /agents screenshot photographs the
     // unchecked state.
     tax_declaration_enabled: false,
+    // #4871: the checkout-details sharing switch defaults OFF on every agent.
+    checkout_details_sharing_enabled: false,
     // #4429: the stored display colour (1..6). DISPLAY ONLY.
     avatar_tint: 1,
   },
@@ -990,6 +996,8 @@ export const FIXTURE_AGENTS = [
     organization_id: 'org-devops',
     // #3426: the opt-in defaults OFF on every agent.
     tax_declaration_enabled: false,
+    // #4871: the checkout-details sharing switch defaults OFF on every agent.
+    checkout_details_sharing_enabled: false,
     // #4429: the stored display colour (1..6). DISPLAY ONLY.
     avatar_tint: 2,
   },
@@ -1748,6 +1756,90 @@ export const FIXTURE_ACCOUNTING_FEED_COMING_SOON = {
 export const FIXTURE_ACCOUNTING_FEED_SELF_HOSTED = { ...FIXTURE_ACCOUNTING_FEED_COMING_SOON, hosted: false }
 
 /**
+ * Merchant services (#4904, epic #4885): the setting the shell reads once.
+ *
+ * OFF with no account — the state every user starts in, and the one the
+ * Settings → Business card renders as "Turn on Sales". The e2e twin is
+ * `merchantServicesOff` in `e2e/fixtures/haven-api.ts`, and
+ * `fixture-shape-parity.test.ts` pins the two shapes together: a key that
+ * exists in one harness and not the other renders `undefined` in exactly one
+ * gate.
+ */
+export const FIXTURE_MERCHANT_SERVICES = {
+  enabled: false,
+  enabled_at: null,
+  disabled_at: null,
+  merchant_account: null,
+}
+
+/**
+ * #4901: the setting after a turn-on — the state the Analytics Spending /
+ * Revenue switch exists in. The account is the dedicated Sales account the
+ * route creates (a real `smart_accounts` row, named "Sales" by the server), on
+ * the fixture's chain, so the capture never invents a state the backend cannot
+ * serve (#2120).
+ */
+export const FIXTURE_MERCHANT_SERVICES_ON = {
+  enabled: true,
+  enabled_at: '2026-05-04T09:00:00.000Z',
+  disabled_at: null,
+  merchant_account: {
+    id: 'account-sales',
+    account_address: '0x5555555555555555555555555555555555555555',
+    chain_id: 8453,
+    name: 'Sales',
+    created_at: '2026-05-04T09:00:00.000Z',
+  },
+}
+
+/**
+ * #4901: the Sales summary the Analytics Revenue side reads (`GET
+ * /merchant-sales/summary`, #4897). One story whose figures agree: Revenue
+ * $2.14 = two chat sales ($0.84) + one embeddings sale ($0.30) + one payment
+ * with no product ($1.00); a $0.50 move from the owner's own agent is in no
+ * total. Every day's `by_product` + `other_products_raw` +
+ * `without_product_raw` adds up to its `revenue_raw`, which is the property
+ * the chart's stack relies on.
+ */
+export const FIXTURE_SALES_SUMMARY = {
+  usdc_rates: { usd: 0.9998, eur: 0.92, sek: 11.2 },
+  revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
+  sales: 3,
+  // $2.14 over every payment counted (3 sales + 1 with no product), rounded down (#4981).
+  average_sale_raw: '535000',
+  without_product: { count: 1, amount_raw: '1000000' },
+  own_moves: { count: 1, amount_raw: '500000' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '300000' },
+  ],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [
+    {
+      payer: { kind: 'contact', name: 'Lumen Research', address: '0x41b2c09e7a55d81f3b2e6c40a9d17e5f8c0b7d93' },
+      payments: 2,
+      amount_raw: '840000',
+      last_paid_at: '2026-11-16T14:05:00.000Z',
+    },
+    {
+      payer: { kind: 'wallet', name: null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' },
+      payments: 2,
+      amount_raw: '1300000',
+      last_paid_at: '2026-11-16T13:48:00.000Z',
+    },
+  ],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [
+    { day: '2026-11-12', payments: 1, sales: 1, revenue_raw: '300000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'embed', amount_raw: '300000' }], other_products_raw: '0' },
+    { day: '2026-11-14', payments: 1, sales: 1, revenue_raw: '420000', without_product_raw: '0', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+    { day: '2026-11-16', payments: 2, sales: 1, revenue_raw: '1420000', without_product_raw: '1000000', in_stripe_raw: '0', by_product: [{ product_id: 'chat', amount_raw: '420000' }], other_products_raw: '0' },
+  ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+}
+
+/**
  * The ATTENTION state (#2869 design review): the destination's sign-in has
  * expired (still the destination, cannot push) and the sweep has given up on
  * three rows. Raises the attention summary, the inline "Stopped retrying"
@@ -2130,6 +2222,11 @@ export function fixtureFor(apiPath, mode = process.env.SCREENSHOT_FIXTURE) {
   if (pathname === '/accounting/providers') return { providers: FIXTURE_ACCOUNTING_PROVIDERS }
   if (pathname === '/accounting/connections') return { connections: [FIXTURE_ACCOUNTING_CONNECTION] }
   if (pathname === '/accounting/feed/status') return FIXTURE_ACCOUNTING_FEED_STATUS
+  // #4904: the merchant-services setting the shell reads once. Keyed so a
+  // capture of `/settings?tab=business` shows the Sales card's real OFF state
+  // rather than `FIXTURE_EMPTY_FALLBACK`'s `{}` (which the hook would read as
+  // a failed read and render as a retry).
+  if (pathname === '/merchant-services') return FIXTURE_MERCHANT_SERVICES
   // Owner company details (#3332): 404 is the DEFAULT state — the flag off,
   // same as a real deployment with `HAVEN_OWNER_COMPANY_DETAILS` unset —
   // so a plain `/settings` route capture shows the section correctly
@@ -3608,14 +3705,21 @@ function setAccountingFeedStage(next) {
  * a scenario that silently captured nothing would be a worse evidence gap
  * than no scenario at all.
  */
-async function runAnalyticsScenario({ page, vp, shoot }, waitForContent) {
+async function runAnalyticsScenario(
+  { page, vp, shoot },
+  waitForContent,
+  // #4901: the revenue side opens on `?view=revenue` and reads the Sales
+  // fixture, whose days sit inside the 30 days before 2026-11-17 — so the
+  // virtual clock moves with the side, or the chart would draw an empty window.
+  { path = '/analytics', now = '2026-07-10T14:00:00.000Z' } = {},
+) {
   // Virtual clock at the fixture's anchor day: the agents table's "Last
   // payment: 2h ago" caption reads the real clock, and against a fixture
   // pinned to 2026-07-10 the real clock printed "2mo ago" beside "4 payments"
   // in a 30-day window (#3204). The rest of the page reads server figures
   // and is unaffected.
-  await page.clock.install({ time: new Date('2026-07-10T14:00:00.000Z') })
-  await page.goto(`${BASE_URL}/analytics`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
+  await page.clock.install({ time: new Date(now) })
+  await page.goto(`${BASE_URL}${path}`, { waitUntil: 'domcontentloaded', timeout: 30_000 })
   await page.evaluate(() => document.fonts.ready)
   await dismissMobileSidebar(page, vp)
   // The title is slice C's declared PageHeader title (issue #2947), so this
@@ -3918,6 +4022,32 @@ export const SCENARIOS = {
       await page.getByRole('button', { name: 'Create account', exact: true }).click()
       await page.getByRole('button', { name: 'Creating account...' }).waitFor({ timeout: 20_000 })
       await shootCard('signup-loading')
+    },
+  },
+
+  /**
+   * #4827: the load-error page a failed `GET /auth/me` now shows instead of
+   * signing the owner out. Route capture cannot reach it — the shared fixture
+   * answers `/auth/me` with 200 — so the scenario seeds a 500 on that one route
+   * and photographs the two routes that render the state.
+   */
+  'session-load-error': {
+    description:
+      'The load-error page a failed GET /auth/me shows on /dashboard and /onboarding (#4827) — one Try again action, no redirect to /login',
+    api(apiPath, method) {
+      if (apiPath !== '/auth/me' || method !== 'GET') return undefined
+      return httpError(500, { error: 'Internal error' })
+    },
+    async run({ page, shoot }) {
+      for (const [route, name] of [
+        ['/dashboard', 'dashboard'],
+        ['/onboarding', 'onboarding'],
+      ]) {
+        await page.goto(`${BASE_URL}${route}`, { waitUntil: 'networkidle', timeout: 60_000 })
+        await page.getByText('Your account could not load').waitFor({ timeout: 20_000 })
+        await page.getByRole('button', { name: 'Try again' }).waitFor({ timeout: 20_000 })
+        await shoot(page, name)
+      }
     },
   },
 
@@ -4672,6 +4802,41 @@ export const SCENARIOS = {
         .waitFor({ timeout: 20_000 })
 
       await shoot(page.locator('main').first(), 'disabled')
+    },
+  },
+  'design-system-sales-patterns': {
+    description:
+      'The Sales patterns section on /design-system — sale rows, the Sales badges, the freshness line, the Spending/Revenue tabs, the revenue chart, the keys-off row and the credential block (#4908)',
+    // An element capture, for the reason `design-system-buttons` gives: the
+    // page is far past Chromium's full-page surface cap. Static showcase
+    // markup, so no fixture overrides.
+    api() {
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.goto(`${BASE_URL}/design-system`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const section = page.getByTestId('ds-sales-patterns')
+      // Wait on the last specimen as well as the section, so the capture
+      // cannot race the grid's tail.
+      await section.getByText('Keys not accepted while off', { exact: true }).waitFor({ timeout: 20_000 })
+      await section.getByRole('tab', { name: 'Revenue' }).waitFor({ timeout: 20_000 })
+      // One capture per specimen, not the section: the section is taller than
+      // the viewport, and a whole-section element capture came back with its
+      // top and bottom blank (the #1726 failure in a smaller form).
+      // Below lg the floating tab bar is fixed over the viewport's bottom and
+      // paints across whichever specimen scrolled under it; hide it for these
+      // element captures — the bar is not under review here.
+      await page.addStyleTag({ content: '[data-mobile-tab-bar]{visibility:hidden!important}' })
+      const specimens = section.getByTestId('ds-sales-specimens').locator(':scope > *')
+      const count = await specimens.count()
+      if (count !== 7) throw new Error(`design-system-sales-patterns: expected 7 specimens, found ${count}`)
+      const names = ['ledger', 'badges', 'freshness', 'tabs', 'revenue-chart', 'keys-off', 'credential-block']
+      for (let i = 0; i < count; i += 1) {
+        const specimen = specimens.nth(i)
+        await specimen.scrollIntoViewIfNeeded()
+        await shoot(specimen, names[i])
+      }
     },
   },
   'design-system-buttons': {
@@ -6801,6 +6966,32 @@ export const SCENARIOS = {
       })
     },
   },
+  'analytics-revenue': {
+    description:
+      'Analytics on the Revenue side of the Spending / Revenue switch (#4901): merchant services on, `?view=revenue`, the Sales summary served — the tiles (Revenue, Sales, Average sale, Not counted), the by-product chart and the by-product breakdown, with the Agent facet hidden and the link to Sales in its place.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/merchant-sales/summary') return FIXTURE_SALES_SUMMARY
+      return undefined
+    },
+    async run(args) {
+      await runAnalyticsScenario(
+        args,
+        async (page) => {
+          // Wait for the side itself, not a skeleton that happens to carry the
+          // title: the revenue tiles, then the by-product line the chart and
+          // the breakdown both name.
+          await page.getByTestId('analytics-revenue-tiles').waitFor({ timeout: 15_000 })
+          await page
+            .getByText('Chat completion', { exact: true })
+            .filter({ visible: true })
+            .first()
+            .waitFor({ timeout: 15_000 })
+        },
+        { path: '/analytics?view=revenue', now: '2026-11-17T12:00:00.000Z' },
+      )
+    },
+  },
 
   // #3127 (finding 8): the SEK default renders end to end. The harness's
   // own session above is now the SEK user, so this scenario photographs the
@@ -7010,6 +7201,184 @@ export const SCENARIOS = {
       // Negative control: the outside deposit keeps "Deposit".
       await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
       await shoot(page.locator('main').first(), 'page')
+    },
+  },
+  // #5000: a sale reads as a sale outside the Sales page. The shared fixture
+  // has no Sales account and no sale marker, so none of this is reachable from
+  // a route capture. Merchant services are on, so the drawer's "View in Sales"
+  // link renders.
+  'sales-read-as-sales': {
+    description:
+      '#5000: with merchant services on, /transactions titles a recorded sale "Sale · <product>" and an unrecorded one "Sale", beside a plain "Deposit"; the two drawers (Product, Receipt number, Merchant reference, no kind line, "View in Sales"); and the dashboard Activity card showing "Sale ×2" apart from "Deposit".',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions' || apiPath.startsWith('/transactions?')) {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(21, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600, accountName: 'Sales',
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(22, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200, accountName: 'Sales',
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        const transactions = [recorded, unrecorded, ...FIXTURE_TXS]
+        return { transactions, total: transactions.length, offset: 0, limit: 25, hasMore: false, partialFailure: false, failedAccountIds: [], truncated: false }
+      }
+      if (apiPath === '/dashboard/overview') {
+        const [, deposit] = FIXTURE_OVERVIEW.activity
+        const at = (secondsBefore) => new Date(Date.parse(deposit.latestAt) + 3_600_000 - secondsBefore * 1000).toISOString()
+        return {
+          ...FIXTURE_OVERVIEW,
+          activity: [
+            // Two sales of different products the same day: one group, no product named.
+            { ...deposit, count: 2, sumAtomic: '19992500', approxAmount: '215.1192', sale: { productName: null }, latestAt: at(60) },
+            // The day's top-up into another account: still "Deposit".
+            { ...deposit, count: 1, sumAtomic: '19990000', approxAmount: '215.0924', latestAt: at(120) },
+            ...FIXTURE_OVERVIEW.activity.filter((group) => group.direction === 'out'),
+          ],
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const ledger = page.getByTestId('transactions-ledger')
+      await ledger.getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await ledger.getByText('Sale', { exact: true }).first().waitFor({ timeout: 10_000 })
+      // Negative control: a plain deposit keeps its word.
+      await ledger.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'transactions')
+
+      const rows = ledger.locator('[role="button"][aria-haspopup="dialog"]')
+      for (const [index, name, label] of [
+        [0, 'Sale · Haven Field Notes', 'drawer-recorded'],
+        [1, 'Sale', 'drawer-unrecorded'],
+      ]) {
+        await rows.nth(index).click()
+        const drawer = page.getByRole('dialog', { name })
+        await drawer.waitFor({ timeout: 20_000 })
+        await drawer.getByRole('link', { name: 'View in Sales' }).waitFor({ timeout: 10_000 })
+        await shoot(drawer, label)
+        await page.keyboard.press('Escape')
+        await drawer.waitFor({ state: 'hidden', timeout: 10_000 })
+      }
+
+      // `domcontentloaded`: the Activity card polls (#2736), so a cold
+      // dashboard never reaches `networkidle`; the text waits below gate it.
+      await page.goto(`${BASE_URL}/dashboard`, { waitUntil: 'domcontentloaded', timeout: 120_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByText('Sale', { exact: true }).first().waitFor({ timeout: 60_000 })
+      await page.getByText('Deposit', { exact: true }).first().waitFor({ timeout: 10_000 })
+      await shoot(page.locator('main').first(), 'dashboard')
+    },
+  },
+  // #5001: the Sales choice on the Direction facet, and the In total's split
+  // into money from sales and money moved in. The shared fixture has no Sales
+  // account and no sale marker, so neither state is reachable from a route
+  // capture; merchant services are on, so the facet offers Sales.
+  //
+  // Two scenarios, because `scenario.api()` sees the PATHNAME only — the
+  // direction rides the query string, so each capture serves the one set its
+  // URL asks for. `total` is the whole feed's size in both, so the count line
+  // reads "{shown} of {total}" honestly.
+  'sales-direction-filter': {
+    description:
+      '#5001: with merchant services on, /transactions?direction=sales narrows the list to the two sale rows and the summary line reads one figure, "Sales <amount>" — no In, no Out. Desktop and phone.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions') {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(31, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600, accountName: 'Sales',
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(32, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200, accountName: 'Sales',
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        return {
+          transactions: [recorded, unrecorded],
+          total: 2,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions?direction=sales`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      const ledger = page.getByTestId('transactions-ledger')
+      await ledger.getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      await ledger.getByText('Sale', { exact: true }).first().waitFor({ timeout: 10_000 })
+      const totals = page.getByTestId('transactions-totals')
+      await totals.getByText('Sales', { exact: true }).waitFor({ timeout: 20_000 })
+      await totals.getByText('Money from sales').waitFor({ timeout: 10_000 })
+      // The other half is not shown under a Direction choice.
+      if ((await totals.getByText('Out', { exact: true }).count()) !== 0) {
+        throw new Error('sales-direction-filter: Direction: Sales must not show an Out figure')
+      }
+      await shoot(page.locator('main').first(), 'sales-direction')
+    },
+  },
+  'sales-incoming-split': {
+    description:
+      '#5001: with merchant services on, /transactions?direction=in reads "In <amount> · of which sales <amount>" — the sales part of In, beside the whole. Desktop and phone.',
+    api(apiPath) {
+      if (apiPath === '/merchant-services') return FIXTURE_MERCHANT_SERVICES_ON
+      if (apiPath === '/transactions') {
+        const buyer = '0x9C58BAcC331c9aa871AFD802DB6379a98e80CEdb'
+        const recorded = tx(31, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '19990000', valueFormatted: '19.99',
+          timestamp: T0 - 600, accountName: 'Sales',
+          sale: { productName: 'Haven Field Notes', receiptNumber: 'R-1042', merchantReference: 'order-77' },
+        })
+        const unrecorded = tx(32, {
+          direction: 'in', from: buyer, to: FIXTURE_ACCOUNT.account_address, value: '2500', valueFormatted: '0.0025',
+          timestamp: T0 - 1200, accountName: 'Sales',
+          sale: { productName: null, receiptNumber: null, merchantReference: null },
+        })
+        const inbound = [recorded, unrecorded, ...FIXTURE_TXS.filter((row) => row.direction === 'in')]
+        return {
+          transactions: inbound,
+          total: inbound.length,
+          offset: 0,
+          limit: 100,
+          hasMore: false,
+          partialFailure: false,
+          failedAccountIds: [],
+          truncated: false,
+        }
+      }
+      return undefined
+    },
+    async run({ page, vp, shoot }) {
+      await page.addInitScript((userId) => {
+        window.localStorage.setItem(`haven-onboarding-complete-dismissed:${userId}`, '1')
+      }, FIXTURE_USER.id)
+      await page.goto(`${BASE_URL}/transactions?direction=in`, { waitUntil: 'networkidle', timeout: 60_000 })
+      await dismissMobileSidebar(page, vp)
+      await page.getByTestId('transactions-ledger').getByText('Sale · Haven Field Notes', { exact: true }).first().waitFor({ timeout: 30_000 })
+      const totals = page.getByTestId('transactions-totals')
+      await totals.getByText('In', { exact: true }).waitFor({ timeout: 20_000 })
+      await totals.getByText(/of which sales/).waitFor({ timeout: 20_000 })
+      await shoot(page.locator('main').first(), 'incoming-split')
     },
   },
   'dashboard-sub-cent': {

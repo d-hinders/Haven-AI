@@ -12,15 +12,14 @@ import {
   isAddress,
   keccak256,
   parseSignature,
-  verifyTypedData,
   type Address,
   type Hex,
   type PrivateKeyAccount,
 } from 'viem'
 import { privateKeyToAccount } from 'viem/accounts'
 import { base, baseSepolia } from 'viem/chains'
+import { createHash } from 'node:crypto'
 import {
-  decodePaymentSignatureHeader,
   encodePaymentRequiredHeader,
   encodePaymentResponseHeader,
 } from '@x402/core/http'
@@ -30,6 +29,44 @@ import {
   type PassportReference,
 } from '@haven_ai/sdk'
 import {
+  AuthorizationAlreadyUsedError,
+  CHECKOUT_DETAILS_EXTENSION,
+  ERC7710_TRANSFER_METHOD,
+  MAX_TIMEOUT_SECONDS,
+  NONCE_RE,
+  PaymentError,
+  SettlementRevertedError,
+  ZERO_TX_HASH,
+  assertExtensionsEchoed,
+  assertPaymentOptionMatches,
+  assertResourceMatches,
+  assertSettlementConsistent,
+  buildSettledPayment as buildCoreSettledPayment,
+  newMerchantReference,
+  checkoutDetailsExtensionEntry,
+  clampReason,
+  createInMemoryConsumedPaymentStore,
+  createSettleOnce,
+  decodePayment,
+  isPlainRecord,
+  paymentMethod,
+  parseExactEvmPayload,
+  recoverUsedAuthorization,
+  sameAddress,
+  selectQuotedPaymentOption,
+  settleThroughCdp,
+  verifyAuthorization,
+  verifyCdpAuthorization,
+  type CheckoutDetailsRequest,
+  type ConsumedPaymentStore,
+  type DecisionReasonCode,
+  type Eip3009Authorization,
+  type PaymentAsset,
+  type SettledPayment as CoreSettledPayment,
+  type SettlementState,
+  type VerifiedPayment as CoreVerifiedPayment,
+} from '@haven_ai/merchant-payments'
+import {
   DEFAULT_SETTLEMENT_METHOD,
   SUPPORTED_SETTLEMENT_METHODS,
   USDC_ADDRESS,
@@ -37,15 +74,37 @@ import {
   USDC_DOMAIN_NAME,
   USDC_DOMAIN_VERSION,
   isSettlementMethod,
+  type SettlementKind,
   type SettlementMethod,
 } from './products.js'
 import type { ProductId } from './products.js'
+import type { CdpSettlementConfig } from './cdp.js'
 
 export { DEFAULT_SETTLEMENT_METHOD, SUPPORTED_SETTLEMENT_METHODS, USDC_ADDRESS }
 export type { SettlementMethod }
 
-const NETWORK: `${string}:${string}` = `eip155:${CHAIN_ID}`
-const MAX_TIMEOUT_SECONDS = 300
+// #4890: the checks, the CDP settle path, the settle-once coordinator and the
+// error classes live in `@haven_ai/merchant-payments`. They are re-exported
+// from here — the SAME classes, never redefined — so an `instanceof
+// PaymentError` holds in every module and every test.
+export {
+  AuthorizationAlreadyUsedError,
+  ERC7710_TRANSFER_METHOD,
+  PaymentError,
+  SettlementRevertedError,
+  assertSettlementConsistent,
+}
+export type { DecisionReasonCode, Eip3009Authorization, SettlementState }
+
+/** What this merchant accepts payment in: its chain and its USDC contract. */
+const PAYMENT_ASSET: PaymentAsset = {
+  chainId: CHAIN_ID,
+  network: `eip155:${CHAIN_ID}`,
+  usdcAddress: USDC_ADDRESS,
+  usdcDomainName: USDC_DOMAIN_NAME,
+  usdcDomainVersion: USDC_DOMAIN_VERSION,
+}
+const NETWORK = PAYMENT_ASSET.network
 /**
  * #2361: the extensions block every 402 challenge advertises, exported so
  * tests build echo-compliant payments from the same object the merchant
@@ -95,20 +154,26 @@ export interface PassportVerifierConfig {
  * a sweep. Set both env values on a service that is not mid-quote; the
  * operator step is named in `docs/operations/railway-services.md`.
  */
-export function demoMerchantExtensions(passport?: PassportVerifierConfig | null): Record<string, unknown> {
-  if (!passport) return DEMO_MERCHANT_EXTENSIONS
+export function demoMerchantExtensions(
+  passport?: PassportVerifierConfig | null,
+  checkoutDetails?: CheckoutDetailsRequest | null,
+): Record<string, unknown> {
+  const base: Record<string, unknown> = passport
+    ? {
+        ...DEMO_MERCHANT_EXTENSIONS,
+        [HAVEN_PASSPORT_EXTENSION]: { info: {} },
+      }
+    : DEMO_MERCHANT_EXTENSIONS
+  // #4873: a product that asks for checkout details advertises the request in
+  // its challenge. Every other product's challenge is unchanged, and the
+  // client echoes this entry verbatim like every other extension (#2361).
+  if (!checkoutDetails) return base
   return {
-    ...DEMO_MERCHANT_EXTENSIONS,
-    [HAVEN_PASSPORT_EXTENSION]: { info: {} },
+    ...base,
+    [CHECKOUT_DETAILS_EXTENSION]: checkoutDetailsExtensionEntry(checkoutDetails),
   }
 }
-// #1279: accepted forward-validity slack beyond the advertised timeout. Covers
-// clock skew plus client settlement margins (Haven's SDK signs
-// clamped-timeout + 300 s forward, #1256) without accepting year-long windows.
-const MAX_WINDOW_SLACK_SECONDS = 900
-const NONCE_RE = /^0x[0-9a-fA-F]{64}$/
 const HEX_BYTES_RE = /^0x(?:[0-9a-fA-F]{2})+$/
-const ZERO_TX_HASH = `0x${'0'.repeat(64)}` as Hex
 
 // Verify-without-settle test hook (#603). Product ids listed here are verified
 // but not settled on-chain — used by the QA sweep-recovery scenario to strand the
@@ -161,24 +226,6 @@ export const PAYMENT_REQUIRED_HEADER = 'PAYMENT-REQUIRED'
 export const PAYMENT_SIGNATURE_HEADER = 'PAYMENT-SIGNATURE'
 export const LEGACY_PAYMENT_SIGNATURE_HEADER = 'X-PAYMENT'
 export const PAYMENT_RESPONSE_HEADER = 'PAYMENT-RESPONSE'
-
-const TRANSFER_WITH_AUTH_TYPES = {
-  TransferWithAuthorization: [
-    { name: 'from', type: 'address' },
-    { name: 'to', type: 'address' },
-    { name: 'value', type: 'uint256' },
-    { name: 'validAfter', type: 'uint256' },
-    { name: 'validBefore', type: 'uint256' },
-    { name: 'nonce', type: 'bytes32' },
-  ],
-} as const
-
-const USDC_DOMAIN = {
-  name: USDC_DOMAIN_NAME,
-  version: USDC_DOMAIN_VERSION,
-  chainId: CHAIN_ID,
-  verifyingContract: USDC_ADDRESS,
-} as const
 
 const USDC_TRANSFER_WITH_AUTHORIZATION_ABI = [
   {
@@ -234,8 +281,6 @@ const USDC_VIEW_ABI = [
 // redeemer and any redeemer caveat in the delegation must name it. The
 // composition root pins the DelegationManager per configured Base chain and
 // omits ERC-7710 from accepts unless that pin is configured.
-
-export const ERC7710_TRANSFER_METHOD = 'erc7710'
 
 // ERC-7579 "simple single call" execution mode (callType 0x00, execType 0x00).
 const ERC7579_SINGLE_CALL_MODE = `0x${'0'.repeat(64)}` as Hex
@@ -313,15 +358,6 @@ const CAVEAT_SPENT_MAP_ABI = [
     outputs: [{ type: 'uint256' }],
   },
 ] as const
-
-export interface Eip3009Authorization {
-  from: string
-  to: string
-  value: string
-  validAfter: string
-  validBefore: string
-  nonce: string
-}
 
 /** Parsed erc7710 payment payload (x402 exact-EVM, assetTransferMethod 'erc7710'). */
 export interface Erc7710Payment {
@@ -437,66 +473,11 @@ export function decodeTransferAmountCap(terms: Hex): bigint | null {
 }
 
 /**
- * #2969: the explicit truth about what actually happened on-chain, replacing
- * the #2970 boolean (`settled?: boolean`) that was inferred from
- * `txHash !== ZERO_TX_HASH`. A boolean could not distinguish the two
- * zero-hash paths from each other, and they are different facts:
- *
- *  - `settled_onchain`: the normal path — a real settlement transaction was
- *    submitted AND its receipt was observed (`confirmSubmittedPayment`).
- *  - `already_settled_earlier`: `AuthorizationAlreadyUsedError` recovery — the
- *    chain says this authorization (or, on erc7710, this settlement child)
- *    already moved the money in an EARLIER transaction that this process did
- *    not submit and cannot name. The goods are owed; there is no hash to show.
- *  - `settlement_unknown`: the `MERCHANT_SKIP_SETTLE_PRODUCT` QA hook — no
- *    settlement was ever attempted, so nothing is known either way.
- *
- * This is display/reporting-only, same as `PurchaseSummary` in server.ts — the
- * wire to the buyer (`paymentResponse`, `paymentResponseHeader`) is UNCHANGED,
- * still carrying `transaction: ZERO_TX_HASH` on the two non-settled paths
- * exactly as before. That is the x402 protocol surface; this field is not on
- * it.
+ * #4890: the settled payment as this merchant types it — its own product ids
+ * and settlement methods on the core's shape (see `SettledPayment` in
+ * `@haven_ai/merchant-payments`, which documents every field).
  */
-export type SettlementState = 'settled_onchain' | 'already_settled_earlier' | 'settlement_unknown'
-
-/**
- * #2969: the state is caller-supplied (the hash alone cannot tell the two
- * zero-hash paths apart), so pin the one thing the hash CAN say: a real hash
- * is `settled_onchain` and the zero hash never is. A caller that disagrees is
- * a bug, not a receipt — throw before anything is rendered or delivered.
- */
-export function assertSettlementConsistent(txHash: Hex, settlement: SettlementState): void {
-  const realHash = txHash !== ZERO_TX_HASH
-  if (realHash !== (settlement === 'settled_onchain')) {
-    throw new Error(`settlement "${settlement}" contradicts txHash ${txHash}`)
-  }
-}
-
-export interface SettledPayment {
-  productId: ProductId
-  settlementMethod: SettlementMethod
-  from: Address
-  to: Address
-  value: bigint
-  nonce: Hex
-  txHash: Hex
-  paymentResponse: SettleResponse
-  paymentResponseHeader: string
-  /** #2969: see `SettlementState`. Always set, never inferred from `txHash`. */
-  settlement: SettlementState
-  /**
-   * #4723: the `haven-passport` reference the payment carried, if any.
-   *
-   * Display/reporting-only, exactly like `settlement`: it is NOT on the x402
-   * wire and the settle path never reads it. `null` means there is nothing to
-   * check — the key was absent, or it was present but empty (the normal shape
-   * for an agent with no passport, since the #4722 client only adds fields when
-   * it has one). `{}` means the key was present but not a plain object: the
-   * reference is malformed, and the check answers `subject_mismatch` rather
-   * than silently treating it as absent.
-   */
-  passportReference: PassportReference | null
-}
+export type SettledPayment = CoreSettledPayment<ProductId, SettlementMethod>
 
 export interface SettlementClient {
   submit(authorization: Eip3009Authorization, signature: Hex): Promise<Hex>
@@ -633,15 +614,44 @@ export interface X402PaymentProcessorOptions {
   }
   settlementMethods?: readonly SettlementMethod[]
   /**
+   * #4851: Coinbase's hosted facilitator, for products whose settlement kind is
+   * `cdp`. Absent, such a product is refused here (and is not offered at all —
+   * the HTTP layer filters it out before a challenge is ever built).
+   */
+  cdp?: CdpSettlementConfig
+  /**
+   * #4853: receiving addresses this merchant quoted BEFORE the current one and
+   * still honours for a payment that already settled to them — a redeploy that
+   * moves the Stripe deposit address.
+   *
+   * Operator-supplied, never read from the payment. That is the whole point:
+   * the payment's own `payTo` is attacker-chosen, so serving a used
+   * authorization addressed to it would hand goods to anyone who paid an
+   * address of their own. Only an address this merchant actually quoted before
+   * can be honoured.
+   */
+  previousReceivingAddresses?: readonly Address[]
+  /**
    * #4723: when set, every challenge advertises `haven-passport` and a payment
    * that carries a reference is checked against this Haven verifier. Advisory
    * only — the settle path never consults it.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4890: where settled payments are recorded. Defaults to a fresh in-memory
+   * store, so nothing is persisted and a restart forgets settled payments.
+   */
+  consumedPaymentStore?: ConsumedPaymentStore
 }
 
 export interface X402PaymentProcessor {
   buildPaymentRequired(params: {
+    /**
+     * #4850: the receiving address of the PRODUCT being bought
+     * (`productReceivingAddress`), not a merchant-wide global — the 402's
+     * `payTo`. Callers resolve it per product; the name is kept because every
+     * verification step compares the payment against it as "this merchant".
+     */
     merchantAddress: Address
     amountUsdc: bigint
     resource: string
@@ -655,44 +665,35 @@ export interface X402PaymentProcessor {
      * IGNORED in the 402 it actually served. The 402 is the one that decides.
      */
     settlementMethods?: readonly SettlementMethod[]
+    /**
+     * #4873: the product's checkout-details request, when it asks for one.
+     * Absent, the challenge advertises no `haven-checkout-details` entry.
+     */
+    checkoutDetails?: CheckoutDetailsRequest
   }): PaymentRequired
   paymentRequiredHeader(paymentRequired: PaymentRequired): string
   paymentResponseHeader(response: SettleResponse): string
   verifyAndSettle(params: {
     productId: ProductId
     paymentHeader: string
+    /** #4850: the purchased product's receiving address — the same value the
+     *  challenge it is checked against was built with. The EIP-3009 `to`, the
+     *  quoted option's `payTo` and the ERC-7710 transfer target must all equal it. */
     merchantAddress: Address
     expectedAmount: bigint
     paymentRequired: PaymentRequired
+    /** #4851: the purchased product's settlement kind (`productSettlementKind`).
+     *  Absent, `self` — the merchant settles with its own key. */
+    settlement?: SettlementKind
   }): Promise<SettledPayment>
 }
 
-interface SettledCacheEntry {
-  productId: ProductId
-  payment: SettledPayment
-}
-
-interface SettlementAttempt {
-  productId: ProductId
-  txHash?: Hex
-  promise?: Promise<SettledCacheEntry>
-}
-
-/** Rail-agnostic description of one verified payment, ready to settle exactly once. */
-interface VerifiedPayment {
-  /** In-process dedupe key. EIP-3009: payer + authorization nonce (on-chain replay
-   *  protection). erc7710: delegator + permissionContext hash — one redemption per
-   *  delegation in this demo; multi-redemption budget delegations are intentionally
-   *  not supported here, the on-chain caveats are the real enforcement. */
-  paymentKey: string
-  payer: Address
-  payTo: Address
-  nonce: Hex
-  settlementMethod: SettlementMethod
-  /** #4723: the `haven-passport` reference the payload carried, if any. */
-  passportReference: PassportReference | null
-  submit: () => Promise<Hex>
-}
+/**
+ * Rail-agnostic description of one verified payment, ready to settle exactly
+ * once (the core's `VerifiedPayment`, less the digest `verifyAndSettle` adds
+ * from the payment header it was given).
+ */
+type VerifiedPayment = Omit<CoreVerifiedPayment<SettlementMethod>, 'authorizationDigest'>
 
 export function createX402PaymentProcessor(
   settlementClient: SettlementClient,
@@ -706,148 +707,26 @@ export function createX402PaymentProcessor(
   if (settlementMethods.includes(ERC7710_TRANSFER_METHOD) && !options.erc7710) {
     throw new PaymentError('ERC-7710 is enabled but no trusted delegation manager was configured')
   }
-  const attempts = new Map<string, SettlementAttempt>()
-  const settled = new Map<string, SettledCacheEntry>()
-
-  async function settleOnce(params: {
-    productId: ProductId
-    verified: VerifiedPayment
-    expectedAmount: bigint
-  }): Promise<SettledPayment> {
-    const { paymentKey } = params.verified
-    const productKey = `${paymentKey}:${params.productId}`
-
-    const existing = settled.get(productKey)
-    if (existing) return existing.payment
-    if ([...settled.keys()].some((key) => key.startsWith(`${paymentKey}:`))) {
-      throw new PaymentError('Payment authorization has already settled a different product')
-    }
-
-    const attempt = attempts.get(paymentKey)
-    if (attempt) {
-      if (attempt.productId !== params.productId) {
-        throw new PaymentError('Payment authorization is already settling a different product')
-      }
-      if (attempt.promise) {
-        return (await attempt.promise).payment
-      }
-      if (attempt.txHash) {
-        const retry = confirmSubmittedPayment(params, productKey, attempt.txHash)
-        attempt.promise = retry
-        try {
-          return (await retry).payment
-        } finally {
-          attempt.promise = undefined
-        }
-      }
-    }
-
-    const nextAttempt: SettlementAttempt = { productId: params.productId }
-    attempts.set(paymentKey, nextAttempt)
-    const promise = (async (): Promise<SettledCacheEntry> => {
-      let txHash: Hex
-      try {
-        txHash = await params.verified.submit()
-      } catch (err) {
-        if (err instanceof AuthorizationAlreadyUsedError) {
-          // The chain says this authorization already moved the money (#1519).
-          // In-memory `settled`/`attempts` are the fast path; the chain is the
-          // TRUTH, and it survives the restarts they do not. Record the
-          // settlement so the buyer is told what actually happened — the goods
-          // are owed — rather than being charged and handed a 402.
-          const entry: SettledCacheEntry = {
-            productId: params.productId,
-            payment: buildSettledPayment(params, ZERO_TX_HASH, 'already_settled_earlier'),
-          }
-          settled.set(productKey, entry)
-          return entry
-        }
-        throw err
-      }
-      nextAttempt.txHash = txHash
-      return confirmSubmittedPayment(params, productKey, txHash)
-    })()
-
-    nextAttempt.promise = promise
-    try {
-      return (await promise).payment
-    } finally {
-      nextAttempt.promise = undefined
-      // #3099: an attempt with no tx hash is over — either `submit` threw (retry
-      // must resubmit) or the chain said the authorization was already used
-      // (the `settled` cache now answers every later call for this key before
-      // `attempts` is consulted, and a different product is refused by the
-      // `settled` prefix scan above). The clause `&& !settled.has(productKey)`
-      // that used to guard this delete was unreachable in any observable way,
-      // so it is gone rather than left as a guard nothing can test. The delete
-      // itself IS observable: after a generic submit failure a different
-      // product on the same authorization must not be refused by the stale
-      // in-flight record — pinned by the test that mutates this `if` away.
-      if (!nextAttempt.txHash) {
-        attempts.delete(paymentKey)
-      }
-    }
-  }
-
-  async function confirmSubmittedPayment(
-    params: {
-      productId: ProductId
-      verified: VerifiedPayment
-      expectedAmount: bigint
-    },
-    productKey: string,
-    txHash: Hex,
-  ): Promise<SettledCacheEntry> {
-    try {
-      await settlementClient.waitForReceipt(txHash)
-    } catch (err) {
-      if (err instanceof SettlementRevertedError) {
-        // #1278: a mined-and-reverted tx is final for THIS submission but not
-        // for the authorization — clear the attempt so the buyer's next retry
-        // resubmits instead of re-confirming the dead hash forever. Any other
-        // error is treated as transient and keeps the hash for re-confirmation.
-        attempts.delete(params.verified.paymentKey)
-        throw new PaymentError(
-          `Settlement transaction reverted on-chain (${txHash}). ` +
-            'Retry the request with the same payment header to resubmit.',
-        )
-      }
-      throw err
-    }
-    const payment = buildSettledPayment(params, txHash, 'settled_onchain')
-    const entry = { productId: params.productId, payment }
-    settled.set(productKey, entry)
-    return entry
-  }
+  // #4890: the settle-exactly-once coordinator is the core's, recording each
+  // payment in a consumed-payment store (in memory unless one is injected).
+  const settleOnce = createSettleOnce<ProductId, SettlementMethod>({
+    store: options.consumedPaymentStore ?? createInMemoryConsumedPaymentStore(),
+    chainId: CHAIN_ID,
+    waitForReceipt: (txHash) => settlementClient.waitForReceipt(txHash),
+  })
 
   function buildSettledPayment(
     params: { productId: ProductId; verified: VerifiedPayment; expectedAmount: bigint },
     txHash: Hex,
     settlement: SettlementState,
   ): SettledPayment {
-    assertSettlementConsistent(txHash, settlement)
-    const response: SettleResponse = {
-      success: true,
-      payer: params.verified.payer,
-      transaction: txHash,
-      network: NETWORK,
-      amount: params.expectedAmount.toString(),
-    }
-    return {
-      productId: params.productId,
-      settlementMethod: params.verified.settlementMethod,
-      from: params.verified.payer,
-      to: params.verified.payTo,
-      value: params.expectedAmount,
-      nonce: params.verified.nonce,
+    // Only the skip-settle QA hook builds here, outside settle-once: it
+    // reserves nothing, so its reference is fresh (it is never reported).
+    return buildCoreSettledPayment(
+      { ...params, network: NETWORK, merchantReference: newMerchantReference() },
       txHash,
-      // #2969: explicit, caller-supplied state — see `SettlementState`.
       settlement,
-      // #4723: display-only, never on the wire.
-      passportReference: params.verified.passportReference,
-      paymentResponse: response,
-      paymentResponseHeader: encodePaymentResponseHeader(response),
-    }
+    )
   }
 
   async function verifyEip3009Payment(params: {
@@ -864,17 +743,142 @@ export function createX402PaymentProcessor(
       params.merchantAddress,
       params.expectedAmount,
       'eip3009',
+      PAYMENT_ASSET,
     )
     assertResourceMatches(params.payload, params.paymentRequired)
-    await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount)
+    await verifyAuthorization(authorization, signature, params.merchantAddress, params.expectedAmount, PAYMENT_ASSET)
     return {
-      paymentKey: `${getAddress(authorization.from).toLowerCase()}:${authorization.nonce.toLowerCase()}`,
       payer: getAddress(authorization.from),
       payTo: getAddress(authorization.to),
       nonce: authorization.nonce as Hex,
+      validBefore: Number(authorization.validBefore),
       settlementMethod: 'eip3009',
       passportReference: params.passportReference,
       submit: () => settlementClient.submit(authorization, signature),
+    }
+  }
+
+  /**
+   * #4851: a payment for a `cdp` product. Every check this merchant makes
+   * about its OWN quote — the extensions echo and x402 version (before the
+   * dispatch, in `verifyAndSettle`), the quoted option, the resource, the
+   * recipient, the amount, the signature and the validity window — runs here,
+   * before Coinbase's facilitator is called at all.
+   *
+   * One exception to the window: an EXPIRED authorization is not refused yet.
+   * A settle that timed out may have landed after all, and a buyer retrying
+   * the same header after `validBefore` must be served if the chain says the
+   * money moved. `settleThroughCdp` reads the chain first and refuses the
+   * expired header only when it is unused.
+   */
+  async function verifyCdpPayment(params: {
+    payload: PaymentPayload
+    merchantAddress: Address
+    expectedAmount: bigint
+    paymentRequired: PaymentRequired
+    passportReference: PassportReference | null
+  }): Promise<VerifiedPayment> {
+    const cdp = options.cdp
+    if (!cdp) {
+      throw new PaymentError(
+        "This product is settled through Coinbase's facilitator, which is not configured on this merchant",
+      )
+    }
+    // The merchant's own checks, in order, before Coinbase is called at all.
+    const { authorization, quoted, expired } = await verifyCdpAuthorization({
+      payload: params.payload,
+      paymentRequired: params.paymentRequired,
+      merchantAddress: params.merchantAddress,
+      expectedAmount: params.expectedAmount,
+      asset: PAYMENT_ASSET,
+    })
+    const payer = getAddress(authorization.from)
+    const nonce = authorization.nonce as Hex
+    return {
+      payer,
+      payTo: getAddress(authorization.to),
+      nonce,
+      validBefore: Number(authorization.validBefore),
+      settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
+      submit: () =>
+        settleThroughCdp({
+          cdp,
+          payload: params.payload,
+          requirements: quoted,
+          authorization,
+          expired,
+        }),
+    }
+  }
+
+  /**
+   * Review of #4853 (S7): recover a CDP payment whose quote no longer matches
+   * this merchant's current receiving address.
+   *
+   * A redeploy with new Stripe variables moves the joke's deposit address. A
+   * buyer that was quoted the old address, paid it, and lost the answer then
+   * retries the same header — and the quote checks refuse it before any chain
+   * read. The epic's invariant is that a buyer whose money moved is never
+   * refused, so the chain decides here: if the authorization is used and its
+   * transaction paid the address the payment was quoted for, this amount, the
+   * buyer is served with that hash.
+   *
+   * Only a payment addressed to an address this merchant quoted BEFORE the
+   * current one is considered (`previousReceivingAddresses`, operator-supplied).
+   * Every other refusal is the original one, unchanged. A chain read that fails
+   * leaves the original refusal standing rather than serving on a guess.
+   */
+  async function recoverCdpPaymentAfterQuoteChange(params: {
+    payload: PaymentPayload
+    expectedAmount: bigint
+    passportReference: PassportReference | null
+  }): Promise<VerifiedPayment | undefined> {
+    const cdp = options.cdp
+    if (!cdp) return undefined
+    let authorization: Eip3009Authorization
+    try {
+      authorization = parseExactEvmPayload(params.payload.payload).authorization
+    } catch {
+      return undefined
+    }
+    if (!isAddress(authorization.from) || !isAddress(authorization.to)) return undefined
+    if (!NONCE_RE.test(authorization.nonce)) return undefined
+    // The payment must have been quoted for an address this merchant used to
+    // quote. The payment's own `payTo` is attacker-chosen, so it cannot be the
+    // test: serving on it would hand goods to anyone who paid an address of
+    // their own choosing.
+    const previous = options.previousReceivingAddresses ?? []
+    if (!previous.some((address) => sameAddress(address, authorization.to))) return undefined
+    // And for this product's price: a transfer of another amount is not this
+    // purchase, whatever the chain says.
+    let value: bigint
+    try {
+      value = BigInt(authorization.value)
+    } catch {
+      return undefined
+    }
+    if (value !== params.expectedAmount) return undefined
+    const payer = getAddress(authorization.from)
+    const nonce = authorization.nonce as Hex
+    let used: boolean
+    try {
+      used = await cdp.chain.authorizationUsed(payer, nonce)
+    } catch {
+      return undefined
+    }
+    if (!used) return undefined
+    return {
+      payer,
+      payTo: getAddress(authorization.to),
+      nonce,
+      validBefore: Number(authorization.validBefore),
+      settlementMethod: 'eip3009',
+      passportReference: params.passportReference,
+      // The chain is the truth: `recoverUsedAuthorization` searches USDC's
+      // events for this authorization and serves only when its transaction
+      // paid the quoted address this amount.
+      submit: () => recoverUsedAuthorization({ cdp, authorization }),
     }
   }
 
@@ -904,6 +908,7 @@ export function createX402PaymentProcessor(
       params.merchantAddress,
       params.expectedAmount,
       ERC7710_TRANSFER_METHOD,
+      PAYMENT_ASSET,
     )
     assertResourceMatches(params.payload, params.paymentRequired)
     const payment = parseErc7710Payload(params.payload.payload)
@@ -913,10 +918,10 @@ export function createX402PaymentProcessor(
     const redeemCall = buildRedeemCall(payment, params.merchantAddress, params.expectedAmount)
     const contextHash = keccak256(payment.permissionContext)
     const verified: VerifiedPayment = {
-      paymentKey: `erc7710:${payment.delegator.toLowerCase()}:${contextHash.toLowerCase()}`,
       payer: payment.delegator,
       payTo: getAddress(params.merchantAddress),
       nonce: contextHash,
+      validBefore: 0,
       settlementMethod: ERC7710_TRANSFER_METHOD,
       passportReference: params.passportReference,
       // #3170: explain a submit-time revert the way the EIP-3009 rail explains
@@ -1095,11 +1100,35 @@ export function createX402PaymentProcessor(
       // never consulted by the settle path.
       const passportReference = readPassportReference((payload as { extensions?: unknown }).extensions)
 
-      let verified: VerifiedPayment
-      if (method === ERC7710_TRANSFER_METHOD) {
-        verified = await verifyErc7710Payment({ ...params, payload, passportReference })
+      let unsealed: VerifiedPayment
+      if (params.settlement === 'cdp') {
+        // #4851: a CDP product is quoted with EIP-3009 only, so anything else
+        // was never offered; refuse it before any other work.
+        if (method !== 'eip3009') {
+          throw new PaymentError(`This product is paid with EIP-3009 only, not ${method}`)
+        }
+        try {
+          unsealed = await verifyCdpPayment({ ...params, payload, passportReference })
+        } catch (err) {
+          // Review of #4853 (S7): the merchant's receiving address can change
+          // between a quote and its retry (a redeploy with new Stripe
+          // variables). The quote checks would then refuse the retried header
+          // before any chain read — refusing a buyer whose money already moved
+          // to the address they were quoted. The epic's invariant is that a
+          // buyer whose money moved is never refused, so the chain gets the
+          // last word before the refusal stands.
+          const recovered = await recoverCdpPaymentAfterQuoteChange({
+            payload,
+            expectedAmount: params.expectedAmount,
+            passportReference,
+          })
+          if (!recovered) throw err
+          unsealed = recovered
+        }
+      } else if (method === ERC7710_TRANSFER_METHOD) {
+        unsealed = await verifyErc7710Payment({ ...params, payload, passportReference })
       } else if (method === 'eip3009') {
-        verified = await verifyEip3009Payment({ ...params, payload, passportReference })
+        unsealed = await verifyEip3009Payment({ ...params, payload, passportReference })
       } else {
         throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
       }
@@ -1111,12 +1140,18 @@ export function createX402PaymentProcessor(
       // normal x402 settle path is unaffected. Testnet/dev only.
       if (SKIP_SETTLE_PRODUCTS.has(params.productId)) {
         return buildSettledPayment(
-          { productId: params.productId, verified, expectedAmount: params.expectedAmount },
+          { productId: params.productId, verified: unsealed, expectedAmount: params.expectedAmount },
           ZERO_TX_HASH,
           'settlement_unknown',
         )
       }
 
+      // #4890: the consumed-payment record carries a digest of the payment
+      // as presented (the whole header, signature included).
+      const verified: CoreVerifiedPayment<SettlementMethod> = {
+        ...unsealed,
+        authorizationDigest: createHash('sha256').update(params.paymentHeader).digest('hex'),
+      }
       return settleOnce({
         productId: params.productId,
         verified,
@@ -1299,6 +1334,11 @@ export function buildPaymentRequired(params: {
   facilitatorAddresses?: Address[]
   /** #4723: when set, the challenge also advertises `haven-passport`. */
   passport?: PassportVerifierConfig | null
+  /**
+   * #4873: when set, the challenge also advertises `haven-checkout-details`
+   * with this request. Absent, the challenge is unchanged.
+   */
+  checkoutDetails?: CheckoutDetailsRequest | null
 }): PaymentRequired {
   const methods = orderedSettlementMethods(params.settlementMethod, params.settlementMethods)
   const eip3009Option: PaymentRequirements = {
@@ -1338,60 +1378,9 @@ export function buildPaymentRequired(params: {
     // defects reached mainnet (#2288's header name, #2360's missing echoes).
     // Kept deliberately small: the whole challenge rides an HTTP header, and
     // the echo doubles it back.
-    extensions: demoMerchantExtensions(params.passport),
+    extensions: demoMerchantExtensions(params.passport, params.checkoutDetails),
     error: 'Payment required',
   }
-}
-
-function decodePayment(header: string): PaymentPayload {
-  try {
-    return decodePaymentSignatureHeader(header)
-  } catch {
-    throw new PaymentError('Invalid payment header: could not decode base64/JSON x402 payload')
-  }
-}
-
-function paymentMethod(accepted: PaymentRequirements): string {
-  const method = accepted.extra?.assetTransferMethod
-  if (method === undefined) return 'eip3009'
-  if (typeof method !== 'string') throw new PaymentError('Invalid payment header: assetTransferMethod must be a string')
-  return method
-}
-
-function selectQuotedPaymentOption(accepted: PaymentRequirements, paymentRequired: PaymentRequired): PaymentRequirements {
-  const method = paymentMethod(accepted)
-  const option = paymentRequired.accepts.find(
-    (candidate) =>
-      paymentMethod(candidate) === method &&
-      candidate.scheme === accepted.scheme &&
-      candidate.network === accepted.network &&
-      candidate.amount === accepted.amount &&
-      candidate.maxTimeoutSeconds === accepted.maxTimeoutSeconds &&
-      sameAddress(candidate.payTo, accepted.payTo) &&
-      sameAddress(candidate.asset, accepted.asset),
-  )
-  if (!option) throw new PaymentError('Payment accepted option does not match a quoted settlement method')
-  return option
-}
-
-function parseExactEvmPayload(payload: Record<string, unknown>): {
-  authorization: Eip3009Authorization
-  signature: Hex
-} {
-  const authorization = payload.authorization as Partial<Eip3009Authorization> | undefined
-  const signature = payload.signature
-  if (!authorization || typeof authorization !== 'object') {
-    throw new PaymentError('Invalid payment header: missing EIP-3009 authorization')
-  }
-  if (typeof signature !== 'string' || !signature.startsWith('0x')) {
-    throw new PaymentError('Invalid payment header: missing EIP-3009 signature')
-  }
-  for (const field of ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'] as const) {
-    if (typeof authorization[field] !== 'string' || authorization[field] === '') {
-      throw new PaymentError(`Invalid payment authorization field: ${field}`)
-    }
-  }
-  return { authorization: authorization as Eip3009Authorization, signature: signature as Hex }
 }
 
 function parseErc7710Payload(payload: Record<string, unknown>): Erc7710Payment {
@@ -1435,50 +1424,6 @@ function buildRedeemCall(
   }
 }
 
-function assertPaymentOptionMatches(
-  accepted: PaymentRequirements,
-  expected: PaymentRequirements,
-  merchantAddress: Address,
-  expectedAmount: bigint,
-  method: string,
-): void {
-  if (accepted.scheme !== 'exact') throw new PaymentError(`Unsupported x402 scheme: ${accepted.scheme}`)
-  if (accepted.network !== NETWORK) throw new PaymentError(`Unsupported x402 network: ${accepted.network}`)
-  if (accepted.amount !== expectedAmount.toString()) {
-    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${accepted.amount}`)
-  }
-  if (accepted.amount !== expected.amount) {
-    throw new PaymentError('Payment accepted option does not match the quoted amount')
-  }
-  if (!sameAddress(accepted.payTo, merchantAddress) || !sameAddress(accepted.payTo, expected.payTo)) {
-    throw new PaymentError('Payment accepted option does not match merchant recipient')
-  }
-  if (!sameAddress(accepted.asset, USDC_ADDRESS) || !sameAddress(accepted.asset, expected.asset)) {
-    throw new PaymentError('Payment accepted option does not match Base USDC')
-  }
-  if (accepted.maxTimeoutSeconds !== expected.maxTimeoutSeconds) {
-    throw new PaymentError('Payment accepted option does not match timeout')
-  }
-  if (method === ERC7710_TRANSFER_METHOD) {
-    if (accepted.extra?.assetTransferMethod !== ERC7710_TRANSFER_METHOD) {
-      throw new PaymentError('Payment accepted option does not echo assetTransferMethod erc7710')
-    }
-  } else if (method === 'eip3009') {
-    const acceptedMethod = accepted.extra?.assetTransferMethod
-    if (acceptedMethod !== undefined && acceptedMethod !== 'eip3009') {
-      throw new PaymentError('Payment accepted option does not echo assetTransferMethod eip3009')
-    }
-    if (
-      (accepted.extra?.name ?? null) !== USDC_DOMAIN_NAME ||
-      (accepted.extra?.version ?? null) !== USDC_DOMAIN_VERSION
-    ) {
-      throw new PaymentError('Payment accepted option is missing the expected USDC domain metadata')
-    }
-  } else {
-    throw new PaymentError(`Unsupported x402 assetTransferMethod: ${method}`)
-  }
-}
-
 function orderedSettlementMethods(
   selected?: SettlementMethod,
   availableMethods: readonly SettlementMethod[] = SUPPORTED_SETTLEMENT_METHODS,
@@ -1489,68 +1434,6 @@ function orderedSettlementMethods(
     throw new PaymentError(`Settlement method ${selected ?? DEFAULT_SETTLEMENT_METHOD} is not enabled for this merchant`)
   }
   return [first, ...available.filter((method) => method !== first)]
-}
-
-function assertResourceMatches(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
-  if (!payload.resource) return
-  if (payload.resource.url !== paymentRequired.resource.url) {
-    throw new PaymentError('Payment resource does not match quoted resource')
-  }
-}
-
-/**
- * #2361: enforce the x402 v2 extensions-echo rule — "the client must include
- * at least the info received; it may append additional info but cannot delete
- * or overwrite existing info." A payment that drops the challenge's
- * `extensions` is refused, with a message that names the rule rather than the
- * bare 400 the live facilitator that motivated this gives (#2360).
- *
- * The version cross-check fires on every payload (this merchant only issues
- * v2 challenges, so a mismatch is a refusal, never an exemption); the echo
- * rule itself then applies when the challenge advertises extensions. This is
- * the check that stops the QA harness validating Haven-against-Haven: a
- * Haven client that stops echoing fails HERE, on Sepolia, instead of at the
- * first strict mainnet facilitator.
- */
-function assertExtensionsEchoed(payload: PaymentPayload, paymentRequired: PaymentRequired): void {
-  // Reviewer finding on #2361: without this cross-check, a payload that
-  // merely DECLARES `x402Version: 1` skipped the echo rule entirely — this
-  // merchant only ever issues v2 challenges and has no v1 verification path,
-  // so a version mismatch is a refusal, never an exemption. The gate exists
-  // to catch Haven-client regressions before a strict mainnet facilitator
-  // does; a client bug that drops the echo AND misreports the version must
-  // not sail through.
-  if (payload.x402Version !== paymentRequired.x402Version) {
-    throw new PaymentError(
-      `Payment x402Version ${String(payload.x402Version)} does not match the challenge's ${String(paymentRequired.x402Version)}`,
-    )
-  }
-  const advertised = (paymentRequired as { extensions?: unknown }).extensions
-  if (!advertised || typeof advertised !== 'object' || Array.isArray(advertised)) return
-  const echoed = (payload as { extensions?: unknown }).extensions
-  if (!echoed || typeof echoed !== 'object' || Array.isArray(echoed)) {
-    throw new PaymentError(
-      'Payment must echo the challenge\'s extensions object (x402 v2 extensions echo rule)',
-    )
-  }
-  if (!objectContainsSubset(advertised as Record<string, unknown>, echoed as Record<string, unknown>)) {
-    throw new PaymentError(
-      'Payment extensions must include the challenge\'s extensions unmodified (x402 v2: append-only, never delete or overwrite)',
-    )
-  }
-}
-
-/** Every key/value in `subset` present and deep-equal in `superset`; extra keys in `superset` are allowed. */
-function objectContainsSubset(subset: Record<string, unknown>, superset: Record<string, unknown>): boolean {
-  return Object.entries(subset).every(([key, value]) => {
-    if (!(key in superset)) return false
-    const other = superset[key]
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return !!other && typeof other === 'object' && !Array.isArray(other) &&
-        objectContainsSubset(value as Record<string, unknown>, other as Record<string, unknown>)
-    }
-    return JSON.stringify(value) === JSON.stringify(other)
-  })
 }
 
 /**
@@ -1578,79 +1461,6 @@ function readPassportReference(extensions: unknown): PassportReference | null {
   const hasChain = Object.prototype.hasOwnProperty.call(info, 'chain_id')
   if (!hasUid && !hasChain) return null
   return { attestation_uid: info.attestation_uid, chain_id: info.chain_id }
-}
-
-/** A JSON object, not an array and not a class instance. */
-function isPlainRecord(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  const proto = Object.getPrototypeOf(value)
-  return proto === Object.prototype || proto === null
-}
-
-async function verifyAuthorization(
-  authorization: Eip3009Authorization,
-  signature: Hex,
-  merchantAddress: Address,
-  expectedAmount: bigint,
-): Promise<void> {
-  const nowSec = BigInt(Math.floor(Date.now() / 1000))
-  const validBefore = parseBigIntField(authorization.validBefore, 'validBefore')
-  const validAfter = parseBigIntField(authorization.validAfter, 'validAfter')
-  const value = parseBigIntField(authorization.value, 'value')
-
-  if (!isAddress(authorization.from)) throw new PaymentError('Payment payer address is invalid')
-  if (!isAddress(authorization.to)) throw new PaymentError('Payment recipient address is invalid')
-  if (!NONCE_RE.test(authorization.nonce)) throw new PaymentError('Payment nonce must be 32 bytes')
-  // EIP-3009 on-chain semantics: valid iff validAfter < now < validBefore.
-  // validBefore = 0 therefore means NEVER valid — the old special case read
-  // it as "no expiry", the exact opposite of what the chain would do (#1279).
-  if (nowSec >= validBefore) throw new PaymentError('Payment authorization has expired')
-  if (nowSec < validAfter) throw new PaymentError('Payment authorization is not valid yet')
-  // Nit companion (#1279): the signed window must not exceed what the quote
-  // advertised by more than a generous slack — a years-long authorization
-  // only risks the BUYER, but accepting one silently makes maxTimeoutSeconds
-  // a lie. Slack covers clock skew and client-side signing margins (the
-  // Haven SDK adds a settlement margin on top of the advertised timeout).
-  const advertisedWindow = BigInt(MAX_TIMEOUT_SECONDS + MAX_WINDOW_SLACK_SECONDS)
-  if (validBefore - nowSec > advertisedWindow) {
-    throw new PaymentError(
-      'Payment authorization validity window is far longer than the quoted maxTimeoutSeconds',
-    )
-  }
-  if (!sameAddress(authorization.to, merchantAddress)) throw new PaymentError('Payment is not addressed to this merchant')
-  if (value !== expectedAmount) {
-    throw new PaymentError(`Payment amount does not match: expected ${expectedAmount}, got ${value}`)
-  }
-
-  let valid = false
-  try {
-    valid = await verifyTypedData({
-      address: getAddress(authorization.from),
-      domain: USDC_DOMAIN,
-      types: TRANSFER_WITH_AUTH_TYPES,
-      primaryType: 'TransferWithAuthorization',
-      message: {
-        from: getAddress(authorization.from),
-        to: getAddress(authorization.to),
-        value,
-        validAfter,
-        validBefore,
-        nonce: authorization.nonce as Hex,
-      },
-      signature,
-    })
-  } catch {
-    valid = false
-  }
-  if (!valid) throw new PaymentError('Invalid EIP-3009 signature')
-}
-
-function parseBigIntField(value: string, field: string): bigint {
-  try {
-    return BigInt(value)
-  } catch {
-    throw new PaymentError(`Invalid payment authorization field: ${field}`)
-  }
 }
 
 /**
@@ -1692,16 +1502,6 @@ export function isContractRevert(err: unknown): boolean {
   return /revert|enforcer|allowance-exceeded/.test(haystack)
 }
 
-/**
- * The revert's own words, capped so the next-action sentence that follows it
- * stays inside the hosted relay's 500-character window even for a 400-character
- * reason (the relay-window tests in erc7710.test.ts).
- */
-const REVERT_REASON_MAX = 120
-/** A control character can JSON-escape to six characters (\uXXXX); flatten everything outside printable ASCII first so the 120-character cap survives JSON.stringify. */
-function clampReason(reason: string): string {
-  return reason.replace(/[^\x20-\x7e]/g, ' ').slice(0, REVERT_REASON_MAX)
-}
 function revertReason(err: unknown): string {
   if (err instanceof BaseError) {
     const reverted = err.walk((e) => e instanceof ContractFunctionRevertedError) as ContractFunctionRevertedError | null
@@ -1710,39 +1510,3 @@ function revertReason(err: unknown): string {
   }
   return clampReason(err instanceof Error ? err.message : String(err))
 }
-
-function sameAddress(a: string, b: string): boolean {
-  return isAddress(a) && isAddress(b) && getAddress(a).toLowerCase() === getAddress(b).toLowerCase()
-}
-
-export class PaymentError extends Error {
-  constructor(message: string) {
-    super(message)
-    this.name = 'PaymentError'
-  }
-}
-
-/**
- * A settlement transaction was MINED AND REVERTED — a definitive on-chain
- * outcome, unlike a transient failure to fetch the receipt (#1278). The
- * processor clears the settlement attempt on this signal so a replay of the
- * same payment header RESUBMITS instead of re-confirming the dead hash
- * forever. Safe to resubmit: the revert is proven, and EIP-3009 nonce
- * uniqueness (or delegation state, on the erc7710 rail) makes an accidental
- * double-submit revert harmlessly on-chain.
- */
-export class SettlementRevertedError extends PaymentError {}
-
-/**
- * The payment's on-chain authority was ALREADY consumed — the purchase
- * settled, and this is a duplicate submission of it. Raised for a used
- * EIP-3009 nonce (#1519) and for an exhausted ERC-7710 settlement child
- * (#1515); both are the chain remembering what the merchant's in-memory maps
- * forget across a restart.
- *
- * A `PaymentError` subclass so it is reported as a decision rather than a
- * merchant fault, and distinct so `settleOnce` can treat it as the success it
- * describes instead of a refusal: a buyer whose money already reached the
- * merchant must not be told the payment failed.
- */
-export class AuthorizationAlreadyUsedError extends PaymentError {}

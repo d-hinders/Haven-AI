@@ -169,8 +169,9 @@ describeDb('assertWorkerSchemaAtHead (#2625)', () => {
  * of its own anywhere. If the drift is still reported, it can only be
  * `db-harness.ts`'s own automatic root-level registration that reported it.
  *
- * vitest assigns the child's `VITEST_WORKER_ID` itself (an inherited env
- * override does not stick), so which worker schema the fixture lands in is
+ * vitest assigns the child's `VITEST_WORKER_ID` and `VITEST_POOL_ID` itself
+ * (an inherited env override does not stick; the schema is named by the pool
+ * id since #4971), so which worker schema the fixture lands in is
  * not something this test controls or can predict — reproduced running the
  * SAME id (`test_w1`) as the outer process on this machine. The cleanup
  * below reads the schema name back out of the child's own error message
@@ -208,8 +209,9 @@ describeDb('fixture: a sibling afterAll throws with no explicit guard registrati
  * Drop the fixture's leaked column from EVERY schema that has it, found by
  * catalog query rather than by name (#2625).
  *
- * The child's `VITEST_WORKER_ID` is assigned by its own vitest, not by the
- * env this process passes, so the exact schema it lands in is not something
+ * The child's `VITEST_POOL_ID` (which names its schema since #4971; before
+ * that, `VITEST_WORKER_ID`) is assigned by its own vitest, not by the env
+ * this process passes, so the exact schema it lands in is not something
  * this test can predict — and on the run that matters most it has no message
  * to read the name out of. Asking the catalog which schemas actually carry
  * the column needs neither prediction nor a successful assertion.
@@ -271,7 +273,9 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
       try {
         // The child MUST NOT drift a schema a parent worker is using
         // (#2625, found by review). A spawned `vitest run` always gets
-        // `VITEST_WORKER_ID=1`, so without this suffix the fixture drifted
+        // `VITEST_WORKER_ID=1` — and pool slot 1, which names the schema since
+        // #4971 and which the parent's own slot 1 uses for its whole run — so
+        // without this suffix the fixture drifted
         // `test_w1` while the parent suite was still running files on it —
         // and a co-running innocent file then failed with the guard's
         // message, blamed for drift it did not cause. Reproduced twice out of
@@ -354,6 +358,9 @@ describeDb('the guard fires even when a sibling afterAll throws (#2625)', () => 
         // locally only because vitest's sequencer runs previously-FAILED
         // files first: one failure moved this file to position 1 and hid
         // itself on every subsequent local run.
+        //
+        // (Since #4971 the schema is named by the pool slot, not this ordinal,
+        // and the parent's slot is just as unpredictable from here.)
         //
         // So do not assert the child's id at all — it is not a property of
         // isolation. Assert the two things that are: the child's schema

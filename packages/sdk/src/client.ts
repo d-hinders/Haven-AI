@@ -1,3 +1,8 @@
+import {
+  checkoutDetailsHeaderFor,
+  readCheckoutDetailsAvailability,
+  type CheckoutDetailsAvailability,
+} from './client-checkout-details.js'
 import { hashTypedData } from 'viem'
 import {
   signHash,
@@ -95,6 +100,7 @@ import {
 } from './types.js'
 import {
   buildX402IdempotencyKey,
+  normalizePaymentRequired,
   parsePaymentRequiredResponse,
   resolveTokenFromAddress,
   selectStandardPaymentOption,
@@ -114,6 +120,7 @@ import {
   mapPaymentResult,
   mapPaymentStatusResult,
 } from './payment-mappers.js'
+import { replaceSettlementEvidenceMessage } from './payment-status-message.js'
 import {
   paymentStateFromRaw,
   paymentStateStatusCode,
@@ -1387,7 +1394,7 @@ export class HavenClient {
       // like a 402. The transport signal is read exactly as for a 402 (path
       // or Bazaar); a stateless merchant that answered a bare `tools/call`
       // with a tool result has shown it needs no session, so nothing is
-      // forced — `quoteMcpX402` still pins its own established session.
+      // forced — `quoteMcpX402` still pins its own MCP handshake (a session, or #5089 stateless).
       const toolResultChallenge = await this.merchantTransport.extractToolResultChallenge(response, initialInit)
       if (toolResultChallenge) {
         const mcpTransport = await this.merchantTransport.detect(url, toolResultChallenge, response)
@@ -1431,8 +1438,12 @@ export class HavenClient {
    * Streamable-HTTP MCP lifecycle before sending the unpaid `tools/call`.
    * Hosted MCP uses this path while remaining keyless: it resolves only the
    * agent's public delegate address for `x402-wallet`; signing remains local.
-   * It refuses before the quote when the merchant does not establish a session;
-   * callers that need a plain x402 endpoint must use {@link quoteX402}.
+   * It refuses before the quote when the endpoint does not complete an MCP
+   * `initialize` — with a session, or (#5089) as a stateless server that
+   * answers a valid `initialize` result with no session id; callers that need
+   * a plain x402 endpoint must use {@link quoteX402}. Every MCP request after
+   * the handshake carries `Accept: application/json, text/event-stream`, and
+   * the quote's request snapshot keeps it for the paid retry.
    */
   async quoteMcpX402(
     url: string,
@@ -1440,8 +1451,8 @@ export class HavenClient {
     options: X402AuthorizationOptions = {},
   ): Promise<X402Quote> {
     const wallet = await this.merchantCompletion.resolveWalletForMerchantCall()
-    const sessionId = await this.merchantTransport.initialize(url, init, wallet)
-    if (!sessionId) {
+    const handshake = await this.merchantTransport.handshake(url, init, wallet)
+    if (!handshake) {
       throw new HavenApiError(
         'The merchant did not establish an MCP session before the x402 quote. No payment was created.',
         502,
@@ -1450,10 +1461,12 @@ export class HavenClient {
     }
 
     let requestInit = withX402Wallet(init, wallet)
-    requestInit = this.merchantTransport.withSessionHeaders(requestInit, sessionId)
+    // #5089: session headers on a stateful server, `Accept` alone on a
+    // stateless one — set BEFORE quoteX402, whose snapshot the retry replays.
+    requestInit = this.merchantTransport.withMcpHeaders(requestInit, handshake)
 
     const quote = await this.quoteX402(url, requestInit, options)
-    // This dedicated helper established an MCP session even when the endpoint
+    // This dedicated helper completed an MCP handshake even when the endpoint
     // uses a custom path and does not advertise Bazaar metadata. Preserve that
     // fact for the later, fresh session used by the paid retry.
     return {
@@ -1470,6 +1483,11 @@ export class HavenClient {
     options: X402AuthorizationOptions = {},
   ): Promise<Response> {
     const idempotencyKey = options.idempotencyKey ?? quote.idempotencyKey
+    // #4872: decided BEFORE authorisation — a required checkout detail that
+    // cannot be shared refuses here, with no payment created.
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, quote.paymentRequired, quote.request.url, {
+      requestHeaders: requestInitFromSnapshot(quote.request).headers,
+    })
 
     try {
       // #3378: forward every authorization option (taskBudgetId included —
@@ -1481,6 +1499,7 @@ export class HavenClient {
         requestInitFromSnapshot(quote.request),
         quote.paymentRequired,
         receipt,
+        checkoutDetailsHeader,
       )
     } catch (err) {
       attachResumeState(err, {
@@ -1622,6 +1641,9 @@ export class HavenClient {
       )
     }
 
+    // #4872: the caller's last word before the re-sign (checkout details).
+    if (input.beforeResign) await input.beforeResign()
+
     // #3888: the resume re-signs the SAME derived nonce the original header
     // carried, so a settled payment's re-signed authorization is refused by
     // the merchant as already used instead of paying twice (#3475).
@@ -1654,13 +1676,36 @@ export class HavenClient {
       paymentRequired = await parsePaymentRequiredResponse(response)
     }
 
+    // #4872: the payment is already funded. A required checkout detail that
+    // cannot be shared is reported and the paid request is NOT sent — the
+    // goods would be bought without what the merchant needs. Decided AFTER
+    // the resume's own status, resumability and already-settled checks (so a
+    // settled or unresumable payment gets its true answer, never "funded but
+    // not delivered") and BEFORE the re-sign, so a refused resume leaves the
+    // authorization unused and a later resume re-signs the same nonce (§5).
+    // An in-process cached receipt skips the hook; it is decided after.
+    const resumeUrl = url ?? paymentRequired.resource.url
+    const decideCheckoutDetails = () =>
+      checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, resumeUrl, {
+        funded: true,
+        requestHeaders: initialInit?.headers,
+        paymentId: input.paymentId,
+      })
+    let checkoutDetailsHeader: string | undefined
+    let checkoutDetailsDecided = false
+
     const receipt = await this.resumeAuthorizedX402({
       paymentId: input.paymentId,
       paymentRequired,
       idempotencyKey: input.idempotencyKey,
+      beforeResign: async () => {
+        checkoutDetailsHeader = await decideCheckoutDetails()
+        checkoutDetailsDecided = true
+      },
     })
+    if (!checkoutDetailsDecided) checkoutDetailsHeader = await decideCheckoutDetails()
 
-    return this.merchantCompletion.retryRequest(url ?? paymentRequired.resource.url, initialInit, paymentRequired, receipt)
+    return this.merchantCompletion.retryRequest(resumeUrl, initialInit, paymentRequired, receipt, checkoutDetailsHeader)
   }
 
   /**
@@ -1758,6 +1803,11 @@ export class HavenClient {
     const request = snapshotX402Request(url, requestInit)
     const option = selectStandardPaymentOption(paymentRequired.accepts)
     const idempotencyKey = options.idempotencyKey ?? (option ? buildX402IdempotencyKey(paymentRequired, option) : undefined)
+    // #4872: decided BEFORE authorisation; a required checkout detail that
+    // cannot be shared refuses here, with no payment created.
+    const checkoutDetailsHeader = await checkoutDetailsHeaderFor({ getAgent: () => this.getAgent(), get: (path) => this.get(path) }, paymentRequired, url, {
+      requestHeaders: requestInit?.headers,
+    })
     let receipt: X402Receipt
     try {
       receipt = await this.authorizeX402(paymentRequired, options)
@@ -1773,7 +1823,7 @@ export class HavenClient {
       }
       throw err
     }
-    const retryResponse = await this.merchantCompletion.retryRequest(url, requestInit, paymentRequired, receipt)
+    const retryResponse = await this.merchantCompletion.retryRequest(url, requestInit, paymentRequired, receipt, checkoutDetailsHeader)
     return mcpSessionId || nativeChallenge ? this.merchantTransport.surfaceResult(retryResponse) : retryResponse
   }
 
@@ -1838,6 +1888,13 @@ export class HavenClient {
      */
     noFundingLeg?: boolean
     /**
+     * #4872: headers for the PAID request only (the `tools/call` that carries
+     * the payment header) — never the unpaid MCP `initialize` or
+     * `notifications/initialized` handshake, which read `init`. The hosted
+     * settle leg passes the checkout-details answer here.
+     */
+    paidRequestHeaders?: Record<string, string>
+    /**
      * #3778: the optional NON-SECRET delivery pointer ("Bik Bok 5 SEK, order
      * 6ac7…") threaded from haven_settle_mcp_tool / haven_complete_mcp_tool.
      * Recorded on the evidence row when the merchant accepted, so the owner's
@@ -1846,6 +1903,17 @@ export class HavenClient {
      * by the backend's semantic layer.
      */
     deliveryReference?: string
+    /**
+     * #5086: the MCP endpoint Haven stored with this payment's call context.
+     * When given, delivery is checked against it (string for string) instead
+     * of the payment's stored resource address, which on EIP-3009 holds the
+     * merchant's DECLARED address (for example `mcp://tool/<name>`) and need
+     * not be a URL at all. The address is still what the funding evidence report
+     * carries. Omit it (the local SDK path, plain HTTP, a payment with no stored
+     * call context) to keep the address comparison. Pass only a value Haven
+     * stored — never the URL being called, or the check compares it with itself.
+     */
+    approvedEndpoint?: string
   }): Promise<{
     status: number
     ok: boolean
@@ -1880,6 +1948,7 @@ export class HavenClient {
       paymentId: input.paymentId,
       url: input.url,
       noFundingLeg: input.noFundingLeg === true,
+      ...(input.approvedEndpoint !== undefined ? { approvedEndpoint: input.approvedEndpoint } : {}),
     })
     // Non-null on the funding-leg path (the gate below throws without it) and
     // always null on erc7710. Bound once so the evidence calls — which require
@@ -1889,13 +1958,19 @@ export class HavenClient {
       this.merchantTransport.isMcpUrl(input.url) ||
       input.mcpTransport?.handshakeRequired === true
     const x402Wallet = shouldHandshakeMcp ? await this.merchantCompletion.resolveWalletForMerchantCall() : x402PayerAddress(this.delegateAddress, this.x402Wallet)
-    let mcpSessionId: string | undefined
-    if (shouldHandshakeMcp) {
-      mcpSessionId = await this.merchantTransport.initialize(input.url, input.init, x402Wallet)
-    }
+    // #5089: a stateless MCP server (no session id) still gets the MCP request
+    // headers (`Accept`) on the paid call; a failed handshake gets none.
+    const mcpHandshake = shouldHandshakeMcp
+      ? await this.merchantTransport.handshake(input.url, input.init, x402Wallet)
+      : undefined
 
     let requestInit: RequestInit = withX402Wallet(input.init, x402Wallet) ?? {}
-    if (mcpSessionId) requestInit = this.merchantTransport.withSessionHeaders(requestInit, mcpSessionId)
+    if (mcpHandshake) requestInit = this.merchantTransport.withMcpHeaders(requestInit, mcpHandshake)
+    if (input.paidRequestHeaders) {
+      const paidHeaders = new Headers(requestInit.headers)
+      for (const [name, value] of Object.entries(input.paidRequestHeaders)) paidHeaders.set(name, value)
+      requestInit = { ...requestInit, headers: paidHeaders }
+    }
 
     // #3171: same session recovery as `retryRequest` — the hosted twin of the
     // local paid retry must not report a settled-nothing 404 as a rejection.
@@ -2156,6 +2231,34 @@ export class HavenClient {
    * payment_id, 409 no stored context, 410 expired) — the caller decides the
    * fallback (re-send the full context explicitly).
    */
+  /**
+   * #4872: the agent's own saved checkout details, as the payment flow reads
+   * them (`GET /agents/:id/checkout-details`, #4871). Never throws: a failed
+   * read, a 404 from an older backend and every "not available" answer are a
+   * named unavailable state. The keyless hosted server reads it to answer a
+   * merchant's checkout-details request; it neither stores nor logs the values.
+   */
+  async readCheckoutDetails(): Promise<CheckoutDetailsAvailability> {
+    return readCheckoutDetailsAvailability({ getAgent: () => this.getAgent(), get: (path) => this.get(path) })
+  }
+
+  /**
+   * #4872: GET /x402/:id/payment-required — the merchant's x402 challenge as
+   * Haven stored it at authorize (#1355), for any x402 intent of this agent.
+   * The keyless hosted `haven_submit` reads the merchant's checkout-details
+   * request from it before it relays a plain-HTTP payment, which stores no
+   * merchant call context. Untrusted merchant content, normalized by the same
+   * parser every challenge goes through: no stored challenge, or a stored blob
+   * that is not a valid challenge, reads as `null`. Throws `HavenApiError`
+   * (404 unknown or foreign payment_id, 409 not an x402 intent).
+   */
+  async getX402StoredPaymentRequired(paymentId: string): Promise<X402PaymentRequired | null> {
+    const raw = await this.get<{ payment_id: string; payment_required?: unknown }>(
+      `/x402/${encodeURIComponent(paymentId)}/payment-required`,
+    )
+    return raw.payment_required == null ? null : normalizePaymentRequired(raw.payment_required)
+  }
+
   async getX402MerchantCallContext(paymentId: string): Promise<X402MerchantCallContext> {
     const raw = await this.get<RawX402MerchantCallContext>(
       `/x402/${paymentId}/merchant-call-context`,
@@ -2168,6 +2271,8 @@ export class HavenClient {
       // #3781: the catalog row name rides the same blob; absent on a direct
       // haven_pay_mcp_tool purchase.
       ...(raw.catalog_name ? { catalogName: raw.catalog_name } : {}),
+      // #4872: the merchant's checkout-details request, verbatim (untrusted).
+      ...(raw.checkout_details_request !== undefined ? { checkoutDetailsRequest: raw.checkout_details_request } : {}),
       ...(raw.mcp_transport
         ? {
             mcpTransport: {
@@ -2323,6 +2428,11 @@ export class HavenClient {
     if (toolName === 'get_payment_status') {
       const { payment_id } = input as { payment_id: string }
       const result = await this.getPaymentStatus(payment_id)
+      // #4808: the backend's message names haven_report_settlement_evidence in
+      // two states, and this surface has no such tool. Replace it whole, keyed
+      // on the structured fields — see payment-status-message.ts for why the
+      // replacement lives here and not in the shared read.
+      const message = replaceSettlementEvidenceMessage(result, 'get_payment_status').message
       return {
         payment_id: result.paymentId,
         kind: result.kind,
@@ -2344,12 +2454,21 @@ export class HavenClient {
         mpp: result.mpp,
         expires_at: result.expiresAt,
         chain_id: result.chainId,
-        message: result.message,
+        message,
       }
     }
 
     if (toolName === 'get_allowances') {
       return { ...await this.getAllowances() }
+    }
+
+    // #4808: havenTools advertises this tool, so a model that calls it must
+    // reach the capability the SDK already exposes as sweepDelegate(). No
+    // argument is read from `input` and no destination is accepted — the sweep
+    // goes to getAgent().accountAddress, exactly as it does for the local MCP.
+    // Errors propagate unchanged, like the read branches above.
+    if (toolName === 'haven_sweep_delegate') {
+      return { ...await this.sweepDelegate() }
     }
 
     throw new Error(`Unknown tool: ${toolName}`)

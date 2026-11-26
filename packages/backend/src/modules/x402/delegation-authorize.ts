@@ -15,7 +15,7 @@ import type { AgentContext } from '../../middleware/agentAuth.js'
 import { DelegationRailChainUnavailableError, railUnavailableRefusalBody } from '../../rails/delegation-rail.js'
 import { prepareDelegationPayment } from '../../rails/delegation-authorization.js'
 import { computeHybridAccountAddress, ensureDelegateHybridDeployed } from '../../rails/hybrid-provisioning.js'
-import { RelayerBudgetExceededError } from '../../infra/relayer-spend-guard.js'
+import { RelayerBudgetExceededError, RELAYER_BUDGET_EXCEEDED_ERROR_CODE } from '../../infra/relayer-spend-guard.js'
 import {
   buildSettlementDelegation,
   selectStoredAccepted,
@@ -26,6 +26,7 @@ import { serializeUserOp } from '../../rails/execution-rail.js'
 import { insertMachineIntent as createPaymentIntent } from '../../infra/repositories/payment-intents.js'
 import { readRemainingBudget } from '../../infra/chain/delegation-budget-reader.js'
 import { x402Description } from '../../domain/x402-description.js'
+import { requiredCheckoutDetailFields } from './checkout-details-required.js'
 import { formatTokenValue } from '../../domain/tokens.js'
 import { type ResolvePaymentTokenResult } from '../../domain/payment-token.js'
 import { agentHourlyX402CapExceeded, normaliseAddress, ZERO_ADDRESS } from './helpers.js'
@@ -590,6 +591,10 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
         settlement_scheme: 'eip3009',
         mcp_call_context: mcpCallContext ?? null,
         payment_required: paymentRequired ?? null,
+        // #5030: the required checkout-details field names this challenge
+        // carried, so `haven_submit` can fail closed when the stored challenge
+        // itself cannot be read (owner decision 2026-11-22, option b).
+        checkout_details_required_fields: requiredCheckoutDetailFields(paymentRequired),
         delegate_account_address: fundingAuth.prepared.delegateAccountAddress,
       },
       executionRail: 'delegation',
@@ -1014,7 +1019,7 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
     if (err instanceof RelayerBudgetExceededError) {
       // #3053: choke point; allowlisted without a ledger row — the relayer
       // sponsorship budget is exhausted (capacity, not spend policy).
-      return refuse({ code: 429, body: { error: err.message } }, null)
+      return refuse({ code: 429, body: { error: err.message, error_code: RELAYER_BUDGET_EXCEEDED_ERROR_CODE } }, null)
     }
     // #3053: choke point; allowlisted without a ledger row — delegate-account
     // deploy infrastructure, not policy (named in the census guard's header).
@@ -1068,6 +1073,9 @@ export async function runDelegationAuthorize(input: DelegationAuthorizeInput): P
       settlement_scheme: 'erc7710',
       mcp_call_context: mcpCallContext ?? null,
       payment_required: paymentRequired ?? null,
+      // #5030: same record as the 3009 branch above — the required
+      // checkout-details field names this challenge carried.
+      checkout_details_required_fields: requiredCheckoutDetailFields(paymentRequired),
       delegate_account_address: delegateAccountAddress,
     },
     executionRail: 'delegation',

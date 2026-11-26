@@ -15,12 +15,17 @@ import {
   claimPreparedSweepForBoundAgent,
   findEvidenceAnchorForAgent,
   findIntentForEvidenceScoped,
+  findOpenOutcomeUnknownSweepForAgent,
+  findOutcomeUnknownSweeps,
   insertPreparedSweepForBoundAgent,
   insertMerchantReceiptOnce,
   listEvidenceReceiptsForAgent,
   countEvidenceReceiptsForAgent,
-  receiptCursorResolvesForAgent,
+  markSweepFailedFromOutcomeUnknown,
+  markSweepOutcomeUnknown,
   markSweepSubmitted,
+  markSweepSubmittedFromOutcomeUnknown,
+  receiptCursorResolvesForAgent,
   releaseSweepClaim,
   resolveReconciliationForPayment,
   resolveStrandedEventsForAgent,
@@ -28,7 +33,8 @@ import {
   upsertReconciliationEvent,
   type EvidenceBaseInput,
 } from '../machine-payments.js'
-import { upsertOwnerCompanyDetails, type BuyerJoinColumns } from '../owner-company-details.js'
+import { findDelegateSweepAgentMatches } from '../transaction-history.js'
+import { upsertOwnerCompanyDetails, buyerPartyFromJoin, type BuyerJoinColumns } from '../owner-company-details.js'
 
 let seq = 0
 const ADDR = (n: string) => `0x${n.repeat(40).slice(0, 40)}`
@@ -403,6 +409,93 @@ describeDb('machine-payments repository (#1224)', () => {
     expect(await insertPreparedSweepForBoundAgent(input)).toBe(false)
   })
 
+  // ── #5035: outcome-unknown sweeps ──────────────────────────────────────
+
+  it('books a broadcast sweep outcome_unknown WITH its hash, and the confirmer CASes it to submitted', async () => {
+    const agent = await seedAgent()
+    const txHash = `0x${'4'.repeat(64)}`
+    const sweep = await db.query<{ id: string }>(
+      `INSERT INTO delegate_sweeps
+         (agent_id, user_id, chain_id, token_address, from_address, to_address,
+          value_atomic, valid_after, valid_before, nonce, status)
+       VALUES ($1, $2, 84532, $3, $4, $5, 100000, 0, 9999999999, $6, 'submitting')
+       RETURNING id`,
+      [agent.agentId, agent.userId, ADDR('0e'), ADDR('d1'), ADDR('f1'), `0x${'7'.repeat(64)}`],
+    )
+    const sweepId = sweep.rows[0].id
+
+    await markSweepOutcomeUnknown(txHash, sweepId)
+    const booked = await db.query<{ status: string; tx_hash: string }>(
+      `SELECT status, tx_hash FROM delegate_sweeps WHERE id = $1`,
+      [sweepId],
+    )
+    expect(booked.rows[0]).toEqual({ status: 'outcome_unknown', tx_hash: txHash })
+
+    // The confirmer's candidate read sees it; prepare's in-flight read sees it.
+    expect((await findOutcomeUnknownSweeps(10)).map((r) => r.id)).toContain(sweepId)
+    expect((await findOpenOutcomeUnknownSweepForAgent(agent.agentId))?.id).toBe(sweepId)
+
+    // The confirmer's CAS: outcome_unknown → submitted with the MINED hash.
+    const minedHash = `0x${'5'.repeat(64)}`
+    expect(await markSweepSubmittedFromOutcomeUnknown(minedHash, sweepId)).toBe(true)
+    // A second CAS loses — the row is no longer outcome_unknown.
+    expect(await markSweepSubmittedFromOutcomeUnknown(`0x${'6'.repeat(64)}`, sweepId)).toBe(false)
+    const submitted = await db.query<{ status: string; tx_hash: string }>(
+      `SELECT status, tx_hash FROM delegate_sweeps WHERE id = $1`,
+      [sweepId],
+    )
+    expect(submitted.rows[0]).toEqual({ status: 'submitted', tx_hash: minedHash })
+  })
+
+  it('the confirmer fails an outcome_unknown sweep whose authorization expired unused', async () => {
+    const agent = await seedAgent()
+    const sweep = await db.query<{ id: string }>(
+      `INSERT INTO delegate_sweeps
+         (agent_id, user_id, chain_id, token_address, from_address, to_address,
+          value_atomic, valid_after, valid_before, nonce, status)
+       VALUES ($1, $2, 84532, $3, $4, $5, 100000, 0, 9999999999, $6, 'submitting')
+       RETURNING id`,
+      [agent.agentId, agent.userId, ADDR('0e'), ADDR('d1'), ADDR('f1'), `0x${'a'.repeat(64)}`],
+    )
+    const sweepId = sweep.rows[0].id
+    await markSweepOutcomeUnknown(`0x${'b'.repeat(64)}`, sweepId)
+
+    expect(await markSweepFailedFromOutcomeUnknown('expired unused', sweepId)).toBe(true)
+    expect(await markSweepFailedFromOutcomeUnknown('again', sweepId)).toBe(false)
+    const row = await db.query<{ status: string; error_message: string }>(
+      `SELECT status, error_message FROM delegate_sweeps WHERE id = $1`,
+      [sweepId],
+    )
+    expect(row.rows[0]).toEqual({ status: 'failed', error_message: 'expired unused' })
+  })
+
+  it('an outcome_unknown sweep is NOT attributed in transaction history until the confirmer marks it submitted', async () => {
+    const agent = await seedBoundAgent()
+    const txHash = `0x${'8'.repeat(64)}`
+    const sweep = await db.query<{ id: string }>(
+      `INSERT INTO delegate_sweeps
+         (agent_id, user_id, chain_id, token_address, from_address, to_address,
+          value_atomic, valid_after, valid_before, nonce, status, tx_hash)
+       VALUES ($1, $2, 84532, $3, $4, $5, 100000, 0, 9999999999, $6, 'outcome_unknown', $7)
+       RETURNING id`,
+      [agent.agentId, agent.userId, ADDR('0e'), ADDR('d1'), agent.accountAddress, `0x${'9'.repeat(64)}`, txHash],
+    )
+    const sweepId = sweep.rows[0].id
+    const account = await db.query<{ id: string }>(
+      `SELECT id FROM smart_accounts WHERE user_id = $1 AND LOWER(account_address) = LOWER($2)`,
+      [agent.userId, agent.accountAddress],
+    )
+    const accountId = account.rows[0].id
+
+    // `outcome_unknown` is NOT "landed": the six readers filter status = 'submitted'.
+    expect(await findDelegateSweepAgentMatches([txHash], agent.userId, [accountId])).toEqual([])
+
+    await markSweepSubmittedFromOutcomeUnknown(txHash, sweepId)
+    const matches = await findDelegateSweepAgentMatches([txHash], agent.userId, [accountId])
+    expect(matches).toHaveLength(1)
+    expect(matches[0].agent_id).toBe(agent.agentId)
+  })
+
   // ── Merchant receipts: first write wins ────────────────────────────────
 
   it('insertMerchantReceiptOnce stores the FIRST receipt and drops the duplicate', async () => {
@@ -551,6 +644,9 @@ describeDb('machine-payments repository (#1224)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     await upsertOwnerCompanyDetails(ownerB.userId, {
       legal_name: 'Owner B GmbH',
@@ -559,6 +655,9 @@ describeDb('machine-payments repository (#1224)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
 
     const afterA = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(ownerA.agentId, 10)
@@ -572,5 +671,43 @@ describeDb('machine-payments repository (#1224)', () => {
     // other owner's — the join is on THIS row's `user_id`.
     expect(afterB[0].buyer_legal_name).toBe('Owner B GmbH')
     expect(afterB[0].buyer_country).toBe('DE')
+  })
+
+  /**
+   * #4870: the receipt email and the two addresses live on the SAME row the
+   * buyer join reads. This pins the buyer block's key set EXACTLY (`toEqual`,
+   * not `toMatchObject`) — i.e. it pins `buyerPartyFromJoin`'s output. It does
+   * NOT catch a column added to `OWNER_COMPANY_DETAILS_JOIN_COLUMNS` (the
+   * mapper builds a fixed six-key object, so an extra joined column never
+   * reaches it); the fragment itself is pinned by
+   * `owner-company-details-join-columns.test.ts` (#4946).
+   */
+  it('#4870: a stored receipt email and both addresses never reach the buyer block', async () => {
+    const owner = await seedAgent()
+    const intent = await seedIntent(owner.agentId, owner.userId)
+    await upsertEvidenceBase(evidenceInput(owner, { paymentIntentId: intent }))
+    await upsertOwnerCompanyDetails(owner.userId, {
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      vies_checked_at: '2026-09-20T10:00:00.000Z',
+      receipt_email: 'billing@acme.se',
+      billing_address: { line1: 'Sveavagen 1', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
+    })
+
+    const rows = await listEvidenceReceiptsForAgent<BuyerJoinColumns & { id: string }>(owner.agentId, 10)
+    expect(rows).toHaveLength(1)
+    expect(buyerPartyFromJoin(rows[0], true)).toEqual({
+      legal_name: 'Owner A AB',
+      country: 'SE',
+      org_number: '111',
+      vat_number: 'SE556677889901',
+      vies_status: 'valid',
+      // pg hands a timestamptz back as a Date.
+      vies_checked_at: new Date('2026-09-20T10:00:00.000Z'),
+    })
   })
 })

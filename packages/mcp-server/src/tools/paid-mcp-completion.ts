@@ -67,6 +67,7 @@ import {
   type EvidenceReportOutcome,
   type AgentPaymentWarning,
   type X402McpTransport,
+  X_CHECKOUT_DETAILS_HEADER,
 } from '@haven_ai/sdk'
 import type { HostedToolHandlers, HostedToolName } from './contracts.js'
 import { parseStrict } from './parsing.js'
@@ -78,6 +79,17 @@ import {
   paymentWindowExpiredError,
   runTool,
 } from './support/errors.js'
+import {
+  checkoutDetailsAfterSubmit,
+  checkoutDetailsBeforeSpend,
+  checkoutDetailsForFundedDelivery,
+  checkoutDetailsWhilePending,
+  type SettleCheckoutDetails,
+  type StoredCheckoutRequest,
+} from './support/checkout-details.js'
+
+/** The paid MCP request's own headers (the SDK adds the session, wallet and payment headers). */
+const MERCHANT_REQUEST_HEADERS = { 'Content-Type': 'application/json' } as const
 import {
   buildAgentGuidance,
   buildPurchaseSummary,
@@ -94,6 +106,7 @@ import {
   MERCHANT_OUT_OF_GAS_REASON,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
+import { approvedDeliveryTarget } from './support/resource-address.js'
 
 /**
  * #1307: resolve merchant_url/tool_name/arguments/mcp_transport for
@@ -116,6 +129,106 @@ export interface ResolvedMerchantCallContext {
    * haven_pay_mcp_tool purchase). Display tier of the purchase label only.
    */
   catalogName: string | null
+  /**
+   * #4872: the merchant's checkout-details request, verbatim from the challenge
+   * stored at authorize (merchant-call-context). Untrusted; parsed with the
+   * SDK's reader at settle. Read on BOTH paths: an explicitly threaded context
+   * still reads the stored request, and `merchantMismatch` marks an explicit
+   * merchant_url that is not the one the payment was quoted for — the owner's
+   * details are never sent to it. Absent when nothing was stored or asked.
+   */
+  checkoutDetailsStored?: StoredCheckoutRequest
+  /**
+   * #5086: the MCP endpoint Haven stored for this payment, as decided by
+   * `approvedDeliveryTarget` before anything moves — handed to
+   * `completeX402MerchantCall` as `approvedEndpoint`. `undefined` when the
+   * payment has no stored call context (completion then keeps the stored-
+   * address comparison) or the check has not run yet.
+   */
+  approvedEndpoint?: string
+  /**
+   * #5086: the explicit path already read the stored context for the delivery
+   * check; its checkout-details request rides `checkoutDetailsStored`, so it
+   * is not read a second time.
+   */
+  storedContextRead?: boolean
+}
+
+/**
+ * #5086: decide where this payment may be delivered (see
+ * `approvedDeliveryTarget`) and carry the decision on the context. On the
+ * explicit path the stored context read for the check also supplies the
+ * checkout-details request (#4872); an explicit URL that differs from the
+ * stored one is refused there, so `merchantMismatch` cannot arise from it.
+ */
+async function withDeliveryTarget(
+  haven: HavenClient,
+  args: Record<string, any>,
+  context: ResolvedMerchantCallContext,
+  phase: 'settle' | 'complete',
+): Promise<ResolvedMerchantCallContext> {
+  const decided = await approvedDeliveryTarget(haven, args.payment_id, context.merchantUrl, {
+    explicit: typeof args.merchant_url === 'string',
+    phase,
+  })
+  const storedRequest = decided.stored?.checkoutDetailsRequest
+  return {
+    ...context,
+    ...(decided.approvedEndpoint !== undefined ? { approvedEndpoint: decided.approvedEndpoint } : {}),
+    // A 409 (no stored context) is an answer too: the checkout-details read
+    // would get the same 409, so it is not made a second time.
+    ...(decided.stored || decided.noStoredContext ? { storedContextRead: true } : {}),
+    ...(context.checkoutDetailsStored === undefined && storedRequest !== undefined
+      ? { checkoutDetailsStored: { value: storedRequest } }
+      : {}),
+  }
+}
+
+/**
+ * #4872: the stored checkout-details request for an explicitly threaded
+ * context. A failed read (no stored context, a version-skew backend) is no
+ * request. A stored merchant URL that differs from the explicit one marks the
+ * request as a mismatch: a required field then refuses, an optional one is
+ * not sent.
+ */
+async function storedCheckoutRequestFor(
+  haven: HavenClient,
+  paymentId: string,
+  explicitMerchantUrl: string,
+): Promise<{ checkoutDetailsStored?: StoredCheckoutRequest }> {
+  let stored: Awaited<ReturnType<HavenClient['getX402MerchantCallContext']>>
+  try {
+    stored = await haven.getX402MerchantCallContext(paymentId)
+  } catch {
+    return {}
+  }
+  if (stored.checkoutDetailsRequest === undefined) return {}
+  return {
+    checkoutDetailsStored: {
+      value: stored.checkoutDetailsRequest,
+      // #5086: defence in depth. An explicit merchant_url that is not the
+      // stored endpoint is refused by `approvedDeliveryTarget` before this
+      // read can run, so this marks a mismatch only if the stored context
+      // changed between the two reads.
+      ...(stored.merchantUrl !== explicitMerchantUrl ? { merchantMismatch: true } : {}),
+    },
+  }
+}
+
+/**
+ * #4872: the documented flow threads the context explicitly, and the intent
+ * still holds the challenge it was authorized against — read its
+ * checkout-details request too. Only for an explicit context (a rehydrated one
+ * already carries it); no stored context is no request.
+ */
+async function explicitCheckoutRequest(
+  haven: HavenClient,
+  args: Record<string, unknown>,
+  context: ResolvedMerchantCallContext,
+): Promise<StoredCheckoutRequest | undefined> {
+  if (typeof args.merchant_url !== 'string') return undefined
+  if (context.storedContextRead) return undefined
+  return (await storedCheckoutRequestFor(haven, args.payment_id as string, context.merchantUrl)).checkoutDetailsStored
 }
 
 /** #3101: after an erc7710 settle whose merchant reported a hash — report it if the agent can, else poll. */
@@ -465,6 +578,7 @@ export async function resolveMerchantCallContext(
       // catalog entry (the stored context carries it); absent on a direct
       // haven_pay_mcp_tool purchase.
       catalogName: ctx.catalogName ?? null,
+      ...(ctx.checkoutDetailsRequest !== undefined ? { checkoutDetailsStored: { value: ctx.checkoutDetailsRequest } } : {}),
       mcpTransport: parseMcpTransport(
         ctx.mcpTransport ? serializeMcpTransport(ctx.mcpTransport) : undefined,
       ),
@@ -704,7 +818,12 @@ export async function deliverMerchantPayment(
   fundingTxHash?: string,
   // #1508: a scheme with NO funding leg (erc7710) must skip the funding wait
   // ENTIRELY. Omitting fundingTxHash above does NOT achieve that — see below.
-  options?: { noFundingLeg?: boolean; context?: ResolvedMerchantCallContext },
+  options?: {
+    noFundingLeg?: boolean
+    context?: ResolvedMerchantCallContext
+    /** #4872: the checkout-details answer the settle handler already decided before spending. */
+    checkoutDetails?: { header: string | undefined }
+  },
 ): Promise<{
   status: number
   ok: boolean
@@ -731,7 +850,16 @@ export async function deliverMerchantPayment(
   // context could change, and a second GET is a second chance to disagree).
   // (#3778: the delivery reference is refused in the HANDLERS, which know
   // their own tool name and run before any submit — never here.)
-  const context = options?.context ?? (await resolveMerchantCallContext(haven, args))
+  // #5086: haven_complete_mcp_tool resolves its context here, so its delivery
+  // check runs here too — before the funding wait and before delivery. The
+  // settle handler decided it before spending and hands it in with the
+  // context (`approvedEndpoint` may then be undefined on purpose: no stored
+  // call context, completion keeps the stored-address comparison).
+  const context =
+    options?.context ?? (await withDeliveryTarget(haven, args, await resolveMerchantCallContext(haven, args), 'complete'))
+  const approvedEndpoint = context.approvedEndpoint
+
+  const requestHeaders = MERCHANT_REQUEST_HEADERS
 
   // Wait for ≥1 on-chain confirmation of the funding tx BEFORE the merchant
   // verifies the X-PAYMENT header — otherwise its balanceOf(delegate) check
@@ -751,6 +879,23 @@ export async function deliverMerchantPayment(
     await ensureFundingConfirmedOrRefuse(haven, args.payment_id, fundingTxHash)
   }
 
+  // #4872: the checkout-details answer. The settle handler decides it BEFORE
+  // anything is spent and hands it in; haven_complete_mcp_tool's payment is
+  // already funded, so it is decided here, after the funding wait, and a
+  // refusal is `funded` (not delivered). The values stay in memory and ride
+  // only the paid request — never the MCP handshake, never a result or log.
+  const checkoutDetailsHeader = options?.checkoutDetails
+    ? options.checkoutDetails.header
+    : await checkoutDetailsForFundedDelivery(haven, {
+        // An explicitly threaded context reads the stored request only here,
+        // after the funding wait — the payment is then known to be funded.
+        stored: context.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, context)),
+        paymentHeader: args.payment_header,
+        requestHeaders,
+        paymentId: args.payment_id,
+        noFundingLeg: options?.noFundingLeg === true,
+      })
+
   const envelope = {
     jsonrpc: '2.0',
     id: `haven-mcp-${randomUUID()}`,
@@ -763,12 +908,13 @@ export async function deliverMerchantPayment(
       url: context.merchantUrl,
       init: {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: requestHeaders,
         body: JSON.stringify(envelope),
       },
       paymentId: args.payment_id,
       paymentHeader: args.payment_header,
       mcpTransport: context.mcpTransport,
+      ...(checkoutDetailsHeader ? { paidRequestHeaders: { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader } } : {}),
       // #3778: the validated non-secret delivery pointer — recorded on the
       // evidence row when the merchant accepted, so the owner's receipt and
       // dashboard show a deliverable exists.
@@ -778,6 +924,9 @@ export async function deliverMerchantPayment(
       // #1508: the same flag that skips the funding wait above also has to
       // reach the SDK's completion gate, which is where the real refusal was.
       noFundingLeg: options?.noFundingLeg === true,
+      // #5086: deliver to the endpoint Haven stored, not to whatever the
+      // merchant's declared address says (it may be mcp://tool/<name>).
+      ...(approvedEndpoint !== undefined ? { approvedEndpoint } : {}),
     })
   } catch (err) {
     // #1300 review finding: at this point funding is CONFIRMED on-chain, so a
@@ -1566,7 +1715,7 @@ export function createPaidMcpCompletionHandlers(
         // reported sooner. Same reasoning as the erc7710 branch below: there
         // the submit burns the settlement child, which is not recoverable by
         // re-signing either.
-        const merchantContext = await resolveMerchantCallContext(haven, args)
+        const resolvedContext = await resolveMerchantCallContext(haven, args)
         // #3747: the egress policy also runs HERE — before the funding
         // signature relay and before the erc7710 submit (both schemes resolve
         // at this site; erc7710 has no funding leg, so refusing pre-submit is
@@ -1578,11 +1727,49 @@ export function createPaidMcpCompletionHandlers(
         // outcome the issue criterion forbids.
         if (haven.merchantEgress) {
           try {
-            haven.merchantEgress.assertUrl(merchantContext.merchantUrl)
+            haven.merchantEgress.assertUrl(resolvedContext.merchantUrl)
           } catch (err) {
             throw egressRefusalBeforeIntent(err, 'merchant_url')
           }
         }
+        // #5084 / #5086: where this payment may be delivered is decided HERE,
+        // before the funding relay and before the erc7710 submit. An EXPLICIT
+        // merchant_url is taken verbatim above, so it can name another
+        // endpoint than the one the payment was approved for: it is compared
+        // with the endpoint the SERVER stored (never with the resolved
+        // context, which would compare it with itself), or — with no stored
+        // call context — with the payment's stored address. A rehydrated
+        // context is the stored endpoint already. A failed read refuses
+        // before anything is spent. The decision rides the context into
+        // completion as `approvedEndpoint`.
+        const merchantContext = await withDeliveryTarget(haven, args, resolvedContext, 'settle')
+        // #4872: checkout details are decided HERE, before the funding relay
+        // and before the erc7710 submit — the same move #2282 made for the
+        // context refusal. On EIP-3009 the agent's payment header is in hand,
+        // so the real block is measured now; on erc7710 only availability can
+        // be decided (Haven assembles that header at submit), and the block
+        // is checked right after the submit, before anything is sent.
+        //
+        // A before-spend refusal only stands while the intent is still
+        // `pending_signature`. A REPEATED settle (the #3423 crash recovery)
+        // reaches a payment that already moved: there the submit or relay
+        // must give its own answer — the settled replay on erc7710, the state
+        // error on EIP-3009 — and delivery, if any happens, decides checkout
+        // details itself as `funded`/`unsent` (`checkoutDetails: undefined`).
+        // Telling that agent "nothing moved" could make it pay twice.
+        // The rule itself is `checkoutDetailsWhilePending`, shared with the
+        // plain-HTTP `haven_submit` (part 2b).
+        const checkoutDetails: SettleCheckoutDetails | undefined = await checkoutDetailsWhilePending(
+          haven,
+          args.payment_id,
+          async () =>
+            checkoutDetailsBeforeSpend(haven, {
+              stored: merchantContext.checkoutDetailsStored ?? (await explicitCheckoutRequest(haven, args, merchantContext)),
+              paymentHeader: args.payment_header,
+              requestHeaders: MERCHANT_REQUEST_HEADERS,
+              paymentId: args.payment_id,
+            }),
+        )
         // Fast path: fund (relay the signature) then deliver the merchant header
         // in one hosted call. The signature and X-PAYMENT header are both signed
         // by the local edge signer — Haven relays them but never holds the key.
@@ -1613,6 +1800,13 @@ export function createPaidMcpCompletionHandlers(
           // and the merchant is NOT called again.
           if (typeof submitted !== 'string') return submitted.settledReplay
           const paymentHeader = submitted
+          const checkoutDetailsHeader7710 = checkoutDetails
+            ? checkoutDetailsAfterSubmit(checkoutDetails, {
+                paymentHeader,
+                requestHeaders: MERCHANT_REQUEST_HEADERS,
+                paymentId: args.payment_id,
+              })
+            : undefined
           const merchant7710 = await deliverMerchantPayment(
             haven,
             { ...args, payment_header: paymentHeader },
@@ -1623,7 +1817,15 @@ export function createPaidMcpCompletionHandlers(
             // the payment status unconditionally, which is a 409 here because
             // the settle above already moved the intent to 'submitted'. Say
             // "there is no funding leg" explicitly instead of implying it.
-            { noFundingLeg: true, context: merchantContext },
+            {
+              noFundingLeg: true,
+              context: merchantContext,
+              // Undecided (a repeated settle): delivery decides it, as `unsent`.
+              // Defence in depth: today the backend answers a non-pending
+              // intent before any delivery (settled replay or 409), so this
+              // branch is not reached on erc7710; the EIP-3009 twin is pinned.
+              ...(checkoutDetails ? { checkoutDetails: { header: checkoutDetailsHeader7710 } } : {}),
+            },
           )
           const summary7710 = await haven.getPostPurchaseAllowanceSummary(args.payment_id)
           // #2970: "settled" means Haven VERIFIED the settlement on-chain, not
@@ -1819,6 +2021,9 @@ export function createPaidMcpCompletionHandlers(
         }
         const merchant = await deliverMerchantPayment(haven, args, funding.txHash, {
           context: merchantContext,
+          // #4872: decided before the funding relay, above (undecided on a
+          // repeated settle: delivery then decides it as `funded`).
+          ...(checkoutDetails ? { checkoutDetails: { header: checkoutDetails.header } } : {}),
         })
         // #1310: rail-aware remaining-budget summary so the agent can report
         // spend without a separate haven_get_agent/haven_get_allowances round

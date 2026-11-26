@@ -3,6 +3,7 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/backend/src/db/migrations/098_owner_company_details.ts
+  - packages/backend/src/db/migrations/129_owner_company_details_checkout_fields.ts
   - packages/backend/src/infra/repositories/owner-company-details.ts
   - packages/backend/src/modules/owner-profile/service.ts
   - packages/backend/src/modules/owner-profile/vies-client.ts
@@ -20,13 +21,17 @@ covers:
   - packages/sdk/src/receipt.ts
   - packages/backend/src/routes/agent-tax-declaration.ts
   - packages/backend/src/modules/agents/tax-declaration.ts
+  - packages/backend/src/db/migrations/135_agent_checkout_details_sharing.ts
+  - packages/backend/src/routes/agent-checkout-details.ts
+  - packages/backend/src/modules/agents/checkout-details.ts
+  - packages/frontend/src/components/agent-panel/CheckoutDetailsSharingToggle.tsx
   - packages/sdk/src/client-tax-declaration.ts
   - packages/sdk/src/tax-declaration.ts
   - packages/frontend/src/components/agent-panel/TaxDeclarationToggle.tsx
   - packages/mcp/src/server.ts
   - packages/sdk/src/merchant-completion.ts
   - packages/frontend/src/components/ui/Checkbox.tsx
-last-verified: "2026-10-26"
+last-verified: "2026-11-18"
 ---
 
 # Owner company details
@@ -62,6 +67,16 @@ One row per owner, keyed on `user_id` (migration `098_owner_company_details`):
 | `vat_number` | Optional. Normalised on write: uppercase, no spaces (`SE556677889901`, not `se 556677889901`). Its own 2-letter prefix may legitimately differ from `country` (an EU group can register for VAT in a member state that is not its seat of incorporation) — VIES is always asked using the VAT NUMBER's own prefix, never `country` (Greece is the one case: a `GR…` prefix asks VIES as `EL`; see below). A prefix that is not itself a VIES member country code is still accepted and stored, but starts no VIES call at all — see *The VIES states* below. |
 | `vies_status` | `null` (no VAT number submitted), `pending`, `valid`, `invalid`, or `not_verifiable`. |
 | `vies_checked_at` | When the last VIES check COMPLETED — never set while `vies_status` is `pending` (a check in flight has no completion time yet), and cleared to `null` whenever the VAT number itself is cleared, alongside `vies_status`. |
+| `receipt_email` | Optional (#4870). Where a merchant should send the receipt: one address, at most 254 characters (RFC 5321 §4.5.3.1.3's forward-path limit, less the angle brackets), no display name and no CR or LF. The form SUGGESTS the sign-up email as a prefill only while the owner has no company details saved (#4946: a saved row with no receipt email — cleared, or saved before #4870 — shows the field empty, because the two cannot be told apart); nothing is stored until the owner saves, and the sign-up email is never used as a receipt email anywhere else (owner decision 2026-11-17, #4868). |
+| `billing_address` | Optional (#4870). A structured address, stored as one JSONB value in the shape `docs/architecture/13-checkout-details.md` § *The address shape* decides: `line1` (required, ≤70), `line2` (≤70), `line3` (≤70), `city` (required, ≤50), `postCode` (≤16), `subdivision` (≤6, ISO 3166-2) and `country` (required, two uppercase letters). An absent optional member is omitted from the JSON, never stored as `null` or as an empty string. |
+| `shipping_address` | Optional (#4870). The same shape as `billing_address`. "Shipping address is the same as billing" is a form convenience only — there is no stored flag; ticking it saves the billing address as the shipping address. |
+
+The three #4870 fields are saved by the same form and the same `PUT` call as
+the rest of the row, so an owner with no company row cannot store an email or
+an address: `legal_name`, `country` and `org_number` are required, and the
+form says so. They are deliberately **not** part of `parties.buyer` (see
+*Where it surfaces* below) — this slice stores them and sends nothing to any
+merchant.
 
 There is no organisation entity above the user (migration 080's own recorded
 decision) and this is **not** the `agent_organizations` folder tree (migration
@@ -118,9 +133,9 @@ just the settings screen built on top of it; `DELETE` is the one exception
 | Route | Notes |
 |---|---|
 | `GET /user/company-details` | 404 when the flag is off, and only then. 200 with `null` if nothing is saved. Re-triggers a stale `pending` check (an atomic claim) as a side effect. |
-| `PUT /user/company-details` | 404 when the flag is off. Full replacement. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
+| `PUT /user/company-details` | 404 when the flag is off. Full replacement of the row, with one exception: the three #4870 fields follow **omitted keeps, `null` clears** — a field the request omits keeps its stored value (so a dashboard tab built before #4870 cannot wipe it), and an explicit `null` clears it. Setting/changing `vat_number` starts a VIES check; clearing it clears both `vies_status` and `vies_checked_at`. Rate-limited per owner (a count shared with the owner's other rate-limited routes, from any session; #4955). |
 | `DELETE /user/company-details` | **Works regardless of the flag** — the owner's erasure path always works, even after an operator turns the feature back off (owner-privacy default). `{ ok: true }` whether or not a row existed. |
-| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per session credential (a count shared with the credential's other rate-limited routes). |
+| `POST /user/company-details/vies-check` | 404 when the flag is off. Re-runs the check for the saved VAT number; 404 if there is none. Rate-limited per owner (a count shared with the owner's other rate-limited routes, from any session; #4955). |
 
 An agent API key (a bearer token or `x-api-key` value starting `sk_agent_`)
 is refused with a named `403` on `DELETE` always, and on the other three
@@ -163,6 +178,22 @@ editing or deleting details changes what past receipts show going forward
 does remove the owner's data from every future read of every past receipt,
 not just new ones; a receipt states current details, never those the payment
 had at settlement time).
+
+The three #4870 fields are **not** in `parties.buyer`: the buyer block keeps
+exactly the six fields it had before this slice, and a test pins that key set
+exactly (`toEqual`) on the output of `buyerPartyFromJoin`, which both
+consumers — payment evidence and the settled-payment receipt — map through,
+and a separate test pins the join fragment's selected columns, so the three
+fields cannot reach the buyer block through the join fragment (#4946). They are stored for the merchant-facing answer #4871
+builds; this slice sends nothing to any merchant. When a merchant does receive
+them, a merchant receipt showing the owner's email or address is kept twice:
+by the merchant, and by Haven as the owner's own bookkeeping record — stored
+immutably in `merchant_receipts` and attached as a PDF in every accounting
+connection the owner has (Fortnox, Accounted, Igdrasil), retained under
+bokföringslagen 7 kap. 2 § (GDPR Art. 17(3)(b));
+`docs/architecture/13-checkout-details.md` § *The receipt flow*.
+`DELETE /user/company-details` reaches neither. What the delete removes is the
+details row — the one every future Haven read of the owner's details uses.
 
 The SDK mirrors this through its MAPPED, camelCase surfaces —
 `HavenClient.listReceipts()`/`listReceiptsPage()` produce `PaymentParties.buyer`
@@ -283,6 +314,63 @@ agents list read, taken from the sanitized `install_status` of the agent's
 latest setup, and nothing in the delegation, budget, enforcement or
 client-compat path reads it.
 
+### A third reader: the per-agent checkout-details switch (#4871)
+
+The receipt email and the two addresses are also what a merchant asks for at
+checkout. An owner can let ONE agent share them with merchants that ask, with
+a per-agent switch that is **off by default** and that only the owner can turn
+on (`PUT /agents/:id/checkout-details-sharing`, owner session only; the toggle
+on the agent's Settings tab, `CheckoutDetailsSharingToggle`). An agent API key
+is refused with a named `403` — an agent cannot switch sharing on for itself.
+
+The switch is stored on the agent (`agents.checkout_details_sharing_enabled`,
+migration `135_agent_checkout_details_sharing`), not on the owner's row, so
+each agent carries its own consent. It is **independent of the tax declaration
+switch**: either can be on while the other is off, and no constraint ties them
+together. Unlike the tax toggle it does **not** require a VIES-valid VAT
+number, and it does **not** require stored details — the owner may turn
+sharing on before saving anything, and the agent's read then answers
+`no_details`. Switching ON is refused with a structured `409`
+(`reason: 'feature_disabled'`) when the deployment's
+`HAVEN_OWNER_COMPANY_DETAILS` is off; switching OFF always succeeds, so the
+owner can always withdraw sharing.
+
+The agent then reads `GET /agents/:id/checkout-details` with its own key, for
+its own id only: an id that is not the authenticated agent's is refused with a
+`403` before any company-details row is read. For its own id the answer is
+`200` either way:
+
+- `{ available: true, checkout_details: { receipt_email?, billing_address?,
+  shipping_address? } }` when the flag is on, sharing is on for this agent,
+  and at least one field is saved. The field names and the address shape are
+  the ones `docs/architecture/13-checkout-details.md` §2 decides
+  (`line1`, `line2`, `line3`, `city`, `postCode`, `subdivision`, `country`).
+  A field the owner has not saved is **omitted**, never `null`.
+- `{ available: false, reason }` otherwise — `feature_disabled` (flag off),
+  `disabled` (sharing off for this agent, or a foreign agent id) or
+  `no_details` (sharing on, nothing saved). Availability is the body, not the
+  status code: a temporarily unavailable answer is a state to poll, not an
+  error.
+
+The read returns **only a receipt email the owner saved**. It never falls back
+to the sign-up email (owner decision 2026-11-17, epic #4868): with sharing on
+and no receipt email saved, the content has no `receipt_email` key at all. The
+sign-up email is a form prefill in Business details, never a shared value.
+
+This slice sends nothing to any merchant. #4872 attaches the answer to the
+paid request, and only to a merchant that asked for it. Turning the switch off
+between the agent's read and the paid request does not recall an answer
+already attached to that request; the next purchase sees the switch off.
+
+The agent Settings tab's row says the same thing in the owner's words: the
+one-line description names what is shared and with whom ("Shares the receipt
+email and addresses you saved in Business details with merchants that ask."),
+and a closed-by-default **What gets shared** disclosure lists the three
+fields, says only a merchant that asks receives them, that the agent can read
+the details once sharing is on, that only a saved receipt email is ever shared
+(never the sign-in email), and that the owner can switch it off at any time.
+When none of the three fields is saved, the row says so.
+
 ## The settings screen
 
 The Company details card on Settings → Business (`CompanyDetailsCard`,
@@ -353,14 +441,21 @@ the form no longer repeats that detail.
 
 - **Basis**: consent — the owner opts in by calling `PUT
   /user/company-details` or filling in the Company details form on Settings →
-  Business; nothing here is required for an agent or a payment to work.
+  Business; nothing here is required for an agent or a payment to work. The
+  receipt email and the two addresses (#4870) are part of the same consent:
+  they are optional, saved by the same form and the same call, and the
+  sign-up email is only ever a prefill, shown only while no company details are
+  saved (#4946) — it is not stored as a receipt email until the owner saves.
 - **Purpose**: stating the buyer on a payment receipt the owner's own agent may
   give to a merchant, (asynchronously) validating the VAT number against
   VIES, and, for an agent the owner opts in, stating the country and VAT
   number in the buyer-side tax declaration that a key-holding client — the opt-in local MCP server,
   `@haven_ai/mcp`, or a developer's own SDK client — sends on its EIP-3009
   payments; an agent on the connector's default hosted install sends none (see
-  *A second reader* above).
+  *A second reader* above). The receipt email and the billing and shipping
+  addresses (#4870) are stored so they can be passed to a merchant that asks
+  for them — the merchant-facing answer #4871 builds. This slice sends
+  nothing to any merchant.
 - **Retention**: kept until the owner deletes it. `DELETE
   /user/company-details` works regardless of the feature flag, and with the
   flag ON the owner calls it themselves from the Company details card on
@@ -369,7 +464,15 @@ the form no longer repeats that detail.
   still call the ungated `DELETE` with their own session, but in practice
   they ask Haven support, who removes the row directly in the database: the
   route only ever erases the CALLER's own row, so support cannot call it on
-  the owner's behalf. Deleting the Haven account WOULD also
+  the owner's behalf. The three #4870 fields are removed with the row by that
+  same `DELETE` — they live on it, so there is no second erasure path to
+  forget. A merchant receipt that already shows the owner's email or address
+  is kept by the merchant, and by Haven as the owner's bookkeeping record
+  (`merchant_receipts` and the accounting attachments, retained under
+  bokföringslagen 7 kap. 2 § / GDPR Art. 17(3)(b)); that delete reaches
+  neither. What it erases is the details row, the one every future Haven read
+  uses.
+  Deleting the Haven account WOULD also
   remove these details (`user_id` is `ON DELETE CASCADE`), but account
   deletion is an operator action today — there is no self-serve
   delete-my-account route — so that cascade is not itself something an owner

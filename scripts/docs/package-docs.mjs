@@ -579,6 +579,8 @@ export const GOVERNED_PACKAGE_DOCS = [
     // change to that slice must re-implicate it.
     covers: [
       'packages/demo-merchant-mcp/src/**',
+      // #4890: the receipt the README describes is built in the shared core.
+      'packages/merchant-payments/src/**',
       'packages/mcp-server/src/tools/paid-mcp-completion.ts',
       'packages/sdk/src/x402.ts',
     ],
@@ -626,7 +628,139 @@ export const GOVERNED_PACKAGE_DOCS = [
     // session 404 and 30-minute TTL, the readiness gate's 503 body and 15 s
     // cache, the #3170 revert split and its 120/500-character caps, the
     // DelegationManager pin, the skip-settle guard and migration 102.
-    'last-verified': '2026-10-24',
+    // #4853: new § "Stripe recording" verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/products.ts
+    // (`stripeRecording`, `productReceivingAddress`) and src/http.ts (the
+    // /healthz `stripe` block, the fire-and-forget recording), plus
+    // stripe.test.ts / stripe-recording.test.ts / stripe-reconcile.test.ts.
+    // EDITED: the settlement-paths table's "Receives the USDC" row, the
+    // "no product's does today" sentence (one does now), the /healthz endpoint
+    // description, and a "What It Demonstrates" bullet. The Stripe parameters
+    // and the two API versions were re-read from
+    // docs.stripe.com/payments/machine/x402 on 2026-11-16. The optional
+    // STRIPE_PREVIOUS_DEPOSIT_ADDRESS and its operator note were verified
+    // against src/stripe.ts and src/x402.ts. Nothing else re-verified in this
+    // pass.
+    // #4854: ADDED § "What we learned from Stripe sandbox (#4854)" and one
+    // sentence in § "Reconciliation". Stripe and RPC behaviour there is what a
+    // sandbox run on 2026-11-16 observed, not a repository measurement; its
+    // code claims (the recorder, `findRecorded`, the single `getLogs`, the
+    // previous-address recovery path) were verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/x402.ts and src/http.ts at c7a779d59.
+    // #4866: EDITED § "Stripe recording" (the verdict, the new log lines and
+    // /healthz counters, the current-address rule), § "Reconciliation" (the
+    // windows, the report arrays, the exit-code table), the /healthz paragraph,
+    // a § "Coinbase facilitator" bullet (the recovery search's windows), and
+    // the #4854 section's "Not yet handled" paragraph and 200-block note,
+    // rewritten to say what #4866 changed. Verified against src/stripe.ts,
+    // src/stripe-reconcile.ts, src/reconcile-cli.ts, src/log-range.ts,
+    // src/cdp.ts and src/http.ts. Nothing else re-verified in this pass.
+    // #4880: ADDED "What the record carries" and "The receipt number is
+    // derived from the transaction" to § "Stripe recording", a
+    // § "Reconciliation" bullet, and the `description` / `receipt_url` rows in
+    // the #4854 sandbox table. The two rows are a sandbox probe on 2026-11-17,
+    // not a repository measurement; the rest was verified against
+    // src/stripe.ts, src/invoice.ts, src/stripe-reconcile.ts and src/http.ts.
+    // Nothing else re-verified in this pass.
+    'last-verified': '2026-11-17',
+  },
+  {
+    // The merchant kit's paywall proxy (#4891). Its README is the merchant's
+    // path from clone to a first paid call, so its claims about the settings,
+    // the discovery document and the answers the proxy gives are pinned to the
+    // code that produces them.
+    doc: 'packages/paywall-proxy/README.md',
+    owner: '@d-hinders',
+    status: 'current',
+    covers: [
+      'packages/paywall-proxy/src/**',
+      'packages/paywall-proxy/package.json',
+      'packages/paywall-proxy/products.example.json',
+      'packages/paywall-proxy/.env.example',
+      // #5007: the container image. The README's run step is the image's
+      // `docker run`, so a Dockerfile change re-checks the prose that tells a
+      // merchant how to run it — the paths it sets, the volume, the non-root
+      // user and the one-process-per-store rule.
+      'packages/paywall-proxy/Dockerfile',
+      'packages/paywall-proxy/Dockerfile.dockerignore',
+    ],
+    // Registered with the README's first version (#4891): the settings table,
+    // the discovery document's fields and the answer table were written against
+    // src/config.ts, src/discovery.ts and src/handler.ts in the same PR.
+    // Re-verified 2026-11-20 (#4985): Step 1 now turns Sales on and takes the
+    // Sales account's receiving address, the key row names Sales → Setup →
+    // Sales keys, Step 6 says a payment from the merchant's own agent is not a
+    // sale, and .env.example carries the same corrections.
+    // Re-verified 2026-11-20 (#5006): the Step 4 tables, the discovery-field
+    // table and the demo table say which settings now have defaults
+    // (`RPC_URL` on Base Sepolia, `ENDPOINT_NAME`, `ENDPOINT_DESCRIPTION`,
+    // `SALES_OUTBOX`) and what they are, and the `started` line's `rpc` field
+    // is documented.
+    // Re-verified 2026-11-20 (#5007): § "Run it as a container" is new and was
+    // written against packages/paywall-proxy/Dockerfile and
+    // Dockerfile.dockerignore — the two paths the image sets, the `/data`
+    // volume, the non-root user, the one-process-per-store rule and the backup
+    // rule. The rest of the README was not re-read in this pass; #5009
+    // restructures it.
+    // Re-verified 2026-11-20 (#5008): the README gains the `check` section
+    // (one line per check, what each line means, and that it runs with the
+    // proxy stopped), and Step 5 points at it before the proxy starts.
+    // Re-verified 2026-11-20 (#5009, licence paragraph only): § Licence gives
+    // a pilot merchant permission to run and modify the kit to evaluate Haven,
+    // with no written step; `package.json` still says "UNLICENSED".
+    // Re-verified 2026-11-21 (#5009): the README opens with an eight-step
+    // Quickstart that runs the #5007 container image; the old Steps 1-6 became
+    // reference sections below it ("Running from source" keeps the Node path),
+    // and the optional, receipt and sales-reporting tables moved under
+    // Reference → All settings. Every earlier sentence survives or is listed
+    // as corrected in the PR.
+    // Re-verified 2026-11-23 (#5058): the Quickstart's `docker run` examples
+    // and § "Run it as a container" pin `dev-<short-sha>` (no `pilot*` tag
+    // exists until the first `dev → main` promotion), name the package page
+    // where the tags are listed, and state the pilot-if-listed-else-dev rule;
+    // the Apple Silicon sentence adds `--platform linux/amd64`; prerequisite 1
+    // drops the "On Base, both use production" clause and names the dev
+    // backend origin for `HAVEN_SALES_URL`, as does `.env.example`. The tag
+    // rule itself (scripts/ci/paywall-proxy-image-tags.mjs) is unchanged.
+    // Re-verified 2026-11-23 (#5059): § "Coinbase developer keys" gains the
+    // portal link, the key type, the settings Haven's key was created with in
+    // #4852, which value is the id and which the secret, and the env-file and
+    // Railway-variable notes; § "Host it on Railway" is new and was checked on
+    // a Railway service on 2026-11-23 (the two-line Dockerfile and the
+    // inherited `VOLUME`, the injected `PORT`, the volume's root ownership and
+    // `RAILWAY_RUN_UID=0`, the redeploy rule, the multi-line variable);
+    // § "A buyer for the first paid call" is new; Quickstart steps 2, 7 and 8,
+    // the `PRODUCTS_FILE` row, the `CDP_*` rows, the `coinbase key` check row
+    // and the demo table point at them. The Coinbase portal itself was not
+    // opened in this pass: the settings are #4852's record, and the section
+    // tells the merchant to check each on the page.
+    // Re-verified 2026-11-24 (#5073, the cold run of this README): the
+    // Quickstart names the dev dashboard and warns off production, step 7 forks
+    // into a quick tunnel (test only), your own host and Railway, and step 8
+    // lists the buyer's four prerequisites; § "Which tag to pin" is new, and its
+    // newest-tag command was run against the registry on 2026-11-24;
+    // § "How a paid call reaches your API" is read from `forward.ts`
+    // (`upstreamUrl`, `STRIPPED_REQUEST_HEADERS`, `buildUpstreamHeaders`) and
+    // `handler.ts` (`subPath`); § "Log output" from `log.ts`, the core's
+    // `console.error` / `console.warn` calls and `@x402/core` 2.29.0's
+    // `logExtensionResponsesHeader`; the `sales key` row quotes `check.ts`'s
+    // 401, 400 and 429 texts. The Railway trial message and the UUID key id
+    // are the cold run's observations, not re-run here.
+    // Re-verified 2026-11-26 (#5097, the Railway cold run of this README): the
+    // recipe was followed end to end on a Railway service with image
+    // dev-21cff2c (paid call, sale report 201, Products tab filled).
+    // § "Host it on Railway" gains numbered steps (project, volume, domain
+    // before `PUBLIC_BASE_URL`, variables with the staged-change note, `check`
+    // as a one-off `CMD ["check"]` deploy, then the proxy, then the healthcheck,
+    // replica and sleep settings), and the volume and redeploy notes say what
+    // that run checked; Quickstart step 5 sends a Railway merchant there rather
+    // than to a local `.env`; § "The Sales account and its receiving address"
+    // gains the Products tab and the product list address (read from
+    // merchant-catalogue.ts `RETIRE_ALL_PRODUCTS_SQL` and the Setup tab);
+    // prerequisite 3 names a no-key echo upstream for a first call. The Railway
+    // dashboard wording is from Railway's docs pages on 2026-11-26, not from
+    // the dashboard itself.
+    'last-verified': '2026-11-26',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

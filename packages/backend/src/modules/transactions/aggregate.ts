@@ -53,7 +53,7 @@ import { createCache } from '../../platform/cache.js'
 import { toBlockNumber, toCanonicalAddress, toUnixSeconds } from './normalize.js'
 import { buildTransactionCacheKey } from './cache-key.js'
 import { compareTransactions, transactionDedupKey } from './ordering.js'
-import { ingestInboundTransfers } from './receive.js'
+import { explorerRowsToLegs, ingestInboundTransfers } from './receive.js'
 import { findOwnerUserIdForAccount } from '../../infra/repositories/inbound-transfers.js'
 import type {
   FetchAccountTransactionsParams,
@@ -147,14 +147,15 @@ export async function fetchAccountTransactions({
     // Decision (c), #3635: chain 100 is known but history-only — read-only, so
     // no `inbound_transfers` write is attempted for it (the history read stays).
     if (isSupportedChain(chainId)) {
+      const ingestAccount = {
+        id: accountId,
+        userId: (await findInboundOwnerUserId(accountId)) ?? '',
+        accountAddress,
+        chainId,
+      }
       void ingestInboundTransfers(
-        {
-          id: accountId,
-          userId: (await findInboundOwnerUserId(accountId)) ?? '',
-          accountAddress,
-          chainId,
-        },
-        erc20.rows,
+        ingestAccount,
+        explorerRowsToLegs(ingestAccount, erc20.rows),
         log,
       ).catch((err: unknown) => {
         log.warn({ err, accountId, chainId }, 'Inbound transfer ingest pass failed')

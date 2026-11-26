@@ -41,19 +41,14 @@ import { Skeleton } from '@/components/ui/Skeleton'
 import { useAccounts } from '@/hooks/useAccounts'
 import { useUserSigners } from '@/hooks/useUserSigners'
 import { useDeployableChains } from '@/hooks/useDeployableChains'
+import { usePasskeyStep } from '@/hooks/usePasskeyStep'
 import { getChainConfig } from '@/lib/chains'
-import { getPasskeyAssertion, PasskeyUnsupportedError } from '@/lib/passkey'
-import { isPasskeyCancellation } from '@/lib/passkeyErrors'
-import { credentialIdFromKeyId, rememberPasskeyCredentialOnDevice } from '@/lib/signer'
 import {
-  allowCredentialIdsFor,
   classifyCreateAccountError,
   defaultSource,
   findCreatedAccount,
-  keyIdFromCredentialId,
   passkeySources,
   sourceChoiceMatters,
-  sourceHoldsKey,
   type CreateAccountRefusal,
   type PasskeySource,
 } from '@/lib/new-account'
@@ -125,12 +120,6 @@ interface UnknownSubmission {
  */
 type CheckState = 'idle' | 'checking' | 'none_found' | 'read_failed'
 
-function randomChallenge(): Uint8Array {
-  const bytes = new Uint8Array(32)
-  crypto.getRandomValues(bytes)
-  return bytes
-}
-
 function NewAccountDialogBody({
   onClose,
   preferredSourceAccountId,
@@ -141,6 +130,7 @@ function NewAccountDialogBody({
   const { accounts, createAccount, refreshAccounts } = useAccounts()
   const { signers, loadError, reload } = useUserSigners()
   const { chains } = useDeployableChains()
+  const passkey = usePasskeyStep()
 
   const sources = useMemo(() => (signers ? passkeySources(accounts, signers) : []), [accounts, signers])
   const initialSource = useMemo(() => defaultSource(sources, preferredSourceAccountId), [sources, preferredSourceAccountId])
@@ -245,47 +235,28 @@ function NewAccountDialogBody({
     const baselineIds = new Set(accounts.map((a) => a.id))
 
     setStage('passkey')
-    let credentialId: string
-    try {
-      const assertion = await getPasskeyAssertion({
-        challenge: randomChallenge(),
-        // A retry offers only the recorded request's passkey (see keyId).
-        allowCredentialIds: unknown ? [credentialIdFromKeyId(unknown.keyId)] : allowCredentialIdsFor(source),
-      })
-      credentialId = assertion.credentialId
-    } catch (err) {
+    // ONE assertion, restricted to the source account's passkeys — or, on a
+    // retry, to the recorded request's single passkey. The step is shared with
+    // the Sales dialog (#4904); see `usePasskeyStep` for what each outcome
+    // means.
+    const outcome = await passkey.run(source, unknown ? { onlyKeyId: unknown.keyId } : undefined)
+    if (outcome.kind !== 'asserted') {
       setStage('form')
-      if (err instanceof PasskeyUnsupportedError) {
-        setRefusal({ kind: 'passkey_unsupported' })
-        return
-      }
       // A dismissed sheet is the user changing their mind, not a failure: back
       // to the form with nothing to report.
-      if (isPasskeyCancellation(err)) return
-      setRefusal({ kind: 'passkey_failed' })
+      if (outcome.kind === 'cancelled') return
+      setRefusal(
+        outcome.kind === 'unsupported'
+          ? { kind: 'passkey_unsupported' }
+          : outcome.kind === 'failed'
+            ? { kind: 'passkey_failed' }
+            : outcome.kind === 'key_not_on_source'
+              ? { kind: 'key_not_on_source' }
+              : { kind: 'other_passkey' },
+      )
       return
     }
-
-    const keyId = keyIdFromCredentialId(credentialId)
-    // The browser was asked for this account's passkeys only; an authenticator
-    // that answered with another one would be refused by the server as
-    // KEY_NOT_ON_SOURCE, so say so without sending it.
-    if (!sourceHoldsKey(source, keyId)) {
-      setStage('form')
-      setRefusal({ kind: 'key_not_on_source' })
-      return
-    }
-    // The browser was asked for the recorded passkey only; one that answered
-    // with another would send the recorded key with a different key_id, which
-    // the server refuses (IDEMPOTENCY_KEY_REUSED). Say so without sending it.
-    if (unknown && keyId.toLowerCase() !== unknown.keyId.toLowerCase()) {
-      setStage('form')
-      setRefusal({ kind: 'other_passkey' })
-      return
-    }
-    // This device holds the credential: the marker lets later signing on the
-    // new account pick it without asking (#1079).
-    rememberPasskeyCredentialOnDevice(credentialId)
+    const keyId = outcome.keyId
 
     setStage('creating')
     try {

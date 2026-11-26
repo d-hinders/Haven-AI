@@ -3,6 +3,12 @@ owner: "@d-hinders"
 status: current
 covers:
   - packages/core/src/approx-mark.ts
+  - packages/frontend/src/components/sales/CreateSalesKeyDialog.tsx
+  - packages/frontend/src/components/sales/SalesFirstRun.tsx
+  - packages/frontend/src/components/sales/SellerSetupPrompt.tsx
+  - packages/frontend/src/components/connect-agent/CloseGuardPanel.tsx
+  - packages/frontend/src/context/MerchantServicesContext.tsx
+  - packages/frontend/src/components/sales/SalesOverviewTab.tsx
   - packages/frontend/src/lib/money-flow-tally.ts
   - packages/frontend/src/app/globals.css
   - packages/frontend/src/components/connect-agent/ConnectSteps.tsx
@@ -64,6 +70,11 @@ covers:
   - packages/frontend/src/components/haven/BudgetMeter.tsx
   - packages/frontend/src/components/haven/ApprovalRequiredBanner.tsx
   - packages/frontend/src/components/haven/TransactionMovement.tsx
+  - packages/frontend/src/components/haven/BalanceFreshnessIndicator.tsx
+  - packages/frontend/src/components/haven/CredentialHandoffCard.tsx
+  - packages/frontend/src/components/sidebar/Sidebar.tsx
+  - packages/frontend/src/components/PaymentCredentialsModal.tsx
+  - packages/frontend/src/lib/payment-status.ts
   - packages/frontend/src/components/haven/Amount.tsx
   - packages/frontend/src/components/haven/AttentionList.tsx
   - packages/frontend/src/components/haven/NoticeRow.tsx
@@ -129,7 +140,7 @@ covers:
   - packages/frontend/src/components/connect-agent/SetupStates.tsx
   - packages/frontend/src/components/haven/DirectionMark.tsx
   - packages/frontend/src/components/settings/ProfileNameEditor.tsx
-last-verified: 2026-11-06
+last-verified: 2026-11-19
 ---
 
 # Haven Design System
@@ -562,6 +573,14 @@ body between the header and footer rows — not on the rows themselves, because
 `footer` is optional: `TransactionDetailPanel` passes one only for a record with
 a real transaction hash (#4267), so the inset has to hold with and without it.
 
+The panel's title `<h2>` carries `break-words` (#4931). Since #4883 the drawer
+title is the server's counterparty name, and a receipt seller or catalog name
+can run to 120 characters with no spaces; the header row is not a scroll box, so
+an unbroken name would spill past the close button and the panel's right edge —
+off-screen at 390, where the panel is full width. `break-words`
+(`overflow-wrap: break-word`) wraps it inside the header; `break-all` is wrong
+here because it would split a normal two-word title mid-word.
+
 **Keep `backdrop-filter` off anything that spans a safe-area band** (#2819). The
 top bar originally grew the blurred `<header>` itself by `--v2-safe-top`, putting
 the status-bar band inside a `backdrop-filter` layer; on the installed iOS shell
@@ -683,9 +702,11 @@ The authenticated app uses one stable product shell:
   - **More is a cell of the bar, and only opens** (#4053, #4058). Until #4053 it was a sibling painted over the bar on `--v2-z-nav-toggle`, because #2820's full-screen drawer covered the bar. Since #4058 its name is the constant *Open sidebar* (with `aria-expanded`) and its label always "More": the sheet covers the cell, and *Close sidebar* belongs to the sheet's ✕ alone — two buttons with that name would break the harness under Playwright's strict mode.
 - **The More sheet** (#4053, `components/sidebar/MoreSheet.tsx`) replaced #2820's full-screen drawer — the desktop rail stretched to the screen. Since #4058 it is a floating card over the floating bar.
   - **Geometry:** a card `max(8px, inset)` in from the sides and the bottom, `rounded-3xl`, capped at `max-w-lg` and centred; it covers the tab bar. Sized to its content up to a max height, scrolling inside beyond that. Its scrim dims everything from below the status-bar band (§ *Safe areas*) to the viewport **bottom**, edge to edge — no scrim edge across the pill, no undimmed strip.
-  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
+  - **Content:** a drag handle; the logo band (wordmark — not a link here — and the environment badge) beside the sheet's ✕ (44px, *Close sidebar*); the account row (name and email, #4358 — no longer a link, `/profile` is gone); one compact list of only the destinations the tab bar lacks, derived from `TAB_ROUTES` (Analytics, Sales when on, Accounting when shown, Marketplace, Contacts, Settings); the theme control as a three-way `SegmentedControl`; and a visible **Log out** row — no kebab.
   - **Behaviour:** a modal `role="dialog"` (`aria-modal`, #4058): while it is open the tab bar and `<main>` are `inert` and Tab cycles inside the card. Closes on the ✕, scrim tap, Escape, a downward swipe on the handle (`SWIPE_DISMISS_PX`), a destination tap and any route change; focus moves in on open and back to More on a dismissal — not on a destination tap or route change, which is why `useFocusTrap` (restore on every close) is not reused. It exists in the DOM only while open, and `data-state="open"` marks the end of its enter animation (`.v2-sheet-enter`, motion-gated) — the e2e helpers key on both.
 - Sidebar nav: 36px row height, 16px icon box, 13px medium label. (The Approvals item and its live actionable-count badge were deleted with the Safe rail, [#1989](https://github.com/d-hinders/Haven-AI/issues/1989). The one dynamic entry left is Accounting ([#2869](https://github.com/d-hinders/Haven-AI/issues/2869)): a muted "Coming soon" badge when hosted but not enabled, an attention dot when the feed needs attention, and hidden on self-hosted.)
+- **A conditional entry that is hidden on load and on a failed read: Sales** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). #4900 adds it (`Sidebar.tsx` `salesNavItem`, read from the shell's one merchant-services setting through `MerchantServicesContext`). Sales is absent while its setting loads, when that read fails, and when Sales is off; it shows only on a read that says Sales is on. That is the opposite of Accounting, which shows on a failed read (`Sidebar.tsx`'s `accountingFeedOffState`): Accounting is a destination every hosted user has, while Sales is a destination only a merchant who turned it on has, so an unknown answer hides it rather than offering a page that may not exist. Its icon is lucide `ReceiptText`. **Placement:** in the rail it comes after Transactions and before Accounting; in the More sheet it comes after Analytics. The sheet needs no placement of its own: its list is the rail's order with the tab bar's routes removed (`Sidebar.tsx` `sheetItems`), so Sales lands after Analytics there by itself. The tab bar's order is a separate rule (`MobileTabBar` builds its cells with `TAB_ROUTES.map(… items.find …)`), and Sales is not a tab.
+- **Entries are found by route, never by index.** `Sidebar.tsx` picks rail entries out of `baseNavItems` through `navItem(href)` (it picked them by position until #4900), and `/design-system` and `MobileTabBar` read the same array. Sales is not in `baseNavItems`: it is `salesNavItem`, spliced into the Money group after Transactions only when the setting is ready and on, so the shared array stays the entries every user has.
 - Brand: the wordmark may use `.v2-brand-gradient-text`; do not repeat the gradient elsewhere in nav.
 - User menu: two-line user card with a kebab menu using popover shadow; destructive menu items use danger styling.
 - **No top bar** ([#4029](https://github.com/d-hinders/Haven-AI/issues/4029), epic #4027): the authenticated chrome above the scroll region is the `SafeAreaBand` — the opaque status-bar strip — and nothing else; the 2px non-production warning line #4029 added was removed the next day, because on a phone, with no label in view, it read as a rendering bug. There is no `banner` landmark; `nav` and `main` remain. Page-level CTAs go in the `PageHeader` actions, and detail pages carry their own back link above the title (#4028). The environment badge lives beside the wordmark in the logo band (rail and More sheet), with a gap between them — the app's only environment marker. Each width shows exactly one theme control: the rail footer's two-state flip at `lg` and above, the More sheet's three-way choice below it (#4053, superseding #2953 for the phone).
@@ -954,6 +975,31 @@ so the card and the account page now say the same thing.
 Both sites render it through `StatusBadge` since #4571; the overview card's
 hand-rolled chip is gone.
 
+#### Sales
+
+| state | label | tone | source |
+|---|---|---|---|
+| `received` | **Received** | `success` | `lib/payment-status.ts` `SALES_STATUS` — the detail panel's status for a sale; a ledger row carries no badge |
+| `not_counted` | Not counted | `neutral` | `SALES_STATUS` — a move from the owner's own agent or account, shown on Sales and left out of its figures |
+| `no_longer_offered` | No longer offered | `neutral` | `SALES_STATUS` — a product the seller's product list no longer lists |
+
+Approved with the Sales mockup on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894) (2026-11-16) and added by
+[#4908](https://github.com/d-hinders/Haven-AI/issues/4908). None of the three
+is a `PaymentStatus`, so they are their own map, and
+`status-vocabulary.test.ts` walks it in **both** directions: a map entry with
+no row here goes red, and so does a row here with no map entry.
+
+**Received is panel-only.** A sale's ledger row carries no badge, by the same
+rule as a confirmed payment (#3897, #4608): the direction is already the
+amount's sign and tone. **Not counted** and **No longer offered** are neutral:
+they are facts about what the figures include and what the seller lists, not
+problems. The table maps the labels and wires nothing; the Sales screens
+(#4900, #4901) read the map. Today the detail panel's fallback labels every
+money-in, move and deposit "Sent" (`TransactionDetailPanel.tsx`). **#4900 decided: Sales only.** The
+Sales detail panel (`SalesPaymentPanel.tsx`) labels a sale and a payment with
+no sale record Received, and an own move Not counted; the `/transactions`
+panel keeps its fallback, so no Transactions baseline moves.
+
 #### What the table does not cover
 
 Some `StatusBadge` sites are **contextual tags**, not statuses of the thing the
@@ -1191,6 +1237,13 @@ shape everywhere.
   Tax declaration row and the agent Passport row's issued-state `dl` (#4477),
   and `ConnectionsCard.tsx`, which renders its inline feed settings through the
   slot instead of a hand-written sibling wrapper (#4478).
+- **A row that states an off feature's credentials are refused** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894); moved onto a `SettingsRow` by [#4983](https://github.com/d-hinders/Haven-AI/issues/4983)).
+  The Settings → Business Sales section (built by [#4904](https://github.com/d-hinders/Haven-AI/issues/4904))
+  carries a `SettingsRow` reading **Keys not accepted while off** when Sales is off: label "Sales keys", value "Keys not
+  accepted while off", and a detail line saying what that means for the seller ("Sales reports from your seller are refused until Sales is on again."). It is a
+  documented use of this row, not a new component — no badge, no alert, no
+  action; the section's own switch, on the status row above it, is the control. Shown on `/design-system` →
+  *Sales patterns*.
 - **The agent Settings tab is a settings page (#4477).** The agent detail
   page's Settings tab (`app/(authenticated)/agents/[agentId]/AgentSettingsTab.tsx`)
   renders its sections with `SettingsSection` and its rows with `SettingsRow`,
@@ -1238,6 +1291,11 @@ the `/design-system` specimen is unchanged).
   full width. Emit ONE `grid-cols` utility per row: two `sm:grid-cols-[…]`
   classes on one element resolve by their order in the compiled stylesheet,
   not in the class string, so the compact track would silently lose.
+- **Row identity.** A row is keyed by its `label`. A list whose rows share a
+  label passes `id` on each item ([#4954](https://github.com/d-hinders/Haven-AI/issues/4954):
+  one "Address" row per registered Stripe deposit address, keyed by the
+  registration), so a re-read that reorders the rows never reconciles one
+  address's badges or actions onto another.
 - **No outer margin.** The list owns none; the caller spaces it (`className`),
   because the same list sits under a card title in `AgentRulesSummary` and
   directly in a card elsewhere.
@@ -1573,7 +1631,10 @@ The dashboard's top section is `dashboard/MoneyPanel.tsx`, built from four
 registered pieces: `PageHeader` (the heading carries the templated 7-day
 summary sentence from `lib/dashboard-summary.ts` — fixed templates over the
 overview's own figures, never model-written, naming at most two agents and
-one merchant and describing budget stops neutrally), then ONE money card
+one merchant and describing budget stops neutrally; above it, #4709's "Since
+your last visit" line, which is hidden when it would only repeat the 7-day
+sentence — its window lies inside the overview's 7-day window and holds as many
+payments (#4839, owner decision 2026-11-12)), then ONE money card
 (#3897): `Card elevation="raised"` — the page's single most prominent
 surface — with the balance on the left (the figure, the "since yesterday"
 line, the § AreaChart sparkline fed from `spend.balance_by_day` — a missing
@@ -1817,9 +1878,9 @@ revoke/remove, delete contact):
   (`packages/ui/tailwind.preset.js`) and would work there too. The mixed spelling in one class string is the tell — where the
   two forms sit side by side, the one with a modifier is the one that has to be semantic.
 
-**Distribution, with the command that produced it.** Ghost dominates: 205 ghost, 33 tertiary,
-8 primary, 4 danger — 250 literal occurrences, from `packages/frontend` (measured
-2026-11-10 at `3d4874a70`; 191 / 31 / 8 / 4 = 234 on 2026-11-03 at `1344f3a83`; 182 / 30 / 8 / 5 = 225
+**Distribution, with the command that produced it.** Ghost dominates: 239 ghost, 37 tertiary,
+8 primary, 4 danger — 288 literal occurrences, from `packages/frontend` (measured
+2026-11-23 at `b9657c08c`; 210 / 33 / 8 / 4 = 255 on 2026-11-17 at `83d3faff5`; 205 / 33 / 8 / 4 = 250 on 2026-11-10 at `3d4874a70`; 191 / 31 / 8 / 4 = 234 on 2026-11-03 at `1344f3a83`; 182 / 30 / 8 / 5 = 225
 on 2026-10-25 at `fb2da6b92`; re-measured weekly as row `ds-button-variant-distribution` in
 `docs/quality/scan-baselines.json`):
 
@@ -1918,7 +1979,11 @@ default, which is right only while the value is printed beside the button. Since
 [#3998](https://github.com/d-hinders/Haven-AI/issues/3998) it has a labelled shape (`text`, a
 ghost `Button` reading "Copy prompt" → "Copied" (#4003), the visible words kept at the start of the
 accessible name) for a value that is *not* printed, and `onCopyFailed`, which such a caller must
-pass to reveal the value when the clipboard refuses it. `CodeBlock`'s copy button
+pass to reveal the value when the clipboard refuses it. Two callers use that shape: the
+marketplace's offer instruction (#3998) and, since #4985, the Sales page's "Copy setup prompt"
+(`SellerSetupPrompt`, shared by the first-run helper and the Setup tab — the prompt is never
+printed, and `onCopyFailed` reveals it; #5010 adds the second prompt, "Copy own-server prompt",
+through the same component). `CodeBlock`'s copy button
 is still its own implementation and is the obvious next adopter; it is listed above as a blind
 spot of the *check*, which it remains, but it is no longer a shape with nowhere to go.
 
@@ -2309,6 +2374,113 @@ Agents / Security & details), and the agent page (Activity / Tool calls / Settin
   reads with the tab's accessible name — and an optional amber `warningDot` marks a view
   that needs the user: decorative to the eye, named to the ear through its screen-reader
   text.
+- **As a page data-source switch** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). Analytics' **Spending / Revenue** (built by [#4901](https://github.com/d-hinders/Haven-AI/issues/4901)) is Tabs whose selection swaps the page's whole data source, not a view of one surface. It is held in `?view=` beside `?period=`, and each side hides the controls that do not apply to it (Revenue has no Agent facet). **Why not `?tab=`:** the choice changes what the whole page reads, alongside the period — every figure, chart and list below it — so it is a parameter of the page's query, like `?period=`, not a sub-view of one surface the way the account page's Activity / Agents tabs are. Shown on `/design-system` → *Sales patterns*.
+
+### Card header freshness line ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908))
+
+A routine "when was this read" line in `Card.Header`'s `actions` slot, approved
+on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894) for the Sales page's Products tab: **"Read from <host> · 4m ago"** in
+`text-xs` ink-3, then a small ghost **Read now** button. The time is
+`timeAgo` (`lib/format`), so it reads "4m ago", "2h ago" like every other
+relative time without a day band. Read now disables and reads "Reading…" while
+the read is in flight (§ Buttons — no spinner).
+
+It is **not** `BalanceFreshnessIndicator`. That component is an amber warning
+that renders only on a stale or failed read, typed to the wire's
+`BalanceFreshness`; a routine timestamp is the opposite meaning — the read
+worked — so reusing the warning would paint a healthy read as a problem. A
+failed read is the caller's own `InlineAlert` below the header, not this line.
+Precedents for an ink-3 time in a trailing slot: the compact `Row` specimen
+("12m ago") and BudgetMeter's "Last paid …" caption on `/design-system`. Shown on `/design-system` →
+*Sales patterns*.
+
+### StackedBarChart ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908))
+
+`components/ui/StackedBarChart.tsx` — daily bars stacked by series, used by
+Analytics spend (`components/analytics/SpendSection.tsx`, wide and narrow) and
+shown on `/design-system`. Its palette, axis, refusal-marker and tick rules
+live in § *Categorical data-viz series* above and are not repeated here; this
+heading exists so the chart has an entry of its own, approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894) for its
+revenue use.
+
+- **Spend:** one series per agent, filled with the agent's stored tint
+  (`seriesColorForAgent`), refusals as the marker series, and a spend-worded
+  `ariaLabel`.
+- **Revenue (Sales and Analytics Revenue):** one series per **product**, which
+  is not an agent, so the fill comes from `--v2-series-*` by index
+  (`seriesIndex`). A product keeps the index the caller assigns it, across
+  renders and periods, so its colour never changes with its rank. The palette
+  has six stops: five products take stops 1–5, and the rest **fold into one
+  "Other" series**, drawn in neutral ink rather than a sixth stop, so no
+  product is silently given a repeated colour. How the caller picks the five
+  is the consuming slice's decision. There is **no refusal marker** on
+  revenue — a refused payment is not a sale — and the `ariaLabel` is the
+  caller's revenue summary, not the spend wording.
+- **Revenue by where received (#4981).** The Sales By-day chart is one
+  "Revenue" series (`seriesIndex` 0) until the filtered period has a Stripe-held
+  sale; then it draws two non-agent series, **In Haven** (`seriesIndex` 0) and
+  **In Stripe** (`seriesIndex` 1), from each day's `in_stripe_raw`. A zero
+  segment is dropped, so a Stripe-only day shows one segment, and the series add
+  up to the day's revenue and to the Revenue tile. No new props: the series are
+  assigned by index like products. Analytics Revenue stays by product.
+- **Revenue drops the Refusals column.** The chart's screen-reader data table
+  renders a **Refusals** column by default, which would read "Refusals 0" on
+  every day of a revenue chart. `hideRefusals` (#4900) is the opt-in that drops
+  it; a revenue chart passes it. It changes the data table only, and every spend
+  caller leaves it off. The Sales By-day chart (`SalesOverviewTab`) is the first
+  revenue chart; Analytics' Revenue side ([#4901](https://github.com/d-hinders/Haven-AI/issues/4901)) is the second, and the
+  first to stack by product — its five named products take stops 1–5, the rest
+  fold into "Other" in neutral ink, and payments with no sale record take the
+  second neutral ink so the stack adds up to the Revenue tile.
+
+Shown on `/design-system` → *StackedBarChart* (spend) and *Sales patterns*
+(revenue).
+
+### Show-once credential block ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), extracted in [#4905](https://github.com/d-hinders/Haven-AI/issues/4905))
+
+The block that hands over a secret Haven shows exactly once, approved on
+[#4894](https://github.com/d-hinders/Haven-AI/issues/4894). It is **one
+component**, `components/ui/ShowOnceCredentialBlock.tsx`, consumed by:
+
+- `PaymentCredentialsModal` — the agent's Haven credential (`revealable`, with
+  the rotate path as `fallback`);
+- `ReplaceSigningKeyModal` — the new credential after a re-key;
+- the Sales key dialog (`CreateSalesKeyDialog`), whose close guard is the
+  connect flow's `CloseGuardPanel`.
+
+**Anatomy.** The caller owns the heading and one line saying the value is shown
+once. The block owns a `rounded-[10px]` bordered `--v2-surface` box holding the
+value in `font-mono text-xs`, `break-all`, and **under it, outside the tint**, the
+actions: **Copy** (`CopyButton`, whose success is its own inline "Copied") and,
+when `revealable`, **Show / Hide**. The value is a prop and is never copied into
+the block's own state.
+
+**Decisions the extraction settled** (the two earlier copies differed):
+
+- **Actions sit below the box, not inside it.** The tint is the code-block
+  surface; sibling controls on it are what the UI Surface Hierarchy rules out,
+  and inside a Card (the Sales Setup tab) they would stand on a tint the card
+  does not own. Neither earlier copy kept them below, so both move.
+- **A failed copy is a toast** (`Could not copy <label>`), always. A one-time
+  value that fails to copy and says nothing is a lost credential (#4573);
+  `ReplaceSigningKeyModal`'s earlier silent failure is gone.
+- **The creating view opens on the value.** A masked default there reads like
+  the after-state. `revealable` (opens masked, Show / Hide) stays for a view
+  reached later, such as `PaymentCredentialsModal`.
+- **After the creating view closes** the caller passes `value={null}`: the box
+  shows the masked form (the prefix then `•`×12) and `fallback` carries the
+  rotate or replace path. The Sales key dialog never shows a masked-after
+  state: it unmounts on close and the list shows the prefix.
+
+**Close guard.** Closing a creating view before Copy lands asks first through
+`CloseGuardPanel` (an inline panel, not a nested dialog); its `title` and `body`
+props word the question per secret, defaulting to the connect flow's.
+
+**How it differs from `CredentialHandoffCard`** (§ StatusBadge → *What the
+table does not cover*): that card is the download-a-file shape — a credential
+file the user saves, with `Saved` / `Action required` — while this block is
+copy-a-string. Shown on `/design-system` → *Sales patterns*, with the
+`sk_merchant_` prefix #4896 fixes (owner decision on #4894).
 
 ### Agent row — shared `AgentRow` / `AgentBudget` ([#4096](https://github.com/d-hinders/Haven-AI/issues/4096))
 
@@ -3080,13 +3252,20 @@ A vertical list in which **each row is both an instruction and its status**:
 a disc, a heading, and the row's own body (a line of copy, a control, or a
 whole sub-flow) beneath it. Use it when one screen walks the user through a
 short sequence they act on in order and the screen itself observes the
-progress. One primitive, two consumers, one stepper family (#4744):
+progress. One primitive, three consumers, one stepper family (#4744, #4985):
 
 - **`ConnectSteps`** — step 3 of the Connect agent modal (copy → paste →
   approve), where the old Waiting → Connected → Approved ticker said where the
   user was without saying what to do. Section-tier `h3` headings.
 - **The first-run guide** (`DashboardOnboardingGuide`) — the dashboard's Get
   started steps. `p` headings, since the card's `h2` is its one heading.
+- **The Sales first-run helper** (`SalesFirstRun`, #4985) — the Sales page's
+  "Get your first sale" steps, shown until the account is first paid. `p`
+  headings, numbered, with "N of 3 done" in the card header's actions slot as
+  the guide does. Its third row is **optional** — the pattern has no
+  optional-row concept, so the title carries "(optional)" and the count stays
+  over three. Each row's state comes from a read (the catalogue and the Sales
+  keys), so a row may un-tick; see the forward-only rule below.
 
 **Numerals: off under a `StepProgress` band, on where the list is the
 counter.** Inside the Connect agent modal the band counts the wizard's steps
@@ -3168,7 +3347,12 @@ Rules:
 - A row's done state comes from state that only moves forward (the
   connect flow's `promptCopied`, latched per setup and keyed by `setup_id`, so
   "Create a new setup" starts uncopied), never from a value a later action can
-  overwrite.
+  overwrite. **Amended by #4985 (owner decision 2026-11-19, "Yes, it can
+  un-tick"):** a **guidance-only checklist that gates nothing** may un-tick when
+  its observed state goes back — the Sales first-run helper's rows come from
+  reads, so a scheduled read that turns `ok` into `unreachable`, or a revoked
+  Sales key, puts the row back to not done. The dashboard guide's existing
+  behaviour is unchanged: its rows still latch forward.
 - **A row that goes done while the user watches plays `Milestone` Step once**
   (#4706). The flag lives ABOVE `ConnectStepShell`'s key, because the shell
   remounts its body on every sub-state change — a mount cannot mean "just
@@ -3205,7 +3389,8 @@ not announce twice (#4706).
 
 The checklist lived in `components/connect-agent/` while every caller was part
 of the connect flow; the first-run guide was its second product use, so #4744
-promoted it to `components/ui/StepChecklist`. `ConnectSteps` stays in
+promoted it to `components/ui/StepChecklist`, and the Sales first-run helper
+(#4985) is its third. `ConnectSteps` stays in
 `connect-agent/` as the flow's thin wrapper (its label and `h3` headings).
 Its `/design-system` specimens are the "ConnectSteps" section, after
 `StepProgress`, and the numbered "StepChecklist" section after it; the guide's
@@ -3380,7 +3565,11 @@ above the list; the card is never repeated inside a parent card.
    account Activity tab's "In · Out" (short visible labels, so the line fits a
    phone beside the count; sr-only "Money in" / "Money out" before each
    figure), and Transactions' "In · Out" too (#4266; a Direction filter shows
-   only its half). The totals are right-aligned at the line's right edge,
+   only its half). Transactions' Direction facet also offers **Sales** (#5001)
+   to a user with a Sales account: choosing it shows one figure, "Sales
+   <amount>" (sr-only "Money from sales"), and choosing Incoming splits the
+   line into "In <amount> · of which sales <amount>" when the filtered set
+   holds a sale. The totals are right-aligned at the line's right edge,
    which is where the rows' amounts end — no padding-matching to the amount
    column. The page passes
    its figures in the toolbar's `summary` slot and never builds the line, so
@@ -3874,10 +4063,15 @@ balance freshness line and the analytics "last payment" caption.
 
 **Merchant-first titles (#3810).** The dashboard's activity list reads
 `counterpartyLabel` in `lib/transaction-presentation.tsx` with the opt-in
-`noAddress` mode, so a raw address never titles a row there: the merchant's
-site for x402, the receipt/contact name the backend resolved, "Deposit" for
+`noAddress` mode, so a raw address never titles a row there: on an outgoing
+row the name the server resolved in Haven's one naming order (#4882, #4883:
+own account, contact, catalog merchant, receipt seller, resource host —
+`recipientName` on `/transactions` rows, the activity groups' `merchantName`,
+the agent ledger's `counterparty_name`), else the merchant's site for x402
+or the browser's own-account and contact lookups, "Deposit" for
 inbound — or "From <account>" for money that came from another of the user's
-own accounts (#4099) — "New recipient" when nothing resolves, "Agent payment" when an x402
+own accounts (#4099), or "Sale · <product>" / "Sale" for a row the backend
+marks a sale into the Sales account (`sale`, #5000) — "New recipient" when nothing resolves, "Agent payment" when an x402
 row carries no resource URL, and "Returned from <agent>" for sweeps. The
 subtitle is the agent's name; on a send it adds "From <account>", the account
 the money left (#4117), only when the user has more than one account and a
@@ -3899,6 +4093,8 @@ unknown valuation an em dash). Rows group under user-local day headings ("Today"
 "Yesterday" / a short date); the server buckets the groups per day (#3824),
 the client only names the bucket.
 
+**Sales exception: product-first titles** ([#4908](https://github.com/d-hinders/Haven-AI/issues/4908), approved on [#4894](https://github.com/d-hinders/Haven-AI/issues/4894)). This amends the #3810 rule above for the Sales ledger only; every other ledger stays counterparty-first. On Sales the row's `title` is the **product** the sale record names and the subline is the **payer**, because the merchant's question is "what sold", and the payer is the second fact. The payer is one of three kinds (owner decision 2 on #4894): a **contact**, by name; the owner's **own agent**, by name, which is a "Moved between your accounts" row left out of every total; and anyone else as **Wallet** with a short address — including another Haven user's agent, which the merchant is never told uses Haven. A payment with no sale record titles **No product recorded** in ink-3 (`mutedTitle`), never a blank and never the payer moved up: the muted ink says the title is an absence, not a product with that name. The row component gains only the opt-in `mutedTitle` (the title's ink); the title text was always caller-supplied, so the product-first rule lives in the Sales caller, as counterparty-first lives in `counterpartyLabel`. A sale's row carries no badge (see § StatusBadge → *Sales*). Shown on `/design-system` → *Sales patterns*.
+
 ### Transaction detail panel
 
 `TransactionDetailPanel` (#4267, epic #4263) is the one detail drawer for a
@@ -3913,7 +4109,11 @@ pattern, and it leads with the answer:
    is the ledger row's title (`counterpartyLabel` no-address mode, or "Moved
    between your accounts"), the subtitle the kind in words ("Paid request",
    "Payment", "Deposit", "Transfer", "Payment attempt"; dropped where it would
-   only repeat the title, as on a deposit). Below it: `Amount
+   only repeat the title, as on a deposit, and on a sale, #5000, where
+   "Deposit" would contradict "Sale · …"). A sale adds Product, Receipt number
+   and Merchant reference Details rows (only those recorded) and, while
+   merchant services are on, a tertiary `Button href="/sales"` "View in
+   Sales" under them. Below it: `Amount
    size="lg"` with the token amount beside it (a move passes no sign), the
    `StatusBadge` from `transactionRowBadge(tx)` with "Sent" as the panel's
    own fallback (the same word `PAYMENT_STATUS.confirmed` uses, #4567 — the
@@ -3987,6 +4187,8 @@ So `Table.HeaderCell` / `Table.SortableHeaderCell` take **`revealAt="md" | "xl"`
 - **Container-keying makes DOM mount order a layout input**, which viewport-keying never did. `Sidebar` is `dynamic(ssr:false)`, so for the frames before its chunk mounts the shell hands a container-keyed table ~256px it is about to take back; a table can paint one column stage and collapse to the next a moment later. Check it before keying a **new** surface on the container.
 
 Pinning the `md`+ columns instead of staging them is the tempting alternative and it is wrong: it was measured during #1774 and grew desktop rows 85px → 133px. Prefer moving low-priority content rather than dropping it — a date can ride under the Amount for a band before it goes. Moving beats dropping where there is somewhere to move to.
+
+The Sales By payer table's **Last paid** column ([#4960](https://github.com/d-hinders/Haven-AI/issues/4960)) is an `md`-stage consumer of this model. It moves rather than drops: below the stage the same time rides under the payer's name (`tableHideFromClass('md')`), and the phone row list carries it on the line under the name. Unlike Analytics' relative "Last paid" (`timeAgo`), it prints the viewer's local clock ("Today, 14:17", "12 Nov, 09:10"), and inside a sentence it reads "Last paid today, 14:17". The geometry leg in `e2e/table-container-collapse.spec.ts` holds the viewport fixed and resizes the container across 718px.
 
 A new container-keyed table takes `tableColumnClass` / `tableHideFromClass`, never a `md:` width: a viewport-keyed width on a container-keyed collapse is harmless only while this shell makes the two coincide (container ≥ 718px ⟺ viewport ≥ 768px), and splits under any container resize that does not track the viewport.
 

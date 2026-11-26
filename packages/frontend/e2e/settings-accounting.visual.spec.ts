@@ -13,7 +13,9 @@
  * committed widths: it is a state production shows, and a card with
  * no action has to read right in the stacked mobile layout too. The hosted
  * flag-off capture is RETIRED with #4359 — the card renders nothing there —
- * replaced by an assertion that `?tab=business` falls back to General.
+ * replaced by an assertion that the accounting card stays empty. Since #4904
+ * the Business tab itself is always present (the Sales card always has
+ * content), so that assertion also pins the tab and the Sales never-on state.
  *
  * Baselines are Linux-rendered by the "Update visual baselines" dispatch;
  * none are hand-made here.
@@ -230,12 +232,15 @@ test.describe('settings accounting connection states', () => {
     })
 
     /**
-     * #4359: with the flag off, every provider is coming soon — nothing the
-     * user can connect or has connected — so the card renders NOTHING and the
-     * explicit `?tab=business` falls back to the General BODY without
-     * rewriting the URL.
+     * #4359 + #4904: with the flag off every accounting provider is coming
+     * soon — nothing the user can connect or has connected — so the accounting
+     * card renders NOTHING. The Business tab itself is now ALWAYS present once
+     * the reads settle: the Sales card always has content (the switch and the
+     * purpose line, the account, or a retry) and Settings → Business is the
+     * only place Sales can be turned on (#4904). An explicit `?tab=business`
+     * therefore selects the tab and the URL is not rewritten.
      */
-    test(`hosted, flag off — the card renders nothing and ?tab=business falls back (${vp.name})`, async ({ page }) => {
+    test(`hosted, flag off — the Business tab stays and the accounting card renders nothing (${vp.name})`, async ({ page }) => {
       await page.setViewportSize({ width: vp.width, height: vp.height })
       await serveConnections(page, [])
       await serveAccountingFeedStatus(page, accountingFeedComingSoon)
@@ -243,9 +248,20 @@ test.describe('settings accounting connection states', () => {
       await page.evaluate(() => document.fonts.ready)
       await expect(page.locator('button[aria-label="User menu"]')).toHaveCount(1)
       await dismissMobileSidebar(page)
-      await expect(page.getByRole('tab', { name: 'Business' })).toHaveCount(0)
-      // The fallback: General's own content under the still-present ?tab=business.
-      await expect(page.getByRole('heading', { name: 'Profile', exact: true })).toHaveCount(1)
+
+      // #4904: the tab is present and selected, and the deep link is kept.
+      const businessTab = page.getByRole('tab', { name: 'Business' })
+      await expect(businessTab).toHaveCount(1)
+      await expect(businessTab).toHaveAttribute('aria-selected', 'true')
+      await expect(page).toHaveURL(/[?&]tab=business(?:&|$)/)
+
+      // The Sales card's never-on state is what keeps the tab on screen.
+      const sales = page.getByTestId('sales-card')
+      await expect(sales).toHaveCount(1)
+      await expect(sales.getByRole('heading', { name: 'Sales', exact: true })).toHaveCount(1)
+      await expect(sales.getByRole('button', { name: 'Turn on Sales', exact: true })).toHaveCount(1)
+
+      // The accounting card still renders NOTHING with the flag off (#4359).
       await expect(page.getByRole('heading', { name: 'Accounting', exact: true })).toHaveCount(0)
       await expect(page.getByTestId('accounting-coming-soon')).toHaveCount(0)
       await expect(page.getByText('Nothing can be connected yet.')).toHaveCount(0)

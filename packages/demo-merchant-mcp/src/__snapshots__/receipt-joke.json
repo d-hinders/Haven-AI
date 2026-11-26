@@ -1,0 +1,39 @@
+{
+  "fakturanummer": "FAK-2026-00099",
+  "fakturadatum": "2026-11-17",
+  "forfallodatum": "2026-12-17",
+  "ocr_nummer": "2026000998",
+  "saljare": {
+    "name": "Haven Demo AB",
+    "address": "Birger Jarlsgatan 57, 113 56 Stockholm",
+    "org_nr": "559412-3456",
+    "moms_nr": "SE559412345601",
+    "iban": "SE35 5000 0000 0549 1000 0003",
+    "bic": "ESSESESS",
+    "crypto_address": "0x3333333333333333333333333333333333333333"
+  },
+  "kopare": {
+    "identifierare": "0x2222222222222222222222222222222222222222",
+    "typ": "blockkedjeadress",
+    "roll": "agent_delegate"
+  },
+  "rader": [
+    {
+      "beskrivning": "Haven Joke — One joke, delivered at once. Verified and settled by Coinbase's hosted x402 facilitator (CDP). (one-time purchase)",
+      "antal": 1,
+      "apris_exkl_moms": "0.008",
+      "moms_procent": 25,
+      "moms_belopp": "0.002",
+      "totalt_inkl_moms": "0.01"
+    }
+  ],
+  "belopp_exkl_moms": "0.008",
+  "moms_procent": 25,
+  "moms_belopp": "0.002",
+  "totalt_inkl_moms": "0.01",
+  "momsbehandling": "SE_25",
+  "valuta": "USDC",
+  "betalningssatt": "Cryptocurrency (USDC on Base Sepolia testnet)",
+  "blockkedje_referens": "Tx: 0xcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcdcd",
+  "status": "Paid"
+}

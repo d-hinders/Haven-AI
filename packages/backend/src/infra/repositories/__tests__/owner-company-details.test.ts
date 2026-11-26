@@ -53,6 +53,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     expect(first).toMatchObject({ legal_name: 'Acme AB', vat_number: null, vies_status: null })
 
@@ -63,6 +66,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'pending',
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     expect(second.vat_number).toBe('SE556677889901')
     expect(second.vies_status).toBe('pending')
@@ -70,6 +76,52 @@ describeDb('owner-company-details repository (#3332)', () => {
 
     const rows = await db.query(`SELECT count(*)::int AS n FROM owner_company_details WHERE user_id = $1`, [userId])
     expect(rows.rows[0].n).toBe(1)
+  })
+
+  it('#4870: stores and returns the receipt email and both addresses; null clears them', async () => {
+    const userId = await seedUser()
+    const saved = await upsertOwnerCompanyDetails(userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+      receipt_email: 'billing@acme.se',
+      billing_address: { line1: 'Sveavagen 1', line2: '4 tr', city: 'Stockholm', postCode: '111 57', country: 'SE' },
+      shipping_address: { line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' },
+    })
+    expect(saved.receipt_email).toBe('billing@acme.se')
+    // The JSONB round-trip returns the stored object exactly — no extra keys,
+    // no reordering surprises for the caller.
+    expect(saved.billing_address).toEqual({
+      line1: 'Sveavagen 1',
+      line2: '4 tr',
+      city: 'Stockholm',
+      postCode: '111 57',
+      country: 'SE',
+    })
+    expect(saved.shipping_address).toEqual({ line1: 'Storgatan 2', city: 'Goteborg', country: 'SE' })
+
+    // Read back independently of the RETURNING clause.
+    const read = await getOwnerCompanyDetails(userId)
+    expect(read?.receipt_email).toBe('billing@acme.se')
+    expect(read?.billing_address).toEqual(saved.billing_address)
+
+    const cleared = await upsertOwnerCompanyDetails(userId, {
+      legal_name: 'Acme AB',
+      country: 'SE',
+      org_number: '556677-8899',
+      vat_number: null,
+      vies_status: null,
+      vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
+    })
+    expect(cleared.receipt_email).toBeNull()
+    expect(cleared.billing_address).toBeNull()
+    expect(cleared.shipping_address).toBeNull()
   })
 
   it('deleteOwnerCompanyDetails: true when a row existed, false when it did not', async () => {
@@ -82,6 +134,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     expect(await deleteOwnerCompanyDetails(userId)).toBe(true)
     expect(await getOwnerCompanyDetails(userId)).toBeNull()
@@ -96,6 +151,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'pending',
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     const checkedAt = new Date().toISOString()
     const updated = await setViesResult(userId, 'valid', checkedAt, 'SE556677889901')
@@ -114,6 +172,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'pending',
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     // A result computed for a DIFFERENT VAT number than the row now holds
     // (the owner changed it mid-flight) must not land.
@@ -140,6 +201,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'pending',
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     // The owner clears the VAT number while the check for it is in flight —
     // exactly `writeCompanyDetails`'s clearing path (`vat_number: null`,
@@ -151,6 +215,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     // `vat_number = $4` is never true against a NULL column (SQL three-valued
     // logic) — the stale check's result must not resurrect it.
@@ -169,6 +236,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: null,
       vies_status: null,
       vies_checked_at: null,
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     expect(await markViesPending(userId)).toBeNull()
 
@@ -179,6 +249,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'valid',
       vies_checked_at: new Date().toISOString(),
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     const pending = await markViesPending(userId)
     expect(pending?.vies_status).toBe('pending')
@@ -193,6 +266,9 @@ describeDb('owner-company-details repository (#3332)', () => {
       vat_number: 'SE556677889901',
       vies_status: 'valid',
       vies_checked_at: new Date().toISOString(),
+      receipt_email: null,
+      billing_address: null,
+      shipping_address: null,
     })
     const pending = await markViesPending(userId)
     expect(pending).toMatchObject({ vies_status: 'pending', vies_checked_at: null })
@@ -210,6 +286,9 @@ describeDb('owner-company-details repository (#3332)', () => {
         vat_number: 'SE556677889901',
         vies_status: 'pending',
         vies_checked_at: null,
+        receipt_email: null,
+        billing_address: null,
+        shipping_address: null,
       })
       expect(await claimStalePendingForUser(userId, 5)).toBeNull()
       await db.query(`UPDATE owner_company_details SET updated_at = NOW() - INTERVAL '10 minutes' WHERE user_id = $1`, [
@@ -231,6 +310,9 @@ describeDb('owner-company-details repository (#3332)', () => {
         vat_number: 'SE556677889901',
         vies_status: 'pending',
         vies_checked_at: null,
+        receipt_email: null,
+        billing_address: null,
+        shipping_address: null,
       })
       await db.query(`UPDATE owner_company_details SET updated_at = NOW() - INTERVAL '10 minutes' WHERE user_id = $1`, [
         userId,
@@ -254,6 +336,9 @@ describeDb('owner-company-details repository (#3332)', () => {
         vat_number: 'SE556677889901',
         vies_status: 'valid',
         vies_checked_at: new Date().toISOString(),
+        receipt_email: null,
+        billing_address: null,
+        shipping_address: null,
       })
       const row = await db.query<BuyerJoinColumns>(
         `SELECT ocd.legal_name AS buyer_legal_name, ocd.country AS buyer_country,
@@ -290,6 +375,9 @@ describeDb('owner-company-details repository (#3332)', () => {
         vat_number: 'SE556677889901',
         vies_status: 'valid',
         vies_checked_at: new Date().toISOString(),
+        receipt_email: null,
+        billing_address: null,
+        shipping_address: null,
       })
       const row = await db.query<BuyerJoinColumns>(
         `SELECT ocd.legal_name AS buyer_legal_name, ocd.country AS buyer_country,

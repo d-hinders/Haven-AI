@@ -124,6 +124,18 @@ import * as agentsAvatarTintSupersededHolds from './122_agents_avatar_tint_super
 import * as purchaseCorrelationKey from './123_purchase_correlation_key.js'
 import * as userVisits from './124_user_visits.js'
 import * as anchorCalldataCallSemantics from './125_anchor_calldata_call_semantics.js'
+import * as merchantServices from './126_merchant_services.js'
+import * as merchantKeys from './127_merchant_keys.js'
+import * as inboundTransferIdentity from './128_inbound_transfer_identity.js'
+import * as ownerCompanyDetailsCheckoutFields from './129_owner_company_details_checkout_fields.js'
+import * as merchantCatalogue from './130_merchant_catalogue.js'
+// 130 is #4945's (130_merchant_catalogue.ts); this one is 131.
+import * as merchantSales from './131_merchant_sales.js'
+import * as inboundTransfersAccountTime from './132_inbound_transfers_account_time.js'
+import * as inboundTransfersOwnFlagBackfill from './133_inbound_transfers_own_flag_backfill.js'
+import * as merchantDepositAddresses from './134_merchant_deposit_addresses.js'
+// #4871: the per-agent checkout-details sharing switch (epic #4868).
+import * as agentCheckoutDetailsSharing from './135_agent_checkout_details_sharing.js'
 
 /**
  * The shape every entry in `migrations` must have.
@@ -307,4 +319,21 @@ export const migrations: Migration[] = [
   purchaseCorrelationKey,
   userVisits,
   anchorCalldataCallSemantics,
+  merchantServices,
+  merchantKeys,
+  inboundTransferIdentity,
+  ownerCompanyDetailsCheckoutFields,
+  // #4899: takes the next free number after 128 (#4903) and 129 (#4870),
+  // both on dev now. Kept in sorted order.
+  merchantCatalogue,
+  // 130 is #4945's (merchant_catalogue), which merges first.
+  merchantSales,
+  // #4897 (reads): the access path for one account's transfers by time.
+  inboundTransfersAccountTime,
+  // #4897 (reads): one-time own-flag backfill of existing rows.
+  inboundTransfersOwnFlagBackfill,
+  // #4952: the Stripe deposit-address registry.
+  merchantDepositAddresses,
+  // #4871: the per-agent checkout-details sharing switch (epic #4868).
+  agentCheckoutDetailsSharing,
 ]

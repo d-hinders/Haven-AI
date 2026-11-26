@@ -34,6 +34,8 @@ import type { ReactNode } from 'react'
 const mockUsePreferences = vi.fn()
 const mockUseAnalyticsOverview = vi.fn()
 const mockUseAgents = vi.fn()
+const mockUseMerchantServices = vi.fn()
+const mockUseSalesSummary = vi.fn()
 const mockRefetch = vi.fn()
 
 vi.mock('@/hooks/usePreferences', () => ({
@@ -41,12 +43,23 @@ vi.mock('@/hooks/usePreferences', () => ({
 }))
 
 vi.mock('@/hooks/useAnalyticsOverview', () => ({
-  useAnalyticsOverview: (range: string, currency: string, agentId: string | null) =>
+  useAnalyticsOverview: (range: string | null, currency: string, agentId: string | null) =>
     mockUseAnalyticsOverview(range, currency, agentId),
 }))
 
 vi.mock('@/hooks/useAgents', () => ({
   useAgents: () => mockUseAgents(),
+}))
+
+// #4901: the switch exists only while merchant services are on, and the
+// revenue side reads the Sales summary. Both are mocked at their seam, the
+// same idiom the two hooks above use.
+vi.mock('@/context/MerchantServicesContext', () => ({
+  useMerchantServicesContext: () => mockUseMerchantServices(),
+}))
+
+vi.mock('@/hooks/useSalesSummary', () => ({
+  useSalesSummary: (range: unknown) => mockUseSalesSummary(range),
 }))
 
 vi.mock('next/link', () => ({
@@ -68,6 +81,8 @@ import {
   FIXTURE_ANALYTICS_OVERVIEW_EMPTY,
 } from '../../../../../scripts/screenshot.mjs'
 import type { AnalyticsOverviewResponse } from '@/types/analytics'
+import type { SalesSummary } from '@/lib/sales'
+import { salesRangeDays } from '@/lib/sales'
 import { ANALYTICS_RANGE_STORAGE_KEY } from '@/lib/analytics-range'
 
 // See the note above: the parity test owns the fixture's fidelity to the
@@ -112,13 +127,90 @@ function agentList(overrides: Partial<{ agents: typeof AGENTS_LIST; loading: boo
   return { agents: AGENTS_LIST, loading: false, error: null, refetch: vi.fn(), ...overrides }
 }
 
+/** The merchant-services setting (#4904): OFF by default — the state every
+ *  user starts in, and the state the page shipped in. */
+function merchantServices(
+  overrides: Partial<{ status: 'loading' | 'ready' | 'error'; enabled: boolean; merchantAccount: unknown }> = {},
+) {
+  return {
+    status: 'ready' as const,
+    state: null,
+    enabled: false,
+    merchantAccount: null,
+    refresh: vi.fn(),
+    turnOn: vi.fn(),
+    turnOff: vi.fn(),
+    ...overrides,
+  }
+}
+
+/** The Sales account the setting names when Sales is on. */
+const SALES_ACCOUNT = {
+  id: 'account-sales',
+  account_address: '0x5555555555555555555555555555555555555555',
+  chain_id: 8453,
+  name: 'Sales',
+  created_at: '2026-05-04T09:00:00.000Z',
+}
+
+/** The revenue side's ONE read: the Sales summary (#4897). Its figures agree
+ *  with each other — $2.14 = two chat sales ($0.84) + one embeddings sale
+ *  ($0.30) + one payment with no product ($1.00); a $0.50 own move is in no
+ *  total. The Sales tile counts every revenue payment (3 sales + 1 without a
+ *  product = 4) and the average is the total over those 4: $0.535 (#4981). */
+const REVENUE_SUMMARY = {
+  usdc_rates: { usd: 0.9998, eur: 0.92, sek: 11.2 },
+  revenue_raw: '2140000',
+  revenue_in_account_raw: '2140000',
+  sales: 3,
+  average_sale_raw: '535000',
+  without_product: { count: 1, amount_raw: '1000000' },
+  own_moves: { count: 1, amount_raw: '500000' },
+  by_product: [
+    { product_id: 'chat', label: 'Chat completion', sales: 2, amount_raw: '840000' },
+    { product_id: 'embed', label: 'Embeddings', sales: 1, amount_raw: '300000' },
+  ],
+  by_product_other: { products: 0, sales: 0, amount_raw: '0' },
+  by_payer: [
+    {
+      payer: { kind: 'wallet', name: null, address: '0x8f3a5e0b7c1d4a92e6f03b8d15c7a90e4b6d21c0' },
+      payments: 4,
+      amount_raw: '2140000',
+      last_paid_at: '2026-11-16T14:05:00.000Z',
+    },
+  ],
+  by_payer_other: { payers: 0, payments: 0, amount_raw: '0' },
+  unattributed: { payments: 0, amount_raw: '0' },
+  by_day: [
+    {
+      day: '2026-11-16',
+      payments: 2,
+      sales: 1,
+      revenue_raw: '1420000',
+      without_product_raw: '1000000',
+      in_stripe_raw: '0',
+      by_product: [{ product_id: 'chat', amount_raw: '420000' }],
+      other_products_raw: '0',
+    },
+  ],
+  received_in_stripe: { count: 0, amount_raw: '0' },
+} as unknown as SalesSummary
+
+function revenue(overrides: Record<string, unknown> = {}) {
+  return { data: REVENUE_SUMMARY, loading: false, failed: false, refetch: vi.fn(), ...overrides }
+}
+
 beforeEach(() => {
   preferences()
   mockUseAnalyticsOverview.mockReset()
   mockRefetch.mockReset()
   mockUseAgents.mockReset()
+  mockUseMerchantServices.mockReset()
+  mockUseSalesSummary.mockReset()
   mockUseAnalyticsOverview.mockReturnValue(settled())
   mockUseAgents.mockReturnValue(agentList())
+  mockUseMerchantServices.mockReturnValue(merchantServices())
+  mockUseSalesSummary.mockReturnValue({ data: null, loading: false, failed: false, refetch: vi.fn() })
 })
 
 afterEach(() => {
@@ -903,5 +995,222 @@ describe('Analytics — the merchants and balance sections (slice E, #2949)', ()
     const page = screen.getByTestId('analytics-page').textContent ?? ''
     expect(page).not.toMatch(/\bsavings\b/i)
     expect(page).not.toMatch(/\bwallet\b/i)
+  })
+})
+
+describe('Analytics — the Spending / Revenue switch (#4901)', () => {
+  const salesOn = () => merchantServices({ enabled: true, merchantAccount: SALES_ACCOUNT })
+
+  it('shows no switch while merchant services are off, and reads the spend side', () => {
+    // The acceptance criterion: with merchant services off the page renders as
+    // it does today and no switch is shown — the existing baselines are the
+    // pixel half of this assertion.
+    render(<AnalyticsClient />)
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByRole('tab', { name: 'Revenue' })).toBeNull()
+    expect(agentFacetTrigger()).toBeTruthy()
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd', null)
+    // The revenue side's read is skipped, not merely hidden: its section is
+    // not mounted, so the Sales summary is never asked for.
+    expect(mockUseSalesSummary).not.toHaveBeenCalled()
+  })
+
+  it('shows the switch while merchant services are on, Spending selected', () => {
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    render(<AnalyticsClient />)
+    const tabs = screen.getAllByRole('tab')
+    expect(tabs.map((tab) => tab.textContent)).toEqual(['Spending', 'Revenue'])
+    expect(screen.getByRole('tab', { name: 'Spending' }).getAttribute('aria-selected')).toBe('true')
+    expect(screen.getByRole('tab', { name: 'Revenue' }).getAttribute('aria-selected')).toBe('false')
+    // The spend side is still the one on screen, with its own controls.
+    expect(agentFacetTrigger()).toBeTruthy()
+    expect(screen.getByTestId('analytics-tiles')).toBeTruthy()
+  })
+
+  it('switches to revenue: one Sales read, the spend read skipped, the facet hidden', async () => {
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    mockUseSalesSummary.mockReturnValue(revenue())
+    const user = userEvent.setup()
+    render(<AnalyticsClient />)
+    await user.click(screen.getByRole('tab', { name: 'Revenue' }))
+
+    // The side is held in the address beside the period.
+    expect(new URLSearchParams(window.location.search).get('view')).toBe('revenue')
+    // The spend side's request is SKIPPED — the page keeps one request per
+    // side, not two.
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith(null, 'usd', null)
+    // The revenue side's one read carries the Sales day range for the period.
+    const range = mockUseSalesSummary.mock.calls[mockUseSalesSummary.mock.calls.length - 1][0] as {
+      from: string
+      to: string
+    }
+    expect(range.from).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(range.to).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(salesRangeDays(range)).toBe(30)
+
+    // The Agent facet is hidden on the revenue side; the link to Sales takes
+    // its place.
+    expect(screen.queryByRole('button', { name: 'Agent: All agents' })).toBeNull()
+    expect(screen.getByRole('link', { name: 'View in Sales' }).getAttribute('href')).toBe('/sales')
+
+    // The tiles: the total, the count of sales, the average, and what was left
+    // out of every total.
+    const tiles = screen.getByTestId('analytics-revenue-tiles')
+    expect(within(tiles).getByText('Revenue')).toBeTruthy()
+    expect(within(tiles).getByText('$2.14')).toBeTruthy()
+    expect(within(tiles).getByText('from 4 payments')).toBeTruthy()
+    expect(within(tiles).getByText('Sales')).toBeTruthy()
+    // Every revenue payment, as the Sales page counts it: 3 sales + 1 without a product.
+    expect(within(tiles).getByText('4')).toBeTruthy()
+    expect(within(tiles).getByText('from 1 payer')).toBeTruthy()
+    expect(within(tiles).getByText('Average sale')).toBeTruthy()
+    // The total over every payment counted: $2.14 / 4 (#4981), "per payment".
+    expect(within(tiles).getByText('$0.54')).toBeTruthy()
+    expect(within(tiles).getByText('per payment')).toBeTruthy()
+    expect(within(tiles).getByText('Not counted')).toBeTruthy()
+    expect(within(tiles).getByText('$0.50')).toBeTruthy()
+    expect(within(tiles).getByText('1 transfer between your accounts')).toBeTruthy()
+
+    // The chart and the by-product card are the SHARED components, fed by the
+    // one summary: no new chart or tile component exists for this side.
+    expect(screen.getByTestId('analytics-revenue-by-day')).toBeTruthy()
+    expect(screen.getByTestId('analytics-revenue-by-product')).toBeTruthy()
+    expect(screen.getAllByText('Chat completion').length).toBeGreaterThan(0)
+    // The spend side's sections are gone with its request.
+    expect(screen.queryByTestId('analytics-tiles')).toBeNull()
+    expect(screen.queryByTestId('analytics-spend-section')).toBeNull()
+  })
+
+  it('counts a Stripe-held sale in the Revenue tiles: Sales is every payment and Average reads the read’s figure (#4981)', async () => {
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    // One more sale, received in Stripe ($0.01): 4 sales + 1 without a product = 5 payments.
+    mockUseSalesSummary.mockReturnValue(
+      revenue({
+        data: {
+          ...REVENUE_SUMMARY,
+          revenue_raw: '2150000',
+          sales: 4,
+          average_sale_raw: '430000',
+          received_in_stripe: { count: 1, amount_raw: '10000' },
+        },
+      }),
+    )
+    render(<AnalyticsClient />)
+    const tiles = screen.getByTestId('analytics-revenue-tiles')
+    expect(within(tiles).getByText('$2.15')).toBeTruthy()
+    expect(within(tiles).getByText('from 5 payments')).toBeTruthy()
+    expect(within(tiles).getByText('5')).toBeTruthy()
+    expect(within(tiles).getByText('$0.43')).toBeTruthy()
+    expect(within(tiles).getByText('per payment')).toBeTruthy()
+    expect(within(tiles).queryByText('per sale')).toBeNull()
+  })
+
+  it('keeps the chosen side when the period changes', async () => {
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    mockUseSalesSummary.mockReturnValue(revenue())
+    const user = userEvent.setup()
+    render(<AnalyticsClient />)
+    await user.click(screen.getByRole('tab', { name: 'Revenue' }))
+    await user.click(screen.getByRole('button', { name: 'Period: Last 30 days' }))
+    await user.click(screen.getByRole('menuitemradio', { name: 'Last 7 days' }))
+
+    const params = new URLSearchParams(window.location.search)
+    expect(params.get('view')).toBe('revenue')
+    expect(params.get('period')).toBe('7d')
+    expect(screen.getByRole('tab', { name: 'Revenue' }).getAttribute('aria-selected')).toBe('true')
+    // The revenue read follows the new period: seven days, not thirty.
+    const range = mockUseSalesSummary.mock.calls[mockUseSalesSummary.mock.calls.length - 1][0] as {
+      from: string
+      to: string
+    }
+    expect(salesRangeDays(range)).toBe(7)
+  })
+
+  it('opens on the side the address names, without spending the other side’s request', () => {
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    mockUseSalesSummary.mockReturnValue(revenue())
+    render(<AnalyticsClient />)
+    expect(screen.getByRole('tab', { name: 'Revenue' }).getAttribute('aria-selected')).toBe('true')
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith(null, 'usd', null)
+    expect(screen.getByTestId('analytics-revenue')).toBeTruthy()
+  })
+
+  it('renders the spend page when the address names revenue but merchant services are off', () => {
+    // There is no revenue side to show, so the URL's hint loses to the
+    // setting: the page renders exactly as it shipped.
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    render(<AnalyticsClient />)
+    expect(screen.queryByRole('tablist')).toBeNull()
+    expect(screen.queryByTestId('analytics-revenue')).toBeNull()
+    expect(screen.getByTestId('analytics-tiles')).toBeTruthy()
+    expect(mockUseAnalyticsOverview).toHaveBeenLastCalledWith('30d', 'usd', null)
+  })
+
+  it('renders the revenue side’s own loading, empty and error states', () => {
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+
+    mockUseSalesSummary.mockReturnValue({ data: null, loading: true, failed: false, refetch: vi.fn() })
+    const loading = render(<AnalyticsClient />)
+    expect(screen.getByTestId('analytics-revenue-skeleton')).toBeTruthy()
+    expect(screen.queryByTestId('analytics-revenue-tiles')).toBeNull()
+    loading.unmount()
+
+    // A period with nothing in it is one empty state, not four tiles
+    // asserting zeros.
+    mockUseSalesSummary.mockReturnValue(
+      revenue({
+        data: {
+          ...REVENUE_SUMMARY,
+          revenue_raw: '0',
+          sales: 0,
+          average_sale_raw: '0',
+          without_product: { count: 0, amount_raw: '0' },
+          own_moves: { count: 0, amount_raw: '0' },
+          by_product: [],
+          by_day: [],
+        },
+      }),
+    )
+    const empty = render(<AnalyticsClient />)
+    expect(screen.getByText('No sales in this period')).toBeTruthy()
+    expect(screen.queryByTestId('analytics-revenue-tiles')).toBeNull()
+    empty.unmount()
+
+    mockUseSalesSummary.mockReturnValue({ data: null, loading: false, failed: true, refetch: vi.fn() })
+    render(<AnalyticsClient />)
+    expect(screen.getByRole('alert')).toBeTruthy()
+    expect(screen.getByText('Analytics could not load')).toBeTruthy()
+    expect(screen.queryByTestId('analytics-revenue-tiles')).toBeNull()
+  })
+
+  it('renders a period whose only money moved between the owner’s accounts, rather than calling it empty', () => {
+    // Revenue is zero, but the Not counted tile carries the figure: the period
+    // is not empty, and hiding it behind an empty state would lose the one
+    // fact it has.
+    window.history.replaceState(null, '', '/analytics?view=revenue')
+    mockUseMerchantServices.mockReturnValue(salesOn())
+    mockUseSalesSummary.mockReturnValue(
+      revenue({
+        data: {
+          ...REVENUE_SUMMARY,
+          revenue_raw: '0',
+          sales: 0,
+          average_sale_raw: '0',
+          without_product: { count: 0, amount_raw: '0' },
+          by_product: [],
+          by_day: [],
+        },
+      }),
+    )
+    render(<AnalyticsClient />)
+    expect(screen.queryByText('No sales in this period')).toBeNull()
+    const tiles = screen.getByTestId('analytics-revenue-tiles')
+    // Revenue and Average sale are both zero; the own move is the figure.
+    expect(within(tiles).getAllByText('$0.00')).toHaveLength(2)
+    expect(within(tiles).getByText('$0.50')).toBeTruthy()
+    expect(within(tiles).getByText('1 transfer between your accounts')).toBeTruthy()
   })
 })

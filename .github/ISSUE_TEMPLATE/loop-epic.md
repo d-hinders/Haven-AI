@@ -101,3 +101,14 @@ otherwise the epic hangs on a release that will never be cut. -->
 ## Notes
 
 <!-- Shared context, invariants to preserve, money-path callouts, etc. -->
+
+## Method
+
+<!-- Every code claim above is measured at a named commit: write
+"Measured on origin/dev @ <sha>" and put the commands here, inside one code
+fence. A count of matches, a line range of a file containing a text, and a path
+existing or not are written as CHECKABLE lines, which
+scripts/docs/issue-method.mjs re-runs (its header comment is the syntax; the
+worked example is in .agents/skills/new-task/SKILL.md, section "Epics").
+Everything else stays free-form. This comment carries no example on purpose:
+the runner reads a code fence under this heading even inside a comment. -->

@@ -21,7 +21,7 @@ covers:
   - packages/frontend/src/components/accounting/ApiKeyConnectModal.tsx
   - packages/frontend/src/hooks/useAccounting.ts
   - packages/frontend/src/hooks/useAccountingFeed.ts
-last-verified: "2026-09-20"
+last-verified: "2026-11-17"
 ---
 
 # Accounting connections
@@ -42,8 +42,9 @@ the retry sweep, what on-call reads when something is stuck — is in
 
 - **Settings → Accounting** is where a connection is made, changed and removed
   (owner decision 2026-09-11; the card ships in #2868). One row per provider
-  the user can actually connect to or has connected: Fortnox and Accounted
-  (live, over a pasted API key). **Coming-soon providers are hidden**
+  the user can actually connect to or has connected: Fortnox (live, over its
+  own OAuth2 approval) and Accounted (live, over a pasted API key).
+  **Coming-soon providers are hidden**
   (2026-10-23, #4359 — superseding the 2026-09-11 decision to list them as
   *Coming soon*): a provider that is not live, or live but not configured on
   the deployment, renders no row, and when nothing qualifies the whole card
@@ -165,8 +166,13 @@ Two Accounted specifics worth knowing:
 
 A settled payment is delivered as **one document**: Haven renders the verifiable
 receipt underlag (payment id, settled time, book value, merchant, resource,
-chain, transaction hash, and since #4532 the transaction kind and its
-description) and uploads it to your Accounted company. The upload
+chain, transaction hash, since #4532 the transaction kind and its
+description, and since #4876 the product lines and VAT the merchant's receipt
+states, labelled "On the merchant's receipt, as reported by the agent"; since
+#4877, when the receipt states no lines, the Haven catalog name, the
+merchant's price-quote text and the agent's own note, each labelled with who
+supplied it) and
+uploads it to your Accounted company. The upload
 is append-only — Accounted stores a document once and it cannot be edited
 afterwards — so a retry of the same payment never creates a second document.
 Haven only marks the payment delivered when Accounted confirms it stored
@@ -177,9 +183,10 @@ exactly the bytes Haven sent.
   made. Pressing **Check in Accounted** answers from Haven's own delivery
   record — no call to Accounted, and nothing in their audit trail either.
 - **Delivery can be refused.** A key missing the write scope (*Needs more
-  access*), a document over Accounted's 10 MB limit, or a payment whose
-  evidence changed after the document was already stored are shown as not
-  fed, with the reason on the row. Each is final until the underlying cause
+  access*), a document over Accounted's 10 MB limit, or, for a payment first
+  rendered before #4824's input pin, evidence that changed after the document
+  was stored (a payment rendered since then retries with the same bytes) are
+  shown as not fed, with the reason on the row. Each is final until the underlying cause
   changes; none is retried behind your back.
 - **Your accountant books from the document.** Haven does not create journal
   entries or supplier invoices in Accounted — the document is the record, and
@@ -216,7 +223,9 @@ recorded and verified on-chain, otherwise the **funding transaction**,
 explicitly labelled as funding. This is the same hash the payment history in
 the Haven UI headlines. For EIP-3009 payments Haven waits a short window
 (the same one the payment status uses) for the merchant's settlement to be
-reported before feeding, and once a hash is booked it never changes — a
+reported before feeding. Every x402 payment also waits up to two minutes for
+the merchant's receipt (#4876), so its product lines and VAT reach the
+document. And once a hash is booked it never changes — a
 settlement reported later cannot rewrite what your accounting system
 already received.
 

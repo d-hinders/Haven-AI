@@ -1154,6 +1154,112 @@ export async function markSweepSubmitted(
   await db.query(MARK_SWEEP_SUBMITTED_SQL, [txHash, sweepId])
 }
 
+// ── #5035: outcome-unknown sweeps ───────────────────────────────────────────
+//
+// A sweep whose receipt wait timed out (or whose broadcast answer was lost)
+// after the transaction was broadcast is NOT a failure: the tx may still land.
+// It is booked `outcome_unknown` with the hash it was broadcast under, and a
+// confirmer decides the real outcome from USDC `authorizationState(from, nonce)`
+// — independent of which hash mined. `outcome_unknown` is deliberately NOT
+// `submitted`: six queries read `ds.status = 'submitted'` as "landed"
+// (analytics.ts:184/:344/:447, dashboard.ts:550/:695,
+// transaction-history.ts:319), and an unconfirmed sweep must not count as one.
+
+export const MARK_SWEEP_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'outcome_unknown', tx_hash = $1
+       WHERE id = $2 AND status = 'submitting'`
+
+/** Book a broadcast sweep whose outcome is not confirmed yet, keeping its hash. */
+export async function markSweepOutcomeUnknown(
+  txHash: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<void> {
+  await db.query(MARK_SWEEP_OUTCOME_UNKNOWN_SQL, [txHash, sweepId])
+}
+
+export const MARK_SWEEP_SUBMITTED_FROM_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'submitted', tx_hash = $1, submitted_at = NOW()
+       WHERE id = $2 AND status = 'outcome_unknown'`
+
+/**
+ * The confirmer's terminal write: the authorization is used on-chain, so the
+ * sweep landed. The hash is the one that actually mined (the first broadcast
+ * hash or a bump-worker replacement), which is what transaction-history
+ * attribution matches on.
+ */
+export async function markSweepSubmittedFromOutcomeUnknown(
+  txHash: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SWEEP_SUBMITTED_FROM_OUTCOME_UNKNOWN_SQL, [txHash, sweepId])
+  return (result.rowCount ?? 0) > 0
+}
+
+export const MARK_SWEEP_FAILED_FROM_OUTCOME_UNKNOWN_SQL = `UPDATE delegate_sweeps
+       SET status = 'failed', error_message = $1
+       WHERE id = $2 AND status = 'outcome_unknown'`
+
+/**
+ * The confirmer's other terminal write: the authorization expired unused, so
+ * the sweep can never land. Only reachable once `valid_before` has passed.
+ */
+export async function markSweepFailedFromOutcomeUnknown(
+  errorMessage: string,
+  sweepId: string,
+  db: Executor = pool,
+): Promise<boolean> {
+  const result = await db.query(MARK_SWEEP_FAILED_FROM_OUTCOME_UNKNOWN_SQL, [errorMessage, sweepId])
+  return (result.rowCount ?? 0) > 0
+}
+
+export interface OutcomeUnknownSweepRow extends DelegateSweepRow {
+  agent_id: string
+  user_id: string
+  created_at: Date
+}
+
+export const FIND_OUTCOME_UNKNOWN_SWEEPS_SQL = `SELECT id, agent_id, user_id, chain_id, token_address,
+              from_address, to_address, value_atomic, valid_after, valid_before,
+              nonce, status, tx_hash, created_at
+       FROM delegate_sweeps
+       WHERE status = 'outcome_unknown'
+       ORDER BY created_at, id
+       LIMIT $1`
+
+/** The confirmer's candidate set, oldest first. */
+export async function findOutcomeUnknownSweeps(
+  limit: number,
+  db: Executor = pool,
+): Promise<OutcomeUnknownSweepRow[]> {
+  const result = await db.query<OutcomeUnknownSweepRow>(FIND_OUTCOME_UNKNOWN_SWEEPS_SQL, [limit])
+  return result.rows
+}
+
+export const FIND_OPEN_OUTCOME_UNKNOWN_SWEEP_FOR_AGENT_SQL = `SELECT id, chain_id, token_address, from_address, to_address,
+              value_atomic, valid_after, valid_before, nonce, status, tx_hash
+       FROM delegate_sweeps
+       WHERE agent_id = $1 AND status = 'outcome_unknown'
+       ORDER BY created_at DESC
+       LIMIT 1`
+
+/**
+ * #5035: the in-flight sweep prepare must not mint a second authorization
+ * around. Returns the newest unresolved sweep for the agent, if any — the full
+ * row, so prepare can answer its current state instead of only refusing.
+ */
+export async function findOpenOutcomeUnknownSweepForAgent(
+  agentId: string,
+  db: Executor = pool,
+): Promise<DelegateSweepRow | null> {
+  const result = await db.query<DelegateSweepRow>(
+    FIND_OPEN_OUTCOME_UNKNOWN_SWEEP_FOR_AGENT_SQL,
+    [agentId],
+  )
+  return result.rows[0] ?? null
+}
+
 // ── Merchant receipts (#956, lib/merchant-receipt.ts) ────────────────────────
 
 // #2055: the `approval_requests` join half is gone with the table —
@@ -1228,14 +1334,19 @@ export async function getMerchantReceiptRow(
 // supplies the settlement facts — without this branch the Accounted connector
 // would skip the payment with "receipt evidence not found" and no document
 // would ever be uploaded.
+// #4824: the render inputs pinned at the payment's first render ride the same
+// read — one query returns the source row AND the pin, so the renderer never
+// pays a second round trip to learn what it must reproduce.
 export const LOAD_RECEIPT_UNDERLAG_SOURCE_SQL = `SELECT mpe.tx_hash, mpe.chain_id, mpe.merchant_address,
-            pi.sign_hash, pi.signature, pi.delegate_address
+            pi.sign_hash, pi.signature, pi.delegate_address,
+            pi.machine_metadata->'accounting_underlag_inputs' AS pinned_underlag_inputs
      FROM machine_payment_evidence mpe
      LEFT JOIN payment_intents pi ON pi.id = mpe.payment_intent_id
      WHERE mpe.id = $1 AND mpe.user_id = $2
      UNION ALL
      SELECT pi.tx_hash, pi.chain_id, pi.to_address AS merchant_address,
-            pi.sign_hash, pi.signature, pi.delegate_address
+            pi.sign_hash, pi.signature, pi.delegate_address,
+            pi.machine_metadata->'accounting_underlag_inputs' AS pinned_underlag_inputs
      FROM payment_intents pi
      WHERE pi.id = $1 AND pi.user_id = $2
        AND ${DIRECT_PAYMENT_RAIL_SQL}
@@ -1247,6 +1358,14 @@ export interface UnderlagSourceRow {
   sign_hash: string | null
   signature: string | null
   delegate_address: string | null
+  /**
+   * #4824: the underlag render inputs pinned at the payment's first render
+   * (`payment_intents.machine_metadata->'accounting_underlag_inputs'`), or
+   * null when the payment has never rendered. Typed `unknown` because the
+   * renderer validates it — a JSONB column written by an older or newer build
+   * must never be trusted into a document.
+   */
+  pinned_underlag_inputs?: unknown
 }
 
 /**
@@ -1275,6 +1394,12 @@ export async function loadReceiptUnderlagSource(
 // is what keeps Accounted's idempotency key (which derives from the
 // paymentId) from going terminal on a re-file with different bytes.
 //
+// The hash is only ONE of the render inputs that can move between attempts;
+// #4824 pins the rest (the merchant receipt, the delivery reference, the
+// purchase group and the catalog country, and since #4877 the product sources) at the payment's first render, in
+// the same JSONB, so a retry reproduces the first attempt's bytes whichever
+// of them was written in between. See the underlag-input pin below.
+//
 // Storage is `payment_intents.machine_metadata` JSONB — deliberately no
 // migration and no `accounting_feed_syncs` column (the latter would put the
 // change under CODEOWNERS for a fact that lives with the payment, not with
@@ -1301,5 +1426,87 @@ export async function pinAccountingBookedTx(
   db: Executor = pool,
 ): Promise<boolean> {
   const result = await db.query(PIN_ACCOUNTING_BOOKED_TX_SQL, [paymentIntentId, txHash, kind])
+  return result.rows.length > 0
+}
+
+// ── Underlag-input pin (#4824) ────────────────────────────────────────────────
+//
+// The underlag is rendered from live reads on every attempt. Several of those
+// reads can be written AFTER a payment's first render — the merchant receipt
+// (the seller block AND the transaction kind), the delivery reference, the
+// purchase group / parent receipt, the catalog country, and (#4877) the
+// catalog name and quote description. Accounted's
+// idempotency key derives from the paymentId alone, so a retry that renders
+// different bytes is refused as `IDEMPOTENCY_KEY_REUSE` and the row ends
+// `skipped` although the document is already in the customer's store.
+//
+// The remedy (owner decision 2026-11-12) pins the INPUTS — not the bytes — at
+// the payment's first render, stored the #3767 way in
+// `payment_intents.machine_metadata`, and renders every retry from the pin.
+// Template drift stays the accepted risk it already is.
+//
+// Storage is `machine_metadata` for the same reason as the booked-hash pin:
+// no migration, and the fact lives with the payment rather than with one
+// destination's ledger row.
+
+/**
+ * The render inputs frozen at a payment's first render. Deliberately the
+ * MUTABLE ones only: the FX capture, `Settled at`, the booked hash (#3767),
+ * the authorization block and the ledger currency are already stable between
+ * attempts, so pinning them would be pinning the bytes.
+ */
+export interface AccountingUnderlagPin {
+  /** The merchant's own receipt as captured at the first render (#956). */
+  merchantReceipt: { url: string | null; inlineJson: unknown | null } | null
+  /** The derived kind and its description line at the first render (#4532). */
+  transactionKind: string
+  description: string
+  /** The purchase correlation key at the first render (#4534). */
+  purchaseGroupId: string | null
+  parentReceiptRef: string | null
+  /** The catalog country at the first render (#3918). */
+  merchantCountry: string | null
+  /**
+   * #4876: true when the first render showed the merchant-receipt block (lines
+   * and VAT, or "VAT not stated by the merchant"). A pin written before #4876
+   * lacks it, and its retries render no block, so their bytes never move.
+   */
+  receiptLines?: boolean
+  /**
+   * #4877: the product sources at the first render — Haven's catalog name,
+   * the merchant's quote description, the agent's delivery reference. A pin
+   * written before #4877 lacks them and renders none, so its bytes never move.
+   */
+  productSources?: { catalogName: string | null; quoteDescription: string | null; deliveryReference: string | null }
+}
+
+export const PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL = `UPDATE payment_intents
+     SET machine_metadata = COALESCE(machine_metadata, '{}'::jsonb) || jsonb_build_object(
+           'accounting_underlag_inputs', $2::jsonb)
+     WHERE id = $1
+       AND machine_metadata->'accounting_underlag_inputs' IS NULL
+     RETURNING id`
+
+/** A payment reference that is not a UUID cannot be a `payment_intents.id`. */
+const PAYMENT_INTENT_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * Pin the underlag render inputs, on the payment's FIRST render only.
+ * First-writer-wins: a pin that already exists is never replaced, which is
+ * exactly the guarantee the stable-bytes acceptance rests on. True when this
+ * call wrote the pin.
+ *
+ * A reference that is not a UUID (a legacy approval-request id, a test
+ * fixture) is not a `payment_intents.id` and is answered `false` without a
+ * query — the pin is a fact about an intent, and there is no intent to hold
+ * it.
+ */
+export async function pinAccountingUnderlagInputs(
+  paymentIntentId: string,
+  pin: AccountingUnderlagPin,
+  db: Executor = pool,
+): Promise<boolean> {
+  if (!PAYMENT_INTENT_UUID_RE.test(paymentIntentId)) return false
+  const result = await db.query(PIN_ACCOUNTING_UNDERLAG_INPUTS_SQL, [paymentIntentId, JSON.stringify(pin)])
   return result.rows.length > 0
 }

@@ -37,6 +37,14 @@ import {
   SELECT_DELEGATION_FOR_PAYMENT_SQL,
 } from '../src/infra/repositories/delegation-budgets.js'
 import { LIST_ACCOUNT_PASSKEYS_SQL } from '../src/infra/repositories/hybrid-signers.js'
+import {
+  DISABLE_MERCHANT_SETTING_SQL,
+  ENABLE_MERCHANT_SETTING_SQL,
+  FIND_MERCHANT_ACCOUNT_FOR_USER_SQL,
+  LOCK_MERCHANT_SETTING_SQL,
+  MARK_MERCHANT_ACCOUNT_SQL,
+  READ_MERCHANT_SETTING_SQL,
+} from '../src/infra/repositories/merchant-services.js'
 import { INSERT_AGENT_TOOL_INVOCATION_SQL } from '../src/infra/repositories/agent-tool-invocations.js'
 import { INSERT_OPS_ACCESS_LOG_SQL } from '../src/infra/repositories/ops-access-log.js'
 import { OPS_REVEAL_SQL } from '../src/infra/repositories/ops-reveal.js'
@@ -478,6 +486,13 @@ const QUERIES: SmokeQuery[] = [
   { name: 'smart-accounts: ownership check (id+address)', sql: FIND_OWNED_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: ownership check (id+is_default)', sql: FIND_OWNED_ACCOUNT_DEFAULT_FLAG_SQL },
   { name: 'smart-accounts: refusal-ledger account resolution', sql: FIND_OWNED_ACCOUNT_ID_BY_ADDRESS_AND_CHAIN_SQL },
+  // #4895: merchant services — the per-user setting and the per-account marker.
+  { name: 'merchant-services: ensure-and-lock the setting row', sql: LOCK_MERCHANT_SETTING_SQL },
+  { name: 'merchant-services: find the merchant account', sql: FIND_MERCHANT_ACCOUNT_FOR_USER_SQL },
+  { name: 'merchant-services: mark the merchant account (tenant-scoped)', sql: MARK_MERCHANT_ACCOUNT_SQL },
+  { name: 'merchant-services: turn the setting on', sql: ENABLE_MERCHANT_SETTING_SQL },
+  { name: 'merchant-services: turn the setting off', sql: DISABLE_MERCHANT_SETTING_SQL },
+  { name: 'merchant-services: read the setting', sql: READ_MERCHANT_SETTING_SQL },
   { name: 'smart-accounts: legacy users.account_address mirror', sql: SET_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: legacy users.account_address clear', sql: CLEAR_LEGACY_USER_ACCOUNT_ADDRESS_SQL },
   { name: 'smart-accounts: rename (tenant-scoped)', sql: RENAME_ACCOUNT_FOR_USER_SQL },

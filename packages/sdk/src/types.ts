@@ -541,6 +541,14 @@ export interface X402MerchantCallContext {
   mcpTransport?: X402McpTransport
   /** #3781: the catalog row's name, when the purchase came from a catalog entry. */
   catalogName?: string
+  /**
+   * #4872: the merchant's checkout-details request, verbatim from the challenge
+   * stored at authorize (`extensions["haven-checkout-details"]`). Untrusted
+   * merchant content: read it with `parseCheckoutDetailsRequest` (wrap it as
+   * `{ "haven-checkout-details": value }`), which treats anything malformed as
+   * no request. Absent when the challenge asked for nothing.
+   */
+  checkoutDetailsRequest?: unknown
 }
 
 /** @internal */
@@ -551,6 +559,8 @@ export interface RawX402MerchantCallContext {
   arguments?: Record<string, unknown>
   mcp_transport?: { handshake_required: boolean; source: 'path' | 'bazaar' }
   catalog_name?: string
+  /** #4872: the merchant's checkout-details request from the stored challenge, verbatim and untrusted. */
+  checkout_details_request?: unknown
   error?: string
   error_code?: string
   status?: string
@@ -671,6 +681,16 @@ export interface ResumeAuthorizedX402Input extends X402AuthorizationOptions {
 
   /** Original or freshly parsed x402 requirements for the merchant retry. */
   paymentRequired: X402PaymentRequired
+
+  /**
+   * @internal #4872: run after the resume's own checks (the status read, the
+   * resumability check and the already-settled check) and BEFORE the payment
+   * header is re-signed. `resumeX402Payment` decides checkout details here,
+   * so a refusal reports a payment that really is funded and resumable, and
+   * leaves the authorization unused. Not called on an in-process cached
+   * receipt.
+   */
+  beforeResign?: () => Promise<void>
 }
 
 export interface ResumeX402PaymentInput extends X402AuthorizationOptions {
@@ -1981,6 +2001,16 @@ export const AgentPaymentFailureCode = {
    * top up its settlement wallet first (#3834).
    */
   MerchantNotReady: 'MERCHANT_NOT_READY',
+  /**
+   * #4872: the merchant's challenge marks a checkout detail (receipt email,
+   * billing or shipping address) as REQUIRED and this agent cannot share it —
+   * sharing is off, the owner has not saved it, it would not fit, or Haven's
+   * read of it failed. Refused BEFORE the payment is authorised: no payment
+   * is created and no funds move (on resume, the funded payment is not
+   * delivered). The owner can fix it; the agent cannot. The refusal names the
+   * missing fields, never their values.
+   */
+  CheckoutDetailsUnavailable: 'CHECKOUT_DETAILS_UNAVAILABLE',
 } as const
 
 export type AgentPaymentFailureCode = (typeof AgentPaymentFailureCode)[keyof typeof AgentPaymentFailureCode]
@@ -2093,6 +2123,8 @@ export const AgentPaymentFailureCodeDescriptions: Record<AgentPaymentFailureCode
     "max_amount_human could not be converted to atomic units against this quote's asset — either its decimals are unknown to Haven or the cap has more decimal places than the asset supports. Nothing was spent. Round the cap, or re-send it as an exact atomic max_amount.",
   [AgentPaymentFailureCode.MerchantNotReady]:
     'The merchant refused the probe with its own "cannot settle right now" signal instead of a 402 challenge. No payment was created. Often transient — retry later (see retry_after_s in the message, if given) rather than treating this as a broken or wrong endpoint — except an out-of-gas refusal (reason_code settlement_wallet_out_of_gas), which needs the merchant\'s operator to top up its settlement wallet before any retry can succeed.',
+  [AgentPaymentFailureCode.CheckoutDetailsUnavailable]:
+    'The merchant requires a checkout detail (receipt email, billing or shipping address) that this agent cannot share: the owner has not turned sharing on for this agent, has not saved the field, it does not fit, or Haven could not read it. Refused before the payment is authorised, so nothing is paid for this request; on a resume, the funded payment is not delivered and can be resumed again. Stop and tell the user which field the merchant needs and that the owner can save it in business details and turn on sharing for this agent.',
 }
 
 /**
@@ -2353,6 +2385,14 @@ export interface PaymentStatusResult {
    * predates #946, or any stored value outside this enum.
    */
   settlementScheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #5030: the required checkout-details field names the merchant's challenge
+   * carried, recorded at authorize. Present only when it asked for at least
+   * one; absent otherwise (a challenge that asked for nothing, or a row
+   * authorized before #5030). Field names only, never the owner's values.
+   * `haven_submit` reads it when the stored challenge itself cannot be read.
+   */
+  checkoutDetailsRequiredFields?: string[]
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.
@@ -2655,6 +2695,13 @@ export interface RawPaymentStatusResult {
    * enum.
    */
   settlement_scheme?: 'eip3009' | 'erc7710' | null
+  /**
+   * #5030: the required checkout-details field names the merchant's challenge
+   * carried, recorded at authorize. Present only when it asked for at least
+   * one; absent otherwise (a challenge that asked for nothing, or a row
+   * authorized before #5030). Field names only, never the owner's values.
+   */
+  checkout_details_required_fields?: string[]
   /**
    * #3475 follow-up: `true` only when an eip3009 payment's merchant
    * settlement transaction is already recorded and on-chain-verified.
@@ -3120,6 +3167,76 @@ export class MerchantTimeoutError extends HavenApiError {
   constructor(message: string) {
     super(message, 504)
     this.name = 'MerchantTimeoutError'
+  }
+}
+
+/**
+ * #4872: a merchant's challenge requires a checkout detail this agent cannot
+ * share (`docs/architecture/13-checkout-details.md` §5). Thrown BEFORE
+ * `authorizeX402`, so no payment exists and no funds moved — except on
+ * `resumeX402Payment`, where the payment is already funded and the paid
+ * request is simply not sent (resume again once the owner has fixed it).
+ *
+ * Status 409: the request conflicts with the owner's current sharing state,
+ * and repeating it unchanged gets the same answer. The body carries the code,
+ * the missing field NAMES (never values), the reason and the next action.
+ */
+/** #4872: why a checkout detail could not be shared (mirrors `CheckoutDetailsRefusalReason`). */
+export type CheckoutDetailsRefusalReasonName =
+  | 'not_shared'
+  | 'feature_disabled'
+  | 'not_stored'
+  | 'over_budget'
+  | 'unreadable'
+  | 'backend_unsupported'
+  /** Hosted settle: the explicit merchant_url is not the one the payment was quoted for, so the owner's data is not sent. */
+  | 'merchant_mismatch'
+  /**
+   * #5030: the stored merchant challenge could not be read, and the intent
+   * recorded that it asked for a required checkout detail. The submit cannot
+   * tell which fields the challenge named, so it fails closed before spending
+   * (owner decision 2026-11-22, option b).
+   */
+  | 'challenge_unreadable'
+
+/**
+ * #4872: where in the purchase the refusal landed, which decides what the
+ * agent may do next:
+ * - `before_payment`: nothing was authorised, funded or sent — call again once
+ *   the owner has fixed it;
+ * - `funded`: an EIP-3009 payment is funded but not delivered — finish it once
+ *   fixed (resume / complete), or verify then sweep;
+ * - `unsent`: an erc7710 settlement was prepared but never sent to the
+ *   merchant, so nothing can be redeemed — start a new purchase once fixed;
+ * - `state_unknown`: a settle-time refusal whose payment state could not be
+ *   read — this call spent nothing, but an earlier settle may already have
+ *   funded or settled it, so check its status before anything else.
+ */
+export type CheckoutDetailsRefusalStage = 'before_payment' | 'funded' | 'unsent' | 'state_unknown'
+
+export class CheckoutDetailsUnavailableError extends HavenApiError {
+  readonly checkoutDetailsErrorCode = 'checkout_details_unavailable' as const
+  constructor(
+    public readonly missingFields: string[],
+    public readonly reason: CheckoutDetailsRefusalReasonName,
+    message: string,
+    public readonly stage: CheckoutDetailsRefusalStage = 'before_payment',
+    paymentId?: string,
+  ) {
+    super(
+      message,
+      409,
+      {
+        code: 'CHECKOUT_DETAILS_UNAVAILABLE',
+        missing_fields: missingFields,
+        reason,
+        stage,
+        next_action: 'stop_and_tell_user',
+      },
+      paymentId,
+      { kind: 'deterministic' },
+    )
+    this.name = 'CheckoutDetailsUnavailableError'
   }
 }
 

@@ -317,6 +317,8 @@ describe('x402 delegation-rail settlement (#830)', () => {
       })
       expect(res.statusCode).toBe(429)
       expect(res.json().error).toMatch(/Relayer budget exceeded/)
+      // #4828: the typed code the hosted mapper answers the stop from.
+      expect(res.json().error_code).toBe('relayer_budget_exceeded')
       expect(mockCreateIntent).not.toHaveBeenCalled()
     })
 
@@ -917,6 +919,88 @@ describe('x402 delegation-rail settlement (#830)', () => {
       metadata: expect.objectContaining({
         payment_required: expect.objectContaining({ x402Version: 2 }),
       }),
+    }))
+  })
+
+  it('#5030: records the required checkout-details field names into machine_metadata on BOTH delegation branches', async () => {
+    // The submit cannot read the stored challenge when that read fails (a 429
+    // from the money-path rate limit is realistic), so the intent records
+    // whether the challenge asked for a REQUIRED detail. Owner decision
+    // 2026-11-22, option b: only such a payment stops on a failed read.
+    const paymentRequired = {
+      x402Version: 2,
+      resource: { url: 'https://merchant.example/resource' },
+      accepts: [{ scheme: 'exact', network: 'base', amount: '100000', asset: USDC, payTo: MERCHANT }],
+      extensions: {
+        'haven-checkout-details': {
+          info: { version: 1, fields: { receipt_email: { required: true }, shipping_address: { required: false } } },
+        },
+      },
+    }
+
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    let res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({ paymentRequired }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        checkout_details_required_fields: ['receipt_email'],
+      }),
+    }))
+
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        settlementScheme: 'erc7710',
+        facilitatorAddresses: ['0x' + 'fa'.repeat(20)],
+        paymentRequired,
+      }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({
+        checkout_details_required_fields: ['receipt_email'],
+      }),
+    }))
+
+    // A challenge that asks for nothing records an empty list, never a guess.
+    mockCreateIntent.mockClear()
+    mockSelect.mockResolvedValue({
+      delegation_hash: `0x${'12'.repeat(32)}`,
+      delegation_json: JSON.stringify(signedBudget),
+      recipient_address: null,
+    })
+    mockCreateIntent.mockResolvedValue({ id: INTENT_ID, status: 'pending_signature', expires_at: 'x' })
+    res = await app.inject({
+      method: 'POST', url: '/x402/authorize',
+      headers: { authorization: 'Bearer sk_agent_test' },
+      payload: authorizeBody({
+        paymentRequired: {
+          x402Version: 2,
+          resource: { url: 'https://merchant.example/resource' },
+          accepts: [{ scheme: 'exact', network: 'base', amount: '100000', asset: USDC, payTo: MERCHANT }],
+        },
+      }),
+    })
+    expect(res.statusCode).toBe(201)
+    expect(mockCreateIntent).toHaveBeenCalledWith(expect.objectContaining({
+      metadata: expect.objectContaining({ checkout_details_required_fields: [] }),
     }))
   })
 
@@ -1579,7 +1663,7 @@ describe('x402 delegation-rail settlement (#830)', () => {
   // fixture has no stored challenge at all — and run WITH an anchored
   // passport, so the absence of the reference is the advertisement rule's
   // doing, not merely the absence of a passport.
-  it('CHARACTERIZATION (merchant did not advertise haven-passport): the X-PAYMENT payload carries exactly the erc7710 keys', async () => {
+  it('CHARACTERIZATION (merchant did not advertise haven-passport): the payment-header payload carries exactly the erc7710 keys', async () => {
     const res = await settleOk([
       { agent_id: 'agent-1', chain_id: 84532, status: 'anchored', attestation_uid: '0x' + 'ab'.repeat(32) },
     ])
@@ -2913,6 +2997,36 @@ describe('x402 merchant-call-context by payment_id (#1307)', () => {
     expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', body)
     // Read-only: nothing was written.
     expect(mockQuery.mock.calls.some((c) => /INSERT|UPDATE/i.test(String(c[0])))).toBe(false)
+  })
+
+  it('serves the merchant checkout-details request from the stored challenge, verbatim, and only when asked (#4872)', async () => {
+    const request = { info: { version: 1, fields: { receipt_email: { required: true } } } }
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: {
+        ...CALL_CONTEXT_ROW.machine_metadata,
+        payment_required: { x402Version: 2, accepts: [], extensions: { 'haven-checkout-details': request, bazaar: { info: {} } } },
+      },
+    }])
+    const res = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(res.statusCode).toBe(200)
+    expect(res.json().checkout_details_request).toEqual(request)
+    expectMatchesSpec('GET', '/x402/{id}/merchant-call-context', res.json())
+
+    // A challenge that asked for nothing: the key is absent, never null.
+    serveIntentRow([{
+      ...CALL_CONTEXT_ROW,
+      machine_metadata: { ...CALL_CONTEXT_ROW.machine_metadata, payment_required: { x402Version: 2, accepts: [], extensions: { bazaar: {} } } },
+    }])
+    const none = await app.inject({
+      method: 'GET', url: `/x402/${INTENT_ID}/merchant-call-context`,
+      headers: { authorization: 'Bearer sk_agent_test' },
+    })
+    expect(none.statusCode).toBe(200)
+    expect('checkout_details_request' in none.json()).toBe(false)
   })
 
   it('404s an unknown or foreign payment id (same answer on purpose)', async () => {

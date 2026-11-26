@@ -79,6 +79,7 @@ const ERROR_CODE_LABELS: Record<string, string> = {
   signature_rejected: 'Signature rejected',
   account_validation_failed: 'Account validation failed',
   submission_outcome_unknown: 'Submission outcome unknown',
+  payment_already_submitted: 'Payment already submitted',
   onchain_execution_failed: 'On-chain execution failed',
   payment_intent_expired: 'Payment intent expired',
 }

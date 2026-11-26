@@ -81,3 +81,37 @@ describe('PaymentCredentialsModal copy (#4573)', () => {
     expect(mockToastError).not.toHaveBeenCalled()
   })
 })
+
+describe('PaymentCredentialsModal masking (#4905 extraction)', () => {
+  const SECRET = 'sk_agent_ab_full_secret_value_for_test_only'
+  const agent = {
+    id: 'agent-1',
+    name: 'Research Agent',
+    api_key: SECRET,
+    api_key_prefix: 'sk_agent_ab',
+    delegate_address: '0x1111111111111111111111111111111111111111',
+    created_at: '2026-10-07T00:00:00Z',
+  }
+
+  it('opens masked, shows and hides on request, and opens masked again after a close', () => {
+    const { rerender } = render(<PaymentCredentialsModal open onClose={() => {}} agent={agent} />)
+    expect(document.body.textContent).not.toContain(SECRET)
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+    expect(document.body.textContent).toContain(SECRET)
+    fireEvent.click(screen.getByRole('button', { name: 'Hide' }))
+    expect(document.body.textContent).not.toContain(SECRET)
+    fireEvent.click(screen.getByRole('button', { name: 'Show' }))
+    expect(document.body.textContent).toContain(SECRET)
+    // Close and reopen: the Show state must not survive into a fresh view.
+    rerender(<PaymentCredentialsModal open={false} onClose={() => {}} agent={agent} />)
+    rerender(<PaymentCredentialsModal open onClose={() => {}} agent={agent} />)
+    expect(document.body.textContent).not.toContain(SECRET)
+    expect(screen.getByRole('button', { name: 'Show' })).toBeTruthy()
+  })
+
+  it('offers the rotate path, not a value, when the full credential is gone', () => {
+    render(<PaymentCredentialsModal open onClose={() => {}} agent={{ ...agent, api_key: null }} />)
+    expect(document.body.textContent).not.toContain(SECRET)
+    expect(screen.queryByRole('button', { name: 'Show' })).toBeNull()
+  })
+})

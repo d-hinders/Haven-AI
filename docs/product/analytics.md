@@ -5,6 +5,9 @@ covers:
   - packages/frontend/scripts/screenshot.mjs
   - packages/frontend/src/__tests__/screenshot-fixture.test.ts
   - packages/frontend/src/app/(authenticated)/analytics/AnalyticsClient.tsx
+  - packages/frontend/src/components/analytics/RevenueSection.tsx
+  - packages/frontend/src/lib/analytics-view.ts
+  - packages/frontend/src/lib/analytics-revenue.ts
   - packages/frontend/src/components/analytics/EmptyStates.tsx
   - packages/frontend/src/hooks/useAnalyticsOverview.ts
   - packages/frontend/src/components/analytics/MerchantsTable.tsx
@@ -25,7 +28,7 @@ covers:
   - packages/backend/src/infra/repositories/analytics.ts
   - packages/backend/src/modules/mpp/budget-precheck.ts
   - packages/backend/src/routes/machine-payments.ts
-last-verified: "2026-11-02"
+last-verified: "2026-11-18"
 ---
 
 # Analytics
@@ -38,14 +41,86 @@ rules. This doc says what each figure means, where it comes from, and what the
 page deliberately does not do, so a reader can tell an honest zero from a
 missing number.
 
-The page renders from one endpoint, `GET /analytics/overview`
-(`range=7d|30d|90d`, `currency=usd|eur|sek`, `tz=<IANA zone>`, and `agentId`
-when the Agent facet is set), so every tile on
-the page describes the same range, the same currency and the same set of
+The page renders from one endpoint per side. The **Spending** side reads
+`GET /analytics/overview` (`range=7d|30d|90d`, `currency=usd|eur|sek`,
+`tz=<IANA zone>`, and `agentId` when the Agent facet is set), so every tile on
+that side describes the same range, the same currency and the same set of
 payments — one loading state, one payment basis (`basis.payments_counted`, the
-figure the Payments tile shows). The endpoint
+figure the Payments tile shows). The **Revenue** side (#4901) reads the Sales
+reads from #4897 (`GET /merchant-sales/summary`) over the same period, and has
+its own one request and one loading state. The endpoint
 (#2946), the page shell (#2947), the chart primitives (#2948) and their wiring
 (#2949, #3051) have all shipped; this doc describes what renders.
+
+## Spending / Revenue (#4901)
+
+For a user with merchant services on, the page carries a **Spending / Revenue**
+switch — the design system's `Tabs`, used as a page data-source switch
+(`design-system.md` § Tabs) — between what the agents spent and what the
+merchant account received. It sits under the header, and its selection is held
+in `?view=` beside `?period=`, so it survives a reload and a period change; a
+shared `/analytics?view=revenue&period=7d` link opens on the revenue side for
+the window it names. The side is not persisted to the device: the period is a
+device preference (`haven.analytics.range`), the side is linkable state, like
+the Agent facet.
+
+With merchant services off — or while the setting is still loading, or after
+its read failed — the switch is absent and the page renders exactly as it
+shipped. A `?view=revenue` in the address loses to the setting: there is no
+revenue side to show.
+
+Each side keeps the page's one-request rule: the side that is not on screen
+issues nothing. Switching back re-reads the side that comes back rather than
+painting a response that may be minutes old.
+
+**Why the revenue side reads the Sales endpoint rather than a second aggregate
+on `/analytics/overview`.** Three reasons, and the first is an acceptance
+criterion: the revenue total for a period equals the Sales page's total for the
+same period *by construction*, because both surfaces read the same endpoint
+over the same day range (`salesDayRange`, the Sales page's own period helper);
+the revenue definition from #4897 (no zero-value transfers, no transfers from
+the owner's own accounts or own agents' delegate addresses) is the read's own
+rule, not a rule this page re-applies; and it adds no SQL under
+`infra/repositories/`, so the slice stays off the money path.
+
+The period control is shared, and the two sides read it in their own terms: the
+spend side takes a rolling window ending now, the revenue side the last N UTC
+calendar days including today — the Sales page's own mapping, which is what
+makes the two totals comparable.
+
+**The revenue figures.** *Revenue* is the period's total in the display
+currency: sales plus payments that carry no sale record, wherever the money was
+received (a sale received in Stripe counts, #4981). *Sales* is every revenue
+payment, sales plus payments with no product, as the Sales page counts them,
+captioned with the payers behind them. *Average sale* is the total over every
+payment counted ("per payment"), the read's own `average_sale_raw`. *Not
+counted* is what moved between the owner's own accounts and agents — it is in no
+total, and the tile says so rather than leaving the reader to wonder where the
+money went; it renders at zero too, because "$0.00 / No transfers between your
+accounts" is a fact about the period and a tile that came and went would move
+the grid under the reader. A period whose only money moved between the owner's
+accounts is not empty: it renders the tiles, with Revenue at zero and the Not
+counted tile carrying the figure.
+
+**Revenue over time** is the shared `StackedBarChart`, one slot per calendar day
+of the period, stacked by product: the five products with the most revenue take
+the five categorical stops, the rest fold into one "Other" series in neutral
+ink, and payments with no sale record take the second neutral ink — so the stack
+adds up to the Revenue tile instead of quietly leaving a class of money out. The
+chart passes `hideRefusals`: a refused payment is not a sale, and a Refusals
+column would read "Refusals 0" on every day. **By product** is the shared
+breakdown card the Sales page uses, fed by the same summary, so the two pages
+cannot disagree about what a product line says.
+
+The revenue side hides the Agent facet: the Sales reads are the merchant
+account's, not an agent's, so an agent filter there would name a control that
+changes nothing. A **View in Sales** link takes its place, opening the Sales
+page where every sale, its payer and its product live.
+
+The revenue side's states are its own: one skeleton in the settled layout's
+shape while the read is in flight, the page's one error state with one retry if
+it fails, and one empty state ("No sales in this period") when the period holds
+nothing — never four tiles asserting zeros.
 
 ## Choosing the window
 
@@ -82,7 +157,10 @@ showed the unfiltered report without saying so would look like the link
 worked. With an agent set, every agent-scoped section narrows; the Payments
 tile names the agent instead of counting agents, the Refused tile gains a
 Review link to that agent's refused attempts, and the balance section says
-"Balance isn't filtered by agent" (the series is per-user; see the epic).
+"Balance isn't filtered by agent" (the series is per-user; see the epic). The
+facet is hidden on the Revenue side (#4901): the Sales reads are the merchant
+account's, not an agent's, so an agent filter there would name a control that
+changes nothing.
 
 ## What each figure means
 
@@ -203,14 +281,19 @@ the tiles and tables stay (a line through one point agrees with every trend,
 but a total over one day is still the total over that day).
 
 **Top merchants.** The recipients your agents paid most, ranked by spent.
-A merchant's label is resolved by the API in a fixed order: the host of the
-x402 resource its most recent payment in the range called, else the name of
-one of your own accounts at that address (address-only, across chains; the
-oldest account wins a shared address), else your contact's name for that
-address, else the name on the payment's receipt, else nothing — the row
+A merchant's label is resolved by the API in Haven's one naming order (#4882,
+[`recipient-names.md`](recipient-names.md)): one of your own accounts at that
+address (the oldest account wins a shared address), else your contact's name,
+else the Haven catalog's merchant for that receiving address (only when every
+network it appears on names the same curated merchant), else the seller name
+on the merchant's receipt (its `saljare.name`, since #4881; a receipt's flat
+`merchant_name` when that yields no usable name; never a name borrowed from a
+catalog merchant), else the host of the x402 resource its most recent payment
+in the range called, else
+nothing — the row
 shows "Unknown recipient" where the transaction history says "New
 recipient", with the naming step as a KIND line under the name: "Your
-account" (own account), "Paid API" (x402 host), or the short address for an
+account" (own account), "Paid API" (x402 host or catalog merchant, #4883), or the short address for an
 unknown recipient (#4333). The Address COLUMN is gone — the address is
 metadata, carried in the unknown recipient's tooltip and the mobile row's
 disclosure, never as a label. Each row also carries `filter_address`, the
@@ -357,7 +440,7 @@ the endpoint (#2946) before it can appear in a demo run.
 
 ## Capturing and testing this screen
 
-Three screenshot-harness scenarios are registered for this screen in
+Four screenshot-harness scenarios are registered for this screen in
 `packages/frontend/scripts/screenshot.mjs`:
 
 - `analytics-populated` — the endpoint answers a populated overview whose
@@ -372,6 +455,10 @@ Three screenshot-harness scenarios are registered for this screen in
   scenario serves; `AnalyticsClient.test.tsx` covers it.
 - `analytics-error` — the endpoint answers `503` via the harness's
   `ScenarioHttpError`, so the capture shows the page's failure path.
+- `analytics-revenue` (#4901) — merchant services on, `?view=revenue`, and the
+  Sales summary served (`FIXTURE_SALES_SUMMARY`): the Revenue side's tiles, its
+  by-product chart and its by-product breakdown, with the Agent facet hidden
+  and the link to Sales in its place.
 
 The fixture keys they serve are pinned by
 `packages/frontend/src/__tests__/screenshot-fixture.test.ts`, which fails if

@@ -28,6 +28,10 @@ import { stillEnabledDelegationSql } from './delegation-budgets.js'
 // #3544: the revoke transaction also cancels the agent's open connection
 // setup — same file family, one direction, no cycle (setups never imports us).
 import { cancelSetupsForAgent } from './agent-connection-setups.js'
+// #4871: the agent's checkout-details read returns the owner's stored address
+// shape verbatim — the same type #4870 stores, so the wire shape and the
+// stored shape cannot drift.
+import type { OwnerAddress } from './owner-company-details.js'
 
 export type { Executor }
 
@@ -68,6 +72,16 @@ export interface AgentRow {
    * path never reads it.
    */
   tax_declaration_enabled: boolean
+  /**
+   * #4871: the owner's per-agent switch allowing THIS agent to share the
+   * owner's saved checkout details (receipt email, billing address, shipping
+   * address) with merchants that ask for them. SETTINGS ONLY — the same
+   * boundary as `tax_declaration_enabled` above; the delegation, budget and
+   * enforcement path never reads it. The toggle that writes it is
+   * PUT /agents/{id}/checkout-details-sharing; the agent's own read is
+   * GET /agents/{id}/checkout-details.
+   */
+  checkout_details_sharing_enabled: boolean
   /**
    * #4429: the agent's stored display colour, 1..6, assigned by the database
    * on insert (migration 121) and never changed by a rename. DISPLAY ONLY —
@@ -338,6 +352,9 @@ export const LIST_AGENTS_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.des
               -- the column itself; nothing in the delegation, budget, or
               -- enforcement path may read it.
               a.tax_declaration_enabled,
+              -- #4871: the owner's per-agent checkout-details sharing switch.
+              -- SETTINGS ONLY, the same boundary as the tax opt-in above.
+              a.checkout_details_sharing_enabled,
               -- #4429: the stored display colour (1..6), assigned by the
               -- database on insert. DISPLAY ONLY, like the fields above.
               a.avatar_tint,
@@ -395,6 +412,8 @@ export const FIND_AGENT_FOR_USER_ALL_STATUSES_SQL = `SELECT a.id, a.name, a.desc
               a.organization_id,
               -- #3426: same display/settings-only field as the list read above.
               a.tax_declaration_enabled,
+              -- #4871: same display/settings-only field as the list read above.
+              a.checkout_details_sharing_enabled,
               -- #4429: the stored display colour (1..6), assigned by the
               -- database on insert. DISPLAY ONLY, like the fields above.
               a.avatar_tint,
@@ -590,6 +609,9 @@ export const INSERT_AGENT_WITH_KEY_SQL = `INSERT INTO agents (user_id, name, des
                    -- #3426: the opt-in is never settable at creation; the
                    -- column default (false) is the honest value here.
                    tax_declaration_enabled,
+                   -- #4871: the sharing switch is never settable at creation;
+                   -- the column default (false) is the honest value here.
+                   checkout_details_sharing_enabled,
                    -- #4429: filled by the BEFORE INSERT trigger (migration
                    -- 121) — the create response carries the assigned colour.
                    avatar_tint,
@@ -639,6 +661,9 @@ export interface CreatedAgent {
     // Declared for the same reason: the query returns it (the column
     // default) and the Agent shape requires it.
     | 'tax_declaration_enabled'
+    // #4871: always FALSE here — the sharing switch is never settable at
+    // creation. Declared for the same reason as the field above.
+    | 'checkout_details_sharing_enabled'
     // #4429: assigned by the BEFORE INSERT trigger, so the create response
     // carries the colour the database chose. Declared for the same reason as
     // the fields above: the query returns it and the Agent shape requires it.
@@ -699,6 +724,9 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
            RETURNING id, name, description, delegate_address, account_id, api_key_prefix, status, created_at,
                      organization_id,
                      tax_declaration_enabled,
+                     -- #4871: carried unchanged by a profile update, but the
+                     -- Agent response shape requires it — read it back.
+                     checkout_details_sharing_enabled,
                      -- #4429: carried unchanged by a profile update, but the
                      -- Agent response shape requires it — read it back.
                      avatar_tint,
@@ -712,6 +740,8 @@ export const UPDATE_AGENT_PROFILE_SQL = `WITH updated AS (
                 -- #3426: carried unchanged by a profile update, but the
                 -- Agent response shape requires it — read it back.
                 updated.tax_declaration_enabled,
+                -- #4871: same — the sharing switch is never edited here.
+                updated.checkout_details_sharing_enabled,
                 -- #4429: same — the tint is assigned once and never edited.
                 updated.avatar_tint,
                 -- #1878/#1694: the display name is editable, the wiring name is
@@ -1147,6 +1177,93 @@ export async function getAgentTaxDeclarationRow(
   db: Executor = pool,
 ): Promise<AgentTaxDeclarationRow | null> {
   const result = await db.query<AgentTaxDeclarationRow>(GET_AGENT_TAX_DECLARATION_SQL, [agentId])
+  return result.rows[0] ?? null
+}
+
+// ── Checkout-details sharing switch (#4871, epic #4868) ─────────────────────
+
+/**
+ * The OWNER's per-agent sharing switch. Gated IN SQL on the deployment flag
+ * only, and DIRECTIONALLY — `NOT $3 OR $4`: switching ON requires
+ * `HAVEN_OWNER_COMPANY_DETAILS` (read as a parameter, so the route's flag read
+ * and this write cannot disagree), while switching OFF is never gated.
+ *
+ * Deliberately NOT gated on stored details or on VIES: unlike the tax
+ * declaration, whose content rests on a VIES-valid VAT number, checkout
+ * details may be shared before the owner has saved any. The agent's read
+ * answers `no_details` until something is stored, which is the honest answer
+ * and keeps the switch usable in either order (issue #4871, "For the builder
+ * to decide").
+ *
+ * Zero rows updated is the structured refusal the route maps to a reason —
+ * the route never writes on a false WHERE. `updated_at` moves with the write,
+ * matching every other agents UPDATE in this file.
+ */
+export const SET_AGENT_CHECKOUT_DETAILS_SHARING_ENABLED_SQL = `
+  UPDATE agents
+  SET checkout_details_sharing_enabled = $3, updated_at = NOW()
+  WHERE id = $1 AND user_id = $2
+    AND (NOT $3::boolean OR $4::boolean)
+  RETURNING id, checkout_details_sharing_enabled
+`
+
+export interface CheckoutDetailsSharingToggleRow {
+  id: string
+  checkout_details_sharing_enabled: boolean
+}
+
+/**
+ * Owner-scoped toggle. Pass `enabled: false` to switch OFF (never gated).
+ * Returns null when the agent is not this user's, or — switching ON — when
+ * the deployment flag is off (passed in by the route).
+ */
+export async function setAgentCheckoutDetailsSharingEnabled(
+  agentId: string,
+  userId: string,
+  enabled: boolean,
+  featureEnabled: boolean,
+  db: Executor = pool,
+): Promise<CheckoutDetailsSharingToggleRow | null> {
+  const result = await db.query<CheckoutDetailsSharingToggleRow>(
+    SET_AGENT_CHECKOUT_DETAILS_SHARING_ENABLED_SQL,
+    [agentId, userId, enabled, featureEnabled],
+  )
+  return result.rows[0] ?? null
+}
+
+/**
+ * One agent's checkout-details eligibility, read by the AGENT's own content
+ * endpoint. Joins the owner's company-details row so the route decides
+ * everything from one round trip: the sharing bit and the three stored
+ * fields. Nothing here is authority — the values are read-only data the owner
+ * saved and consented to share with this agent.
+ *
+ * The three fields are `NULL` when the owner has not saved them (or has no
+ * company-details row at all), which the resolver maps to `no_details` when
+ * all three are absent.
+ */
+export interface AgentCheckoutDetailsRow {
+  checkout_details_sharing_enabled: boolean
+  receipt_email: string | null
+  billing_address: OwnerAddress | null
+  shipping_address: OwnerAddress | null
+}
+
+export const GET_AGENT_CHECKOUT_DETAILS_SQL = `
+  SELECT a.checkout_details_sharing_enabled,
+         ocd.receipt_email,
+         ocd.billing_address,
+         ocd.shipping_address
+  FROM agents a
+  LEFT JOIN owner_company_details ocd ON ocd.user_id = a.user_id
+  WHERE a.id = $1
+`
+
+export async function getAgentCheckoutDetailsRow(
+  agentId: string,
+  db: Executor = pool,
+): Promise<AgentCheckoutDetailsRow | null> {
+  const result = await db.query<AgentCheckoutDetailsRow>(GET_AGENT_CHECKOUT_DETAILS_SQL, [agentId])
   return result.rows[0] ?? null
 }
 

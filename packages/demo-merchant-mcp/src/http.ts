@@ -17,21 +17,49 @@ import {
 } from './x402.js'
 import {
   CHAIN_ID,
+  DEFAULT_MERCHANT_LOCALE,
   DEFAULT_SETTLEMENT_METHOD,
+  FREE_TOOL_NAMES,
   HOSTED_DEMO_MERCHANT_URLS,
   PRODUCTS,
   SKIP_SETTLE_QA_FIXTURE,
   SUPPORTED_SETTLEMENT_METHODS,
+  checkoutDetailsForProduct,
   formatUsdc,
+  isMerchantLocale,
   isSettlementMethod,
+  isProductOffered,
   merchantEnvironmentForChain,
+  offeredProducts,
+  paidToolNames,
+  productForToolCall,
+  productReceivingAddress,
+  productSettlementKind,
+  productToolArgs,
+  requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
+  type MerchantLocale,
+  type Product,
   type ProductId,
+  type ProductOfferOptions,
   type SettlementMethod,
 } from './products.js'
 import { invoiceForPayment } from './invoice.js'
+import { KIT_DISCOVERY_PATH, buildKitDiscovery } from './kit-discovery.js'
+import {
+  CHECKOUT_DETAILS_FIELDS,
+  X_CHECKOUT_DETAILS_HEADER,
+  X_TAX_DECLARATION_HEADER,
+  acceptCheckoutDetails,
+  acceptTaxDeclaration,
+  type CheckoutDetailsField,
+  type ReceiptSellerDetails,
+} from '@haven_ai/merchant-payments'
+import { recordStripePayment, stripeRecordingDecision, type StripeRecording } from './stripe.js'
+import type { SalesReporting } from './sales.js'
+import type { SekRateFeed } from './sek-rate.js'
 import { BaseError, HttpRequestError, InsufficientFundsError, TimeoutError, type Address } from 'viem'
-import type { SettlementClient } from './x402.js'
+import type { DecisionReasonCode, SettlementClient } from './x402.js'
 
 export interface DemoMerchantServerOptions {
   merchantAddress: Address
@@ -45,6 +73,39 @@ export interface DemoMerchantServerOptions {
    * reports `passport: null`.
    */
   passport?: PassportVerifierConfig
+  /**
+   * #4851: true when Coinbase's facilitator is configured (both CDP variables
+   * set and its client built). Only then is a `cdp` product offered: absent,
+   * it is missing from `list_products`, discovery, the tool list and the
+   * payment gate, and `/healthz` has no `cdp` block.
+   */
+  cdpConfigured?: boolean
+  /**
+   * #4853: Stripe recording, present only when both Stripe variables are set
+   * and the recorded product's price is a whole number of cents. Its
+   * `depositAddress` is the recorded product's receiving address, and every
+   * settled payment for that product is recorded as a PaymentIntent. Absent,
+   * the product keeps `MERCHANT_ADDRESS` and `/healthz` has no `stripe` block.
+   */
+  stripe?: StripeRecording
+  /**
+   * #4950: the Haven Sales account and its sale reporter, present only when
+   * the Sales settings are set. Only then is the Sales product offered, paid
+   * into `sales.address`, and each of its settled sales reported to Haven.
+   * Absent, the merchant and `/healthz` are exactly what they were.
+   */
+  sales?: SalesReporting
+  /**
+   * #4856: the seller every receipt carries (`resolveReceiptSeller`).
+   * Absent, the demo seller.
+   */
+  receiptSeller?: ReceiptSellerDetails
+  /**
+   * #4856: the cached USDC→SEK rate the receipt for a Stripe-recorded payment
+   * states. Only `current()` is read on the purchase path. Absent, that
+   * receipt says the SEK amount was not available.
+   */
+  sekRate?: Pick<SekRateFeed, 'current'>
   /**
    * #1530: lets `/healthz` report whether the wallet that PAYS for settlement
    * can still afford to. Optional so a test double or a merchant without a
@@ -70,6 +131,14 @@ export interface DemoMerchantServerOptions {
   sessionIdleTtlMs?: number
   /** Clock for the idle sweep; injectable for tests. */
   now?: () => number
+  /**
+   * #4873: the dev-only hook that makes one of the checkout-details product's
+   * optional fields required, so the "stopped before paying" behaviour can be
+   * exercised on dev. Absent, it is read from
+   * `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD` (testnet-only, off by default);
+   * `null` explicitly means "no field is required".
+   */
+  checkoutDetailsRequiredField?: CheckoutDetailsField | null
 }
 
 interface MerchantSession {
@@ -105,6 +174,12 @@ interface PaymentToolInfo {
   product: (typeof PRODUCTS)[ProductId]
   description: string
   settlementMethod?: SettlementMethod
+  /**
+   * #4980: the paid tool call's `locale` argument, which sets the language of
+   * the receipt's values; `en` when absent or not a known locale (a plain-HTTP
+   * x402 call carries none).
+   */
+  locale: MerchantLocale
 }
 
 const MAX_BODY_BYTES = 500_000
@@ -147,11 +222,14 @@ function createReadinessReader(
   }
 }
 
-interface ResolvedServerOptions extends Omit<DemoMerchantServerOptions, 'path' | 'sessionIdleTtlMs' | 'now'> {
+interface ResolvedServerOptions
+  extends Omit<DemoMerchantServerOptions, 'path' | 'sessionIdleTtlMs' | 'now' | 'checkoutDetailsRequiredField'> {
   path: string
   getReadiness: ReadinessReader
   sessionIdleTtlMs: number
   now: () => number
+  /** #4873: resolved once, so every challenge and quote agrees. */
+  checkoutDetailsRequiredField: CheckoutDetailsField | null
 }
 
 export function createDemoMerchantServer(options: DemoMerchantServerOptions): Server {
@@ -167,6 +245,12 @@ export function createDemoMerchantServer(options: DemoMerchantServerOptions): Se
     getReadiness,
     sessionIdleTtlMs: options.sessionIdleTtlMs ?? DEFAULT_SESSION_IDLE_TTL_MS,
     now: options.now ?? Date.now,
+    // #4873: the dev-only required-field hook. An explicit `null` means off;
+    // absent, it is read from the environment (testnet-only, off by default).
+    checkoutDetailsRequiredField:
+      options.checkoutDetailsRequiredField !== undefined
+        ? options.checkoutDetailsRequiredField
+        : requiredCheckoutFieldFromEnv(),
   }
 
   return createServer((req, res) => {
@@ -231,6 +315,58 @@ async function handle(
       network: `eip155:${CHAIN_ID}`,
       mcp_url: `${options.baseUrl}${options.path}`,
       ...(settlement ? { settlement } : {}),
+      // #4851: present only when configured, so a merchant without CDP keeps
+      // its /healthz byte-identical. Names no credential, only the fact.
+      ...(options.cdpConfigured
+        ? {
+            cdp: {
+              configured: true,
+              facilitator: 'coinbase-cdp',
+              products: offeredProducts({ cdpConfigured: true })
+                .filter((product) => productSettlementKind(product) === 'cdp')
+                .map((product) => product.id),
+            },
+          }
+        : {}),
+      // #4853: present only when Stripe recording is on, so a merchant without
+      // it keeps its /healthz byte-identical. `record_failures` is the counter
+      // the issue asks for; it is process-local (the merchant sleeps after
+      // ~10 minutes), so the durable signal is the `[stripe] record_failed
+      // tx=<hash>` log line the reconciliation runbook greps for.
+      // #4866: `recorded` counts only PaymentIntents Stripe accepted
+      // (`succeeded`); `pending` and `declined` count the ones it had not
+      // decided by the bound and the ones it declined (`[stripe]
+      // record_declined`, permanent for that transaction).
+      ...(options.stripe
+        ? {
+            stripe: {
+              configured: true,
+              deposit_address: options.stripe.depositAddress,
+              api_version: options.stripe.apiVersion,
+              network: options.stripe.network,
+              recorded: options.stripe.stats().recorded,
+              pending: options.stripe.stats().pending,
+              declined: options.stripe.stats().declined,
+              record_failures: options.stripe.stats().failed,
+            },
+          }
+        : {}),
+      // #4950, #4953: present whenever sales reporting is on (the Sales key and
+      // base URL set), with or without the Sales address. Names the Sales
+      // account when there is one (public on-chain) and process-local counts,
+      // never the key.
+      ...(options.sales
+        ? {
+            sales: {
+              configured: true,
+              address: options.sales.address,
+              reported: options.sales.stats().reported,
+              pending: options.sales.stats().pending,
+              refused: options.sales.stats().refused,
+              gave_up: options.sales.stats().gaveUp,
+            },
+          }
+        : {}),
     })
     return
   }
@@ -238,6 +374,22 @@ async function handle(
   if ((req.method === 'GET' || req.method === 'HEAD') && (url.pathname === '/' || url.pathname === '/.well-known/haven-demo-merchant')) {
     writeJson(res, 200, buildDiscovery(options))
     return
+  }
+
+  // #4987: the merchant kit's discovery document, so a Haven Sales account can
+  // read this merchant's product list. Only with a Sales account to name as
+  // `pay_to`; otherwise the path answers the same 404 as before.
+  if ((req.method === 'GET' || req.method === 'HEAD') && url.pathname === KIT_DISCOVERY_PATH) {
+    const document = buildKitDiscovery({
+      salesAddress: options.sales?.address,
+      merchantAddress: options.merchantAddress,
+      stripeDepositAddress: options.stripe?.depositAddress,
+      cdpConfigured: Boolean(options.cdpConfigured),
+    })
+    if (document) {
+      writeJson(res, 200, document)
+      return
+    }
   }
 
   if (url.pathname !== options.path) {
@@ -285,7 +437,33 @@ async function handle(
     return
   }
 
-  const paymentToolInfo = extractPaymentToolInfo(body)
+  if (isBatchedToolCall(body)) {
+    writeJson(res, 400, {
+      jsonrpc: '2.0' as const,
+      error: { code: -32600, message: 'A tools/call cannot be sent in a batch here: send each tool call as its own request.' },
+      id: null,
+    })
+    return
+  }
+
+  const ungated = ungatedToolCall(body)
+  if (ungated !== null) {
+    // #5069: fail closed, in the shape the MCP SDK itself gives an unknown tool:
+    // HTTP 200 with an `isError` tool result carrying "MCP error -32602: Tool
+    // <name> not found". Not a 404, which Streamable HTTP reserves for "session
+    // not found" — a client would drop its session over a mistyped tool name.
+    writeJson(res, 200, {
+      jsonrpc: '2.0' as const,
+      id: (body as { id: unknown }).id,
+      result: { content: [{ type: 'text', text: `MCP error -32602: Tool ${ungated} not found` }], isError: true },
+    })
+    return
+  }
+
+  const paymentToolInfo = extractPaymentToolInfo(body, {
+    cdpConfigured: Boolean(options.cdpConfigured),
+    salesConfigured: Boolean(options.sales?.address),
+  })
   const session = await getSession(req, body, options, sessions)
 
   let settled: SettledPayment | undefined
@@ -294,11 +472,73 @@ async function handle(
     if (!payment) return
     settled = payment
     res.setHeader(PAYMENT_RESPONSE_HEADER, settled.paymentResponseHeader)
+    // #4855: the buyer's signed tax declaration, if this paid request carried
+    // one. Verified against the payer the merchant just settled from — the
+    // same key that signed the payment — and treated as absent on ANY failure,
+    // so a malformed declaration can never turn a settled purchase into an
+    // error. Display only: it changes the buyer block and the VAT treatment,
+    // never the price.
+    const taxDeclaration = acceptTaxDeclaration({
+      header: firstHeader(req.headers[X_TAX_DECLARATION_HEADER.toLowerCase()]),
+      payer: settled.from,
+      chainId: CHAIN_ID,
+    })
+    // #4873: the checkout details this paid request carried, if any. Read the
+    // same way the tax declaration is: a malformed or oversized header is
+    // treated as absent, so it can never turn a settled purchase into an
+    // error. Display only — it adds fields to the receipt's buyer block and
+    // changes no price, no settlement and no refusal. Only the fields this
+    // product asked for are read, so a client cannot put a value on a receipt
+    // for a product that never requested it. The values are never logged and
+    // never stored beyond this response.
+    const checkoutRequest = checkoutDetailsForProduct(paymentToolInfo.product, {
+      requiredField: options.checkoutDetailsRequiredField,
+    })
+    const checkoutDetails = acceptCheckoutDetails({
+      header: firstHeader(req.headers[X_CHECKOUT_DETAILS_HEADER.toLowerCase()]),
+      fields: checkoutRequest ? CHECKOUT_DETAILS_FIELDS.filter((field) => checkoutRequest.fields[field]) : [],
+    })
     // #956: hand the paying agent the merchant's OWN receipt machine-readably.
     // Base64 keeps the header ASCII-safe; the SDK captures and reports it to
     // Haven, whose reporting feed attaches it next to the payment evidence.
-    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId)
+    // #4856: when Stripe will record this payment, the receipt says the
+    // Stripe reference is pending and states the SEK amount from the cached
+    // rate (or that none was available). Reading the cache never waits.
+    const stripeWillRecord =
+      stripeRecordingDecision(options.stripe, paymentToolInfo.product, settled) === 'record'
+    const receiptInvoice = invoiceForPayment(settled, paymentToolInfo.productId, {
+      receivingAddress: productReceivingAddress(paymentToolInfo.product, options.merchantAddress, {
+        stripeDepositAddress: options.stripe?.depositAddress,
+        salesAddress: options.sales?.address,
+      }),
+      taxDeclaration,
+      checkoutDetails,
+      seller: options.receiptSeller,
+      locale: paymentToolInfo.locale,
+      ...(stripeWillRecord ? { stripe: { sekRate: options.sekRate?.current() } } : {}),
+    })
     res.setHeader('x-receipt-json', Buffer.from(JSON.stringify(receiptInvoice.json), 'utf8').toString('base64'))
+    // #4853: record the settled payment in Stripe. Fire-and-forget: the money
+    // has already moved, so a Stripe refusal, timeout or network error must
+    // never delay or refuse the goods. A failure is logged as
+    // `[stripe] record_failed tx=<hash>` (never the key) and counted in
+    // /healthz. A payment served through recovery without a transaction hash
+    // (#4851) records nothing here — the reconciliation script picks it up.
+    // #4866: and only a payment to the CURRENT deposit address — one recovered
+    // to the previous address is logged as `not_recorded`, never sent.
+    // #4880: after the receipt, so the record carries its number, VAT and
+    // buyer keys. Reading the declaration and building the receipt are
+    // synchronous, so this delays nothing.
+    recordStripePayment(options.stripe, paymentToolInfo.product, settled, receiptInvoice.json)
+    // #4950: report a sale of the Sales product to Haven. The one point every
+    // paid call passes — both settlement methods, MCP tool calls and plain
+    // HTTP x402 alike — after the receipt, whose number and VAT treatment the
+    // record carries. Fire-and-forget, like Stripe: the money has moved, so
+    // Haven accepting, refusing, answering slowly or not at all changes
+    // nothing for the buyer. Only an on-chain settlement is reported, once per
+    // transaction, so a replayed payment header sends nothing more.
+    // #4953: and the Stripe-settled joke, after the Stripe record is made.
+    options.sales?.report(paymentToolInfo.product, settled, receiptInvoice.json, options.stripe)
   }
 
   try {
@@ -320,6 +560,13 @@ async function handlePaymentGate(
   paymentToolInfo: PaymentToolInfo,
 ): Promise<SettledPayment | null> {
   const { productId, product, description, settlementMethod } = paymentToolInfo
+  // #4850: the PRODUCT names the address its payment is made out to; the
+  // merchant-wide address is only its default. #4853: the Stripe-recorded
+  // product's address is the deposit address when Stripe is on.
+  const receivingAddress = productReceivingAddress(product, options.merchantAddress, {
+    stripeDepositAddress: options.stripe?.depositAddress,
+    salesAddress: options.sales?.address,
+  })
 
   // #2979: gate on settlement readiness. This runs on EVERY paid tool call —
   // the unpaid one that would receive the 402 challenge AND the agent's
@@ -328,12 +575,15 @@ async function handlePaymentGate(
   // caught here too (the drain test in http.test.ts). Skip the QA fixture
   // that settles nothing on-chain (`isSkipSettleProduct`) — a drained wallet
   // cannot block a settlement that never runs.
-  if (!isSkipSettleProduct(productId) && (await refuseIfNotReady(res, options))) {
+  // #4851: nor a product Coinbase's facilitator settles — CDP pays that gas,
+  // not this merchant's wallet (the same per-product exemption).
+  const settlement = productSettlementKind(product)
+  if (!isSkipSettleProduct(productId) && settlement !== 'cdp' && (await refuseIfNotReady(res, options))) {
     return null
   }
 
   const paymentRequired = options.paymentProcessor.buildPaymentRequired({
-    merchantAddress: options.merchantAddress,
+    merchantAddress: receivingAddress,
     amountUsdc: product.price_usdc,
     resource: `${options.baseUrl}${options.path}`,
     description,
@@ -347,6 +597,11 @@ async function handlePaymentGate(
       product,
       options.settlementMethods ?? SUPPORTED_SETTLEMENT_METHODS,
     ),
+    // #4873: the product's checkout-details request, when it asks for one.
+    // Every other product's challenge is unchanged.
+    checkoutDetails: checkoutDetailsForProduct(product, {
+      requiredField: options.checkoutDetailsRequiredField,
+    }),
   })
   const paymentHeader = getPaymentHeader(req)
 
@@ -359,9 +614,10 @@ async function handlePaymentGate(
     return await options.paymentProcessor.verifyAndSettle({
       productId,
       paymentHeader,
-      merchantAddress: options.merchantAddress,
+      merchantAddress: receivingAddress,
       expectedAmount: product.price_usdc,
       paymentRequired,
+      settlement,
     })
   } catch (err) {
     // A PaymentError is a DECISION: the merchant looked at the payment and
@@ -375,7 +631,9 @@ async function handlePaymentGate(
     // silence cost a day of QA triage on 2026-08-17: six red legs whose only
     // evidence was a generic 402.
     if (err instanceof PaymentError) {
-      writePaymentRequired(res, options, withReason(paymentRequired, err.message))
+      // #4851: a CDP-path refusal carries its own decision code; every other
+      // refusal has none, as before.
+      writePaymentRequired(res, options, withReason(paymentRequired, err.message, err.reasonCode))
       return null
     }
 
@@ -492,6 +750,17 @@ async function getSession(
     buildPaymentRequired: options.paymentProcessor.buildPaymentRequired,
     settlementMethods: options.settlementMethods,
     passport: options.passport,
+    cdpConfigured: options.cdpConfigured,
+    // #4853: the in-band quote must name the same receiving address the HTTP
+    // 402 does, so the deposit address travels with the session's config.
+    stripeDepositAddress: options.stripe?.depositAddress,
+    // #4950: the Sales account, so the in-band quote names the Sales product's
+    // own receiving address, as the HTTP 402 does.
+    salesAddress: options.sales?.address,
+    receiptSeller: options.receiptSeller,
+    // #4873: the in-band quote advertises the same checkout-details request
+    // the HTTP 402 does.
+    checkoutDetailsRequiredField: options.checkoutDetailsRequiredField,
   })
   const transport = new StreamableHTTPServerTransport({
     sessionIdGenerator: stateful ? () => randomUUID() : undefined,
@@ -555,8 +824,8 @@ function getPaymentHeader(req: IncomingMessage): string | undefined {
 function withReason<T extends { error?: string }>(
   paymentRequired: T,
   reason: string,
-  reasonCode?: FaultReasonCode,
-): T & { reason_code?: FaultReasonCode } {
+  reasonCode?: FaultReasonCode | DecisionReasonCode,
+): T & { reason_code?: FaultReasonCode | DecisionReasonCode } {
   const { error: _default, ...rest } = paymentRequired
   return {
     error: reason,
@@ -564,7 +833,7 @@ function withReason<T extends { error?: string }>(
     // sites, which keep their own specific message and no generic code.
     ...(reasonCode ? { reason_code: reasonCode } : {}),
     ...rest,
-  } as T & { reason_code?: FaultReasonCode }
+  } as T & { reason_code?: FaultReasonCode | DecisionReasonCode }
 }
 
 function writePaymentRequired(
@@ -611,7 +880,10 @@ function buildDiscovery(
     default_settlement_method: settlementMethods.includes(DEFAULT_SETTLEMENT_METHOD)
       ? DEFAULT_SETTLEMENT_METHOD
       : settlementMethods[0],
-    products: Object.values(PRODUCTS).map((product) => ({
+    products: offeredProducts({
+      cdpConfigured: Boolean(options.cdpConfigured),
+      salesConfigured: Boolean(options.sales?.address),
+    }).map((product) => ({
       id: product.id,
       name: product.name,
       category: product.category,
@@ -620,7 +892,7 @@ function buildDiscovery(
       default_settlement_method: settlementMethods.includes(product.x402.defaultSettlementMethod)
         ? product.x402.defaultSettlementMethod
         : settlementMethods[0],
-      tools: product.category === 'vpn' ? ['buy_vpn'] : ['buy_cloud_storage'],
+      tools: [productToolArgs(product).toolName],
       // #2989: same shape list_products' structuredContent carries — see
       // `isSkipSettleProduct` in x402.ts. Absent for every other product.
       ...(isSkipSettleProduct(product.id) ? { qa_fixture: SKIP_SETTLE_QA_FIXTURE } : {}),
@@ -628,7 +900,46 @@ function buildDiscovery(
   }
 }
 
-function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
+/** #1550: the 402 description's suffix per product category (English). */
+const DESCRIPTION_SUFFIX: Record<Product['category'], string> = {
+  vpn: '1 month subscription',
+  storage: '1 month of storage',
+  joke: 'one joke',
+  field_notes: 'one field note',
+}
+
+/**
+ * #5069: the name of a `tools/call` request the payment gate does not know —
+ * neither a free tool nor a buy tool of the product registry. The gate refuses
+ * it before the MCP server sees it, so a paid tool registered without a product
+ * (or a renamed one) fails closed instead of reaching its handler unpaid.
+ * `null` for every other request, and for a notification (no `id`): nothing
+ * answers a notification, and the server never runs a tool for one.
+ */
+function ungatedToolCall(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null
+  const rpc = body as Record<string, unknown>
+  if (rpc.method !== 'tools/call' || rpc.id === undefined) return null
+  const params = rpc.params as Record<string, unknown> | undefined
+  if (!params || typeof params.name !== 'string') return null
+  if (FREE_TOOL_NAMES.has(params.name) || paidToolNames().has(params.name)) return null
+  return params.name
+}
+
+/**
+ * #5069 review: a JSON-RPC batch carrying a `tools/call`. The payment gate reads
+ * one request per body, so a buy tool inside a batch would reach its handler
+ * with no HTTP 402. Refused whole; every client sends tool calls one per
+ * request (MCP's Streamable HTTP dropped batching in 2025-06-18).
+ */
+function isBatchedToolCall(body: unknown): boolean {
+  return (
+    Array.isArray(body) &&
+    body.some((item) => Boolean(item) && typeof item === 'object' && (item as Record<string, unknown>).method === 'tools/call')
+  )
+}
+
+function extractPaymentToolInfo(body: unknown, opts: ProductOfferOptions): PaymentToolInfo | null {
   if (!body || typeof body !== 'object') return null
   const rpc = body as Record<string, unknown>
   if (rpc.method !== 'tools/call') return null
@@ -640,34 +951,26 @@ function extractPaymentToolInfo(body: unknown): PaymentToolInfo | null {
   const args = (params.arguments as Record<string, unknown> | undefined) ?? {}
   const settlementMethod = isSettlementMethod(args.settlement_method) ? args.settlement_method : undefined
 
-  let productId: ProductId | null = null
+  // #5069: the product comes from the registry (`productForToolCall`), not a
+  // second hand-kept switch over tool names — a buy tool whose product the
+  // registry does not know is refused by `ungatedToolCall` before this runs.
+  const product = productForToolCall(toolName, args)
+  if (!product) return null
+  const productId = product.id
   // #1550: the 402 challenge's description is merchant metadata shown in Haven
   // quotes — English default, matching the MCP tool surface.
-  let descriptionSuffix = '1 month subscription'
-
-  if (toolName === 'buy_vpn') {
-    const plan = args.plan as string | undefined
-    // `legacy` is the EIP-3009-only plan (#1441) — see PRODUCTS.vpn_legacy.
-    if (plan === 'basic' || plan === 'pro' || plan === 'ultra' || plan === 'legacy') {
-      productId = `vpn_${plan}` as ProductId
-    }
-  } else if (toolName === 'buy_cloud_storage') {
-    const tier = args.tier as string | undefined
-    if (tier === '50gb' || tier === '200gb' || tier === '1tb') {
-      productId = `storage_${tier}` as ProductId
-      descriptionSuffix = '1 month of storage'
-    }
-  }
-
-  if (!productId) return null
-  const product = PRODUCTS[productId]
+  const descriptionSuffix = DESCRIPTION_SUFFIX[product.category]
+  // #4851: a product this merchant does not offer is not gated here — its
+  // tool is not registered either, so the MCP layer answers "unknown tool".
+  if (!isProductOffered(product, opts)) return null
   // #2989: the 402 `description` is what the hosted quote/prepare surfaces to
   // the agent BEFORE it signs — the fixture must be disclosed here, not only
   // in `list_products` prose the agent may never re-read at purchase time.
   const description = isSkipSettleProduct(productId)
     ? `${product.name} — ${descriptionSuffix}${QA_FIXTURE_DESCRIPTION_SUFFIX}`
     : `${product.name} — ${descriptionSuffix}`
-  return { productId, product, description, settlementMethod }
+  const locale = isMerchantLocale(args.locale) ? args.locale : DEFAULT_MERCHANT_LOCALE
+  return { productId, product, description, settlementMethod, locale }
 }
 
 function isInitializeRequest(body: unknown): boolean {
@@ -730,6 +1033,10 @@ function applyCorsHeaders(res: ServerResponse): void {
       'MCP-Protocol-Version',
       PAYMENT_SIGNATURE_HEADER,
       LEGACY_PAYMENT_SIGNATURE_HEADER,
+      // #4855: the buyer's signed tax declaration travels on the paid retry.
+      X_TAX_DECLARATION_HEADER,
+      // #4873: the buyer's checkout details travel on the paid retry.
+      X_CHECKOUT_DETAILS_HEADER,
     ].join(', '),
   )
   res.setHeader('Access-Control-Expose-Headers', `${PAYMENT_REQUIRED_HEADER}, ${PAYMENT_RESPONSE_HEADER}, mcp-session-id`)

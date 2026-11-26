@@ -30,9 +30,10 @@ covers:
   - packages/sdk/src/agent-guidance.ts
   - packages/frontend/src/lib/agent-skill-steps.ts
   - packages/frontend/src/lib/agent-skill-index.ts
+  - packages/frontend/src/lib/i18n/messages/en.ts
   - scripts/frontend-copy-lint.mjs
   - scripts/lib/ratchet.mjs
-last-verified: "2026-11-10"
+last-verified: "2026-11-23"
 ---
 
 # Haven UX Copy Guidelines
@@ -252,6 +253,28 @@ three platform names in product copy):
 
 User-editable credential nicknames are deliberately deferred (#1679) — date +
 kind is enough at two or three credentials; revisit if users accumulate more.
+
+### Use “seller” for whatever reports sales to Haven
+
+A **seller** is whatever asks buyers to pay into the Sales account and reports
+each sale to Haven: the merchant's own MCP server or HTTP API, or Haven's
+merchant kit. Prefer:
+
+- “Your seller asks buyers to pay this address”
+- “Your seller uses a Sales key to report what each payment was for”
+- “Add your seller's address on Setup”
+
+Avoid:
+
+- “Your kit” / “the kit” as a stand-in for the seller — the kit is one way to
+  sell, not the only one (owner decision 2026-11-19, #4985)
+- “Kit address” for the product list address
+
+**“Merchant kit”** stays the name of Haven's ready-made seller, used only when
+the kit itself is meant: the definition, the README link, the coding-agent
+prompt and the pilot line. The shared definition lives in
+`packages/frontend/src/lib/i18n/messages/en.ts` (`SELLER_DEFINITION`), so the
+Sales page and Settings cannot drift.
 
 ### Use “agent rules” or “agent budgets” instead of “spending policies”
 

@@ -24,7 +24,7 @@ covers:
   - packages/backend/src/routes/transactions.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/backend/src/modules/transactions/x402.ts
-last-verified: "2026-11-02"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Local MCP vs Hosted MCP + Edge Signer

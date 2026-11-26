@@ -90,6 +90,12 @@ export function mapPaymentStatusResult(raw: RawPaymentStatusResult): PaymentStat
     // payload (older backend) stays absent here; `settlementScheme` is
     // carried through even when `null` (a real, known answer).
     ...(raw.settlement_scheme !== undefined ? { settlementScheme: raw.settlement_scheme } : {}),
+    // #5030: the required checkout-details field names the challenge carried —
+    // absent from the raw payload (older backend, or nothing required) stays
+    // absent here, so the field never claims an empty requirement.
+    ...(Array.isArray(raw.checkout_details_required_fields) && raw.checkout_details_required_fields.length > 0
+      ? { checkoutDetailsRequiredFields: raw.checkout_details_required_fields }
+      : {}),
     ...(raw.merchant_settlement_recorded === true ? { merchantSettlementRecorded: true as const } : {}),
     // #4530: the recorded transaction itself — absent from the raw payload
     // (older backend, or nothing recorded) stays absent here, so the field

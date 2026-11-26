@@ -1,3 +1,4 @@
+import { parseX402Hostname } from '@haven_ai/core'
 import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
 
 /**
@@ -25,8 +26,8 @@ import { formatFiatDisplay, SUB_CENT_THRESHOLD } from '@/lib/format'
  *    most two agents. The dominant split prints figures only when both the
  *    agent's share and the total are at or above the threshold.
  * 4. **No raw address is ever named.** The merchant renders through #3810's
- *    counterparty rules (`merchantDisplayName`): contact name, else receipt
- *    name, else the x402 resource HOST. A bare recipient address has no
+ *    counterparty rules (`merchantDisplayName`): the server's name in the one
+ *    naming order (#4882), else the x402 resource hostname. A bare recipient address has no
  *    displayable name — the sentence falls back to a count, not the address.
  *
  * The spend figures are #3803's NET definition (booked-or-repriced fiat with
@@ -87,8 +88,8 @@ export function merchantDisplayName(
 }
 
 /**
- * The two displayable-name sources, in order: the resolved contact/receipt
- * name, then the x402 resource HOST (#4707 reuses this for the first-payment
+ * The two displayable-name sources, in order: the server's name in the one
+ * naming order (#4882), then the x402 resource hostname (#4707 reuses this for the first-payment
  * card, whose wire shape carries no `key`). A bare address is never a name.
  */
 export function merchantNameFromParts(parts: {
@@ -97,11 +98,11 @@ export function merchantNameFromParts(parts: {
 }): string | null {
   if (parts.merchantName) return parts.merchantName
   if (parts.x402ResourceUrl) {
-    try {
-      return new URL(parts.x402ResourceUrl).host
-    } catch {
-      // An unparseable resource URL has no name to show — fall through.
-    }
+    // #4883: the same hostname parse the server's naming order and the
+    // transaction rows use (`parseX402Hostname`), so a port never splits one
+    // merchant into two labels.
+    const host = parseX402Hostname(parts.x402ResourceUrl)
+    if (host) return host
   }
   return null
 }
@@ -257,3 +258,50 @@ export function buildSinceLastVisitSummary(input: SinceLastVisitInput): string |
 
   return `${input.timeWord}, ${who} made ${made}${money}.`
 }
+
+// ── When the Since line repeats the 7-day sentence (#4839) ──────────────────
+//
+// Owner decision (2026-11-12, #4839): when every payment of the last 7 days
+// happened since the previous visit, the two header lines say the same thing,
+// and only the 7-day sentence is shown (it also carries the merchant and
+// budget-stop clauses).
+//
+// "The same thing" is decided on the payment SET, never the money: both counts
+// are gross confirmed rows with the same filters and scope (#4839's spec
+// review), so a Since window that lies inside the overview's 7-day window and
+// holds as many payments IS that window's set. The nets are not compared —
+// each window nets its own sweeps, so one set can carry two nets.
+//
+// The 7-day window is the overview's own `[activityWindowStart, +7×24 h)`, and
+// it slides on every poll while the Since window is latched for the entry, so
+// containment is tested against `activityWindowStart`, never against `through`.
+// Anything missing or unparseable answers false: the line shows, as before.
+
+const DAY_MS = 24 * 60 * 60 * 1000
+
+export interface SinceRepeatsInput {
+  /** The Since window and its count, from `GET /dashboard/since`. */
+  since: { after: string; through: string; payments: number } | null
+  /** The overview's 7-day window start (`activityWindowStart`). */
+  activityWindowStart: string | null | undefined
+  /** The overview's window length in days (`activityWindowDays`); 7 when absent. */
+  activityWindowDays?: number | null
+  /** Confirmed payments in the overview's 7-day window (`spend.d7.payments`). */
+  sevenDayPayments: number | null | undefined
+}
+
+/** True when the Since line would only repeat the 7-day sentence, so it is hidden. */
+export function sinceLineRepeatsSevenDay(input: SinceRepeatsInput): boolean {
+  const { since, activityWindowStart, sevenDayPayments } = input
+  if (!since || !activityWindowStart || typeof sevenDayPayments !== 'number') return false
+  const start = Date.parse(activityWindowStart)
+  const after = Date.parse(since.after)
+  const through = Date.parse(since.through)
+  if (!Number.isFinite(start) || !Number.isFinite(after) || !Number.isFinite(through)) return false
+  const days = typeof input.activityWindowDays === 'number' && input.activityWindowDays > 0 ? input.activityWindowDays : 7
+  // d7 is [start, start + days); Since is (after, through].
+  if (after < start) return false
+  if (through >= start + days * DAY_MS) return false
+  return since.payments === sevenDayPayments
+}
+

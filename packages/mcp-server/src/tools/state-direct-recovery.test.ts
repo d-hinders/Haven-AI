@@ -1836,8 +1836,10 @@ describe('#3774 haven_submit next steps', () => {
     expect(res.data.next_tool_name).toBe('haven_get_payment_status')
     expect(res.data.next_arguments).toEqual({ payment_id: 'pay_1' })
     expect(res.data.reason).toContain('do NOT retry the merchant')
-    // No status read before confirmation.
-    expect(recordedCalls().some((c) => c.method === 'GET')).toBe(false)
+    // No status read before confirmation. (#4872: the one GET before the relay
+    // is the stored challenge, read for the checkout-details decision.)
+    const gets = recordedCalls().filter((c) => c.method === 'GET').map((c) => new URL(c.url).pathname)
+    expect(gets).toEqual(['/x402/pay_1/payment-required'])
   })
 
   it('an unreadable status degrades to a status read, never a merchant retry', async () => {

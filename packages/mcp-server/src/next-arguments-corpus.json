@@ -9,11 +9,23 @@
       }
     },
     {
+      "site": "errors.ts normalizeError: payment already submitted (typed 409, #4826)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
       "site": "errors.ts normalizeError: submission outcome unknown (typed 502, payment_id known)",
       "tool": "haven_get_payment_status",
       "arguments": {
         "payment_id": "pay_1"
       }
+    },
+    {
+      "site": "errors.ts normalizeError: sweep outcome unknown (typed 409, #5035)",
+      "tool": "haven_sweep_delegate",
+      "arguments": {}
     },
     {
       "site": "guidance.ts eip3009 confirmed replay: funded-awaiting-merchant (poll status)",
@@ -206,6 +218,13 @@
     },
     {
       "site": "plain-http-x402.ts report outcome: erc7710 rejected (verify settlement before re-quoting)",
+      "tool": "haven_get_payment_status",
+      "arguments": {
+        "payment_id": "pay_1"
+      }
+    },
+    {
+      "site": "resource-address.ts settle-time: payment status unreadable before spend",
       "tool": "haven_get_payment_status",
       "arguments": {
         "payment_id": "pay_1"

@@ -153,19 +153,57 @@ const MAKE_PAYMENT_DESCRIPTION =
 // stable substring tests assert on) and then appends the SDK-specific guidance
 // for tool-calling consumers.
 
+/**
+ * #4808: `havenTools` is a third surface, and its six tools are not the MCP
+ * surface's tools. Two shared fragments name MCP tool names, and both are
+ * pinned byte-for-byte by the two MCP goldens
+ * (`packages/mcp/src/local-tool-contract.golden.json` and
+ * `packages/mcp-server/src/tools-list.snapshot.json`), so the shared text
+ * cannot change. These are the SDK-surface variants, derived from the shared
+ * fragment so there is one source of truth: the MCP-only pointer is dropped,
+ * and an MCP tool name is replaced by the SDK tool that does the same job.
+ * `sdk-tool-names.test.ts` fails if a variant stops differing from the shared
+ * text (a silent no-op) or names a tool outside the six.
+ */
+const SDK_GET_ALLOWANCES_BEHAVIOR = sharedDescriptions.getAllowances.behavior.replace(
+  "Open task budgets are not listed here: haven_get_agent's taskBudgets[] carries each one's spentAtomic/remainingAtomic and lifecycle status.",
+  'Open task budgets are not listed here.',
+)
+
+const SDK_PAY_X402_NEXT_ACTION_GUIDANCE = sharedDescriptions.payX402.nextActionGuidance.replaceAll(
+  'haven_get_payment_status',
+  'get_payment_status',
+)
+
 const GET_STATUS_DESCRIPTION =
   sharedDescriptions.getPaymentStatus.summary + ' ' +
   'Accepts payment intent IDs. Returns the current status, phase, next_action, transaction hash if available, and payment details.'
 
-const GET_ALLOWANCES_DESCRIPTION = composeDescription(sharedDescriptions.getAllowances)
+const GET_ALLOWANCES_DESCRIPTION = composeDescription({
+  ...sharedDescriptions.getAllowances,
+  behavior: SDK_GET_ALLOWANCES_BEHAVIOR,
+})
+
+/**
+ * #4872: the adapter's x402 tools rebuild the challenge from tool arguments
+ * (`toolX402PaymentRequired`), which carry no `extensions`, so they can
+ * neither answer a merchant's checkout-details request nor refuse on it
+ * (`docs/architecture/13-checkout-details.md` §4: not supported).
+ */
+const ADAPTER_NO_CHECKOUT_DETAILS_SENTENCE =
+  'Checkout details are not shared on this tool: it rebuilds the payment challenge without the merchant\'s extensions, so a merchant that asks for a receipt email or an address gets no answer and the payment proceeds as today.'
 
 const AUTHORIZE_X402_DESCRIPTION =
-  composeDescription(sharedDescriptions.payX402) + ' ' +
+  composeDescription({
+    ...sharedDescriptions.payX402,
+    nextActionGuidance: SDK_PAY_X402_NEXT_ACTION_GUIDANCE,
+  }) + ' ' +
   'In this SDK tool set, the allowance lookup tool is get_allowances. ' +
   'When a paid API returns x402 payment requirements, use this tool to sign with the agent-owned delegate key; funding, when the scheme needs it, is redeemed from the agent budget delegation and is bounded by it. ' +
   'Haven relays signed transactions only; the agent key authorizes payment and on-chain limits enforce spend. ' +
   'A payment outside the on-chain budget is declined before any money moves — report the decline and ask the user to raise the budget in Haven; do not loop retries and do not wait for an approval, because none is queued. Preserve the original merchant/MCP session and x402 details. ' +
-  'On a manual HTTP retry always set PAYMENT-SIGNATURE (x402 v2) to the returned payment_header; a strict v2 merchant reads only that name. Add X-PAYMENT (v1) only when the merchant\'s 402 is x402Version 1 — a v2 payment header echoes the merchant\'s extensions (on erc7710 it carries a delegation chain) and sending it twice is refused with HTTP 431, after the EIP-3009 funding leg has already moved money.'
+  'On a manual HTTP retry always set PAYMENT-SIGNATURE (x402 v2) to the returned payment_header; a strict v2 merchant reads only that name. Add X-PAYMENT (v1) only when the merchant\'s 402 is x402Version 1 — a v2 payment header echoes the merchant\'s extensions (on erc7710 it carries a delegation chain) and sending it twice is refused with HTTP 431, after the EIP-3009 funding leg has already moved money.' + ' ' +
+  ADAPTER_NO_CHECKOUT_DETAILS_SENTENCE
 
 // #2145: the backend now emits nextAction=retry_original_x402_request from
 // GET /payments/:id (agent-payment-status.ts) when the funding leg confirmed
@@ -176,7 +214,8 @@ const AUTHORIZE_X402_DESCRIPTION =
 const RESUME_X402_DESCRIPTION =
   sharedDescriptions.resumeX402.summary + ' ' +
   'Only call this after get_payment_status reports nextAction=retry_original_x402_request — that means Haven\'s funding leg confirmed but no merchant response was ever recorded (typically a crash between funding and the merchant retry). ' +
-  'Any other nextAction reports a conflict instead of retrying — do not call this speculatively, and do not pay again.'
+  'Any other nextAction reports a conflict instead of retrying — do not call this speculatively, and do not pay again.' + ' ' +
+  ADAPTER_NO_CHECKOUT_DETAILS_SENTENCE
 
 const SWEEP_DELEGATE_DESCRIPTION = composeDescription(sharedDescriptions.sweep_delegate)
 

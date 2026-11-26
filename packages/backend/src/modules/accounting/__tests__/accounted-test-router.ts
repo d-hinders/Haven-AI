@@ -27,12 +27,20 @@ export interface UploadRecord {
   uploadSource: string | null
   sha256: string
   byteLength: number
+  /** The bytes the client actually sent — the renderer's output, for content assertions. */
+  bytes: Buffer
 }
 
 /** The recorded exchange log + per-case refusal switches, inspectable by tests. */
 export interface AccountedRouterState {
   uploadCalls: number
   uploads: UploadRecord[]
+  /**
+   * #4824: EVERY upload POST the connector made, including replays and 409
+   * refusals — `uploads` records only the creates. A retry's bytes are
+   * compared against the first attempt's here.
+   */
+  attempts: UploadRecord[]
   lastUpload: UploadRecord | null
   lastPayload: Record<string, unknown> | null
   /** Every request the connector made: method + path — the allowlist test's data. */
@@ -47,6 +55,12 @@ export interface AccountedRouterState {
   corruptHash: boolean
   /** #3918: refuse only the SECOND create (the merchant-invoice upload) with a retryable 500. */
   failSecondUpload: boolean
+  /**
+   * #4824: store the document, then throw as if the answer was lost on the
+   * way back (a network failure after the provider committed). One-shot: the
+   * next upload answers normally, so a retry can be observed.
+   */
+  loseAnswer: boolean
 }
 
 const DOCUMENT_ID = '3f1c7a52-9b04-4e6a-8f21-7c5d2e8b9a10'
@@ -63,6 +77,7 @@ export function accountedRouter() {
   const state: AccountedRouterState = {
     uploadCalls: 0,
     uploads: [],
+    attempts: [],
     lastUpload: null,
     lastPayload: null,
     requests: [],
@@ -74,6 +89,7 @@ export function accountedRouter() {
     replayIdempotent: false,
     corruptHash: false,
     failSecondUpload: false,
+    loseAnswer: false,
   }
   // Per-idempotency-key record + document id: a payment's SECOND document
   // (the merchant invoice, key `paymentId:merchant-invoice`) gets its own
@@ -123,7 +139,11 @@ export function accountedRouter() {
         uploadSource: typeof form.get('upload_source') === 'string' ? String(form.get('upload_source')) : null,
         sha256,
         byteLength: bytes.byteLength,
+        bytes,
       }
+      // #4824: every POST is recorded, replays and refusals included — the
+      // retry's bytes are compared against the first attempt's here.
+      state.attempts.push(record)
       const key = record.idempotencyKey ?? ''
       const cached = byKey.get(key)
       // A replay of the SAME key with the SAME bytes returns the provider's
@@ -164,6 +184,12 @@ export function accountedRouter() {
       }
       const documentId = idForKey(key)
       byKey.set(key, { record, id: documentId })
+      // #4824: the provider committed the document, then the answer was lost
+      // on the way back. One-shot, so the retry answers normally.
+      if (state.loseAnswer) {
+        state.loseAnswer = false
+        throw new TypeError('fetch failed: the answer was lost after the document was stored')
+      }
       const body = accountedFixture('document-created.json')
       body.data.id = documentId
       body.data.sha256_hash = state.corruptHash ? 'deadbeef'.repeat(8) : sha256

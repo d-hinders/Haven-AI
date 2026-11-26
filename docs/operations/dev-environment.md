@@ -36,7 +36,7 @@ covers:
   - packages/frontend/package.json
   - .github/workflows/ci.yml
   - .github/workflows/update-visual-baselines.yml
-last-verified: "2026-11-09"
+last-verified: "2026-11-20"
 ---
 
 # Dev environment
@@ -460,12 +460,12 @@ Isolation rules that are non-negotiable for a payments product:
   node scripts/ci/rpc-conformance.mjs --url "$CANDIDATE_URL" --chain 84532 --logs-range 10   # QA_RPC_URL_BASE_SEPOLIA only
   ```
 
-  **The dev arrangement since 2026-10-01 (#3489, #3456):**
+  **The dev arrangement since 2026-11-20 (the merchant-index Alchemy incident):**
 
   | Variable | Where | Provider | Burst of 20 | `--logs-range` |
   |---|---|---|---|---|
-  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | Alchemy, the dev app | 20/20 answered, all 5 checks pass (2026-10-01, after the swap; probed before that day's key rotation, same app) | 500, the default (the sweepers' batch). Not yet probed with the `eth_getLogs` line; expected ✗ on the free tier's 10-block cap (#4118) |
-  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Infura, free Core plan | **fails**: 20/20 then 14/20 rate-limited (2026-09-29), 20/20 (2026-09-30) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below), so its logs line is covered by the fallback exception below. Re-probe at the default 500 only if it is ever promoted to primary |
+  | `RPC_URL_BASE_SEPOLIA` (primary) | `@haven/backend` / dev | the public node, `https://sepolia.base.org` | 20/20 answered; 5 of 6 checks pass (2026-11-20) | ✗ at 500: the node serves **200** blocks per call (HTTP 413, `-32614 eth_getLogs is limited to a 200 range`), which `log-range-limit.ts` parses and narrows to. Accepted as a temporary exception, below |
+  | `RPC_URL_BASE_SEPOLIA_FALLBACK` | `@haven/backend` / dev | Alchemy, the dev app (the primary until 2026-11-20) | 20/20 answered, all 5 checks pass (2026-10-01) | Informational, not a gate: no `eth_getLogs` reader uses the fallback (it carries the viem failover reads and the relayer's raw-send rebroadcast; the log scanners stay on the primary, see *RPC failover* below) |
   | `QA_RPC_URL_BASE_SEPOLIA` (the QA observer) | GitHub Actions secret | Alchemy, a separate QA-observer app | not probed | **10**: the harness reads 10-block windows (`GET_LOGS_MAX_RANGE`, PR #4086) and never asks for more |
 
   **Two owner-accepted exceptions to the probe rule above** (2026-10-01):
@@ -481,6 +481,25 @@ Isolation rules that are non-negotiable for a payments product:
 
   Every Alchemy app draws on one account-wide monthly compute-unit allowance,
   prod's app included. An Alchemy burn-alert email reopens #3489.
+
+  **What changed on 2026-11-20, and why.** From 2026-11-19 the merchant inbound
+  index (#4903) held dev's Alchemy app at ~1M compute units an hour, 99%
+  `eth_getLogs` at the free plan's 10 blocks per call, and used 27.3M of the
+  shared 30M monthly allowance. The primary was swapped to the Infura key
+  first; within minutes Infura answered every request, even a single
+  `eth_blockNumber`, with HTTP 429 (`-32005`), and that key is also prod's
+  `RPC_URL_BASE_FALLBACK`. So dev moved to the public node, which shares no
+  quota with prod, and Alchemy became dev's fallback. **Temporary exception:**
+  the public node fails the 500-block logs line (it serves 200). Every log
+  scanner learns that limit from the refusal, so a scan costs 2.5× the calls
+  it would at 500, and nothing is lost. Since #5012 the merchant index has no
+  scheduled pass: it refreshes a merchant account only while its owner views
+  Sales, at most once per 30 s, so it no longer drives the RPC bill. Without
+  `ALCHEMY_HISTORY_API_KEY` that refresh reads the range with `eth_getLogs` on
+  the primary. Moving the primary back to a
+  dedicated endpoint that passes every line is an ops decision.
+  `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`, lower-case; any other
+  value refuses boot) stops the refresh.
 
 - **RPC failover (#3255)** — the backend's viem clients (delegation-rail
   prepare, account deploy checks, caveat-enforcer and budget reads) fail over
@@ -571,10 +590,27 @@ Isolation rules that are non-negotiable for a payments product:
   `packages/backend/src/openapi/route-modules.generated.ts`; regenerate it with
   `npm run generate:route-modules` after adding, moving or renaming a route
   (`npm run check:route-modules` and the backend suite both fail on a stale
-  table). #4709's `POST /user/visits` and `GET /dashboard/since` are the latest
-  rows: both live in modules already enforced (`routes/user.ts`,
-  `routes/dashboard.ts`), so the table gained two rows and no module entered
-  shadow. New modules are born ENFORCED with their own `enforcedModules`
+  table). #4709's `POST /user/visits` and `GET /dashboard/since` joined
+  modules already enforced (`routes/user.ts`, `routes/dashboard.ts`), so the
+  table gained two rows and no module entered shadow. #4895's three
+  `/merchant-services` rows are a new module, `routes/merchant-services.ts`,
+  listed from its first commit. #4896's three `/merchant-keys` rows are the
+  same shape: a new module, `routes/merchant-keys.ts`, listed from its first
+  commit. #4899's three `/merchant-catalogue` rows are the same shape again: a
+  new module, `routes/merchant-catalogue.ts`, listed from its first commit, so
+  its save body is refused by the schema when it carries anything but the
+  deployment address. #4897 added two more modules of that shape:
+  `routes/merchant-sales.ts`, with one `POST /merchant/sales` row (the Sales
+  key's ingest, whose body is closed to the sale-record shape), and
+  `routes/merchant-sales-reads.ts`, with four `/merchant-sales` rows for the
+  owner's reads and the clear route. Both are listed from their first commit;
+  #4959 added a fifth row to the second, `GET /merchant-sales/facets`, in the
+  same enforced module.
+  #4952 added one more of that shape, `routes/merchant-deposit-addresses.ts`,
+  with three `/merchant-deposit-addresses` rows (the owner's list, register and
+  retire of a Stripe deposit address), also listed from its first commit.
+  New modules are born ENFORCED with their own
+  `enforcedModules`
   entry — #3164's `routes/agent-organizations.ts` (its own `/organizations`
   prefix) followed the #3167 precedent exactly, and #3329's two new modules
   did the same — the owner-auth `routes/agent-task-budgets.ts` (one GET under
@@ -846,11 +882,56 @@ documents variables rather than applying them.
    `MERCHANT_PASSPORT_ISSUER` is updated; treat rotation as a breaking change
    ([secret-rotation.md](secret-rotation.md)).
 
-To turn it back **off**, unset either variable. The merchant advertises only
-`haven-demo` again, and a payment that still carries a reference reports
+To turn it back **off**, unset `MERCHANT_PASSPORT_ISSUER` (`MERCHANT_HAVEN_BASE_URL`
+is shared with the Haven Sales product below, which needs it). The merchant
+advertises only `haven-demo` again, and a payment that still carries a reference reports
 `passport: null` rather than a stale answer.
 
 Reference: `packages/demo-merchant-mcp/README.md` § *Agent Passport check*.
+
+### Enabling the Haven Sales product on the dev demo-merchant
+
+Since #4950 the dev demo-merchant can offer one more product, **Haven Field
+Notes** (`buy_field_notes`, 0.0025 USDC), paid into a Haven **Sales account**
+and reported to Haven after each sale, so it appears on that account's Sales
+page — the merchant-services demo (epic #4885). It is off by default and, like
+the rails above, a **manual variable change** on the Railway demo-merchant
+service.
+
+1. **First, on the dev Haven deployment**, as the demo merchant's Haven user:
+   turn on Sales (Settings → Business → Sales), which creates the Sales
+   account, and create a Sales key for it (Sales → Setup → Sales keys → Create
+   Sales key, #4905; or `POST /merchant-keys` with the user's session). The
+   secret is shown once. Note the Sales account's address.
+2. **Set both variables together** on the demo-merchant service, and make sure
+   `MERCHANT_HAVEN_BASE_URL` names the dev backend's public origin (it is shared
+   with the passport check; set alone it only logs the passport check's
+   "set BOTH" warning):
+
+   ```
+   MERCHANT_SALES_ADDRESS=<the Sales account's checksummed address>
+   MERCHANT_SALES_KEY=<the Sales key, sk_merchant_...>
+   MERCHANT_HAVEN_BASE_URL=https://<dev backend public origin>
+   ```
+
+   Paste the key straight into Railway's service variables, never into a file,
+   issue or chat. With either variable missing or unusable (an address that is
+   not checksummed, or equals `MERCHANT_ADDRESS` or a Stripe deposit address; a
+   key without the `sk_merchant_` prefix) the merchant warns and does not offer
+   the product; every other product is unchanged either way.
+3. **Check** `/healthz`: a `sales` block with the Sales address appears (see
+   the README's `/healthz` description), and the startup log says
+   `Sales: reporting … field_notes … paid into <address> to <base URL>`, not
+   `Sales: not reporting …`. The full demo, step by step, is
+   [merchant-services-demo.md](merchant-services-demo.md). After a purchase, `reported` counts the
+   sales Haven accepted; a refusal or give-up shows in the `[sales]` log lines.
+4. **Buy from a different Haven user.** A sale bought by an agent of the Sales
+   account's own owner is a move between the owner's accounts and shows no
+   revenue.
+
+To turn it back **off**, unset either variable.
+
+Reference: `packages/demo-merchant-mcp/README.md` § *Haven Sales account*.
 
 ### The `DEV` badge
 

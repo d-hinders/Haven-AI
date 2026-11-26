@@ -50,10 +50,11 @@ const { mockQuery, portfolioMocks, transactionMocks, fiatMocks } = vi.hoisted(()
     // #4099: the route hands the feed an own-account name lookup built from
     // its account list.
     ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
-    // #4268: the route folds own-account moves before grouping. This suite
-    // feeds the feed builder directly, so the fold passes rows through; the
-    // fold itself is pinned against the real route in dashboard-activity.test.ts.
-    foldOwnAccountTransfers: vi.fn((rows: unknown[]) => rows),
+    // #4268/#5000: the route folds own-account moves and marks sales before
+    // grouping. This suite feeds the feed builder directly, so the step passes
+    // rows through; the fold is pinned against the real route in
+    // dashboard-activity.test.ts, the sale marker in transactions-sale-marker.db.test.ts.
+    foldAndMarkSales: vi.fn(async (_userId: string, rows: unknown[]) => rows),
     buildActivityFeed: vi.fn(async () => ({
       groups: [] as never[],
       hasOlderActivity: false,
@@ -79,8 +80,23 @@ vi.mock('../../modules/accounts/index.js', () => ({
   combineBalanceFreshness,
   needsBackupSignerRecommendation,
 }))
-vi.mock('../../infra/fiat-values.js', () => fiatMocks)
-vi.mock('../../modules/transactions/index.js', () => transactionMocks)
+// #4963: `loadTokenRates` lives in fiat-values now; the real one rides in and
+// reads through the `infra/prices.js` mock below.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
+  ...fiatMocks,
+}))
+vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
+  return {
+    ...transactionMocks,
+    // #4882: the real naming module — its loader reads through the mocked
+    // `db.js` (each source fail-soft), so the names follow the fixtures.
+    loadRecipientNameIndex: actual.loadRecipientNameIndex,
+    recipientAddressOf: actual.recipientAddressOf,
+    recipientNameWithoutHost: actual.recipientNameWithoutHost,
+  }
+})
 // #3803: the route reads today's spot rates for the budget captions. A mock
 // keeps the suite off CoinGecko — the price read itself is infra/prices.ts'
 // own concern.

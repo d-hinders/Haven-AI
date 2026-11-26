@@ -11,6 +11,7 @@
 import {
   AgentPaymentFailureCode,
   AgentPaymentNextAction,
+  CheckoutDetailsUnavailableError,
   HavenApiError,
   HavenClient,
   HavenError,
@@ -20,7 +21,7 @@ import {
   catalogFundingLegExpected,
   composeDescription,
   discoverMerchantMcpUrl,
-  resolveTokenFromAddress,
+  replaceSettlementEvidenceMessage,
   sameUrl,
   selectErc7710PaymentOption,
   selectStandardPaymentOption,
@@ -33,8 +34,8 @@ import {
   type X402PaymentOption,
   type X402Quote,
   type X402ResumeState,
+  type CheckoutDetailsRefusalStage,
 } from '@haven_ai/sdk'
-import { taskSignerCompatibilityNotice } from './signer-compat.js'
 import { z } from 'zod/v3'
 
 const headersSchema = z.record(z.string(), z.string()).optional()
@@ -67,6 +68,176 @@ function humanDecimalToAtomic(human: string, decimals: number): bigint | null {
   const fraction = match[2] ?? ''
   if (fraction.length > decimals) return null
   return BigInt(match[1] + fraction.padEnd(decimals, '0'))
+}
+
+/**
+ * #4830: why a stated `expected_amount` could NOT be compared. Mirrors the
+ * hosted `ExpectedAmountNotComparedCause` (mcp-server support cannot be
+ * imported here) — same four causes, same next-step rule: a transient read
+ * failure is worth one re-quote, everything else is deterministic and stops.
+ */
+type ExpectedAmountNotComparedCause =
+  | 'agent_read_failed'
+  | 'agent_read_refused'
+  | 'no_option_selected'
+  | 'unknown_decimals'
+
+/** #4830: the comparison's outcome — a decision, or an honest "not made". */
+type ExpectedAmountComparison =
+  | { kind: 'compared'; differs: boolean }
+  | { kind: 'not_compared'; cause: ExpectedAmountNotComparedCause }
+
+/** #4830: the AUTHORIZATION amount of one option, or null when unpayable data. */
+function authorizationAmountOf(option: X402PaymentOption): bigint | null {
+  try {
+    return BigInt(x402AuthorizationAmount(option))
+  } catch {
+    return null
+  }
+}
+
+/** #4830: the cause of a failed agent read, decided the way `normalizeError` does. */
+function notComparedCauseForReadError(error: unknown): ExpectedAmountNotComparedCause {
+  if (error instanceof HavenApiError) {
+    const status = error.statusCode
+    if (status === 401 || status === 403) return 'agent_read_refused'
+  }
+  return 'agent_read_failed'
+}
+
+/**
+ * #4830 — the local twin of the hosted `compareExpectedAmount`. Same decision
+ * procedure, with the local surface's own option selector: the agent read only
+ * chooses BETWEEN the merchant's erc7710 and standard options, so when that
+ * choice cannot change the answer (one option, equal amounts, or a stated
+ * price equal to neither) the comparison is decided WITHOUT the read. When it
+ * genuinely cannot be made the result says so instead of answering as if no
+ * expectation had been stated.
+ *
+ * A stated price finer than the token's scale cannot equal any option amount,
+ * so it is a decided mismatch — hosted parity, which the local surface used to
+ * skip silently.
+ */
+function compareExpectedAmountLocal(input: {
+  accepts: X402PaymentOption[]
+  decimals: number | null
+  expectedAmount: string
+  agent: HavenAgent | undefined
+  agentError: unknown
+}): ExpectedAmountComparison {
+  const { accepts, decimals, expectedAmount, agent, agentError } = input
+  if (decimals === null) return { kind: 'not_compared', cause: 'unknown_decimals' }
+  const expectedAtomic = humanDecimalToAtomic(expectedAmount, decimals)
+  if (expectedAtomic === null) return { kind: 'compared', differs: true }
+
+  if (agent) {
+    const option = selectQuoteOption(accepts, agent)
+    if (!option) return { kind: 'not_compared', cause: 'no_option_selected' }
+    const amount = authorizationAmountOf(option)
+    if (amount === null) return { kind: 'not_compared', cause: 'no_option_selected' }
+    return { kind: 'compared', differs: amount !== expectedAtomic }
+  }
+
+  const candidates: X402PaymentOption[] = []
+  const erc7710 = selectErc7710PaymentOption(accepts)
+  if (erc7710) candidates.push(erc7710)
+  const standard = selectStandardPaymentOption(accepts)
+  if (standard && standard !== erc7710) candidates.push(standard)
+  if (candidates.length === 0) return { kind: 'not_compared', cause: 'no_option_selected' }
+  const amounts = candidates.map(authorizationAmountOf)
+  if (amounts.some((amount) => amount === null)) {
+    return { kind: 'not_compared', cause: notComparedCauseForReadError(agentError) }
+  }
+  const decided = amounts as bigint[]
+  if (decided.length === 1) return { kind: 'compared', differs: decided[0] !== expectedAtomic }
+  if (decided[0] === decided[1]) return { kind: 'compared', differs: decided[0] !== expectedAtomic }
+  if (expectedAtomic !== decided[0] && expectedAtomic !== decided[1]) {
+    return { kind: 'compared', differs: true }
+  }
+  return { kind: 'not_compared', cause: notComparedCauseForReadError(agentError) }
+}
+
+/** #4830: the next step a not-compared quote carries, decided by the CAUSE. */
+function notComparedNextAction(cause: ExpectedAmountNotComparedCause): AgentPaymentNextAction {
+  return cause === 'agent_read_failed'
+    ? AgentPaymentNextAction.RetryWithExplicitContext
+    : AgentPaymentNextAction.StopAndTellUser
+}
+
+/** #4830: why no tool follows a not-compared quote. */
+function notComparedOmittedReason(cause: ExpectedAmountNotComparedCause): string {
+  switch (cause) {
+    case 'agent_read_failed':
+      return (
+        'no Haven tool follows yet: the price could not be compared because the agent read ' +
+        'failed — re-quote once with the same arguments before telling the user'
+      )
+    case 'agent_read_refused':
+      return (
+        'no Haven tool follows: the agent read was refused, so the price could not be ' +
+        'compared — tell the user what failed'
+      )
+    case 'no_option_selected':
+      return (
+        'no Haven tool follows: no payment option this agent can pay was selected, so the ' +
+        'price could not be compared — tell the user'
+      )
+    case 'unknown_decimals':
+      return (
+        "no Haven tool follows: the quote's token is not one Haven recognises, so the price " +
+        'could not be compared — tell the user'
+      )
+  }
+}
+
+/**
+ * #4830: the prose for a not-compared quote — it says the comparison was NOT
+ * made and why, never that the price differs, and never the deposit-address
+ * fallback (that remedy belongs to a challenge found WRONG).
+ */
+function notComparedReason(
+  expectedAmount: string,
+  cause: ExpectedAmountNotComparedCause,
+): string {
+  const opening =
+    `The merchant's quoted price was NOT compared with the expected price (${expectedAmount}) ` +
+    'stated with this quote: '
+  const closing = ' No comparison was made — this says nothing about whether the price matches.'
+  switch (cause) {
+    case 'agent_read_failed':
+      return (
+        opening +
+        "the agent's account could not be read from Haven, and the merchant's payment options " +
+        'carry different amounts, so which one this agent would pay is unknown.' +
+        closing +
+        ' Re-quote once with the same arguments; if the read still fails, stop and tell the ' +
+        'user before any payment.'
+      )
+    case 'agent_read_refused':
+      return (
+        opening +
+        "the agent's account read was refused by Haven, and the merchant's payment options " +
+        'carry different amounts, so which one this agent would pay is unknown.' +
+        closing +
+        ' Stop and tell the user before any payment; re-quoting the same way cannot succeed.'
+      )
+    case 'no_option_selected':
+      return (
+        opening +
+        "no payment option this agent can pay was selected from the merchant's offer, so the " +
+        'amount this agent would authorize is unknown.' +
+        closing +
+        ' Stop and tell the user before any payment.'
+      )
+    case 'unknown_decimals':
+      return (
+        opening +
+        "the quote's token is not one Haven recognises, so its decimals are unknown and the " +
+        "stated price cannot be converted to the token's atomic amount." +
+        closing +
+        ' Stop and tell the user before any payment.'
+      )
+  }
 }
 
 export type HavenMcpToolName =
@@ -288,15 +459,19 @@ export const toolSchemas = {
 // #3101: keys survive on the type (see the hosted server's contracts.ts).
 } as const satisfies Record<HavenMcpToolName, z.ZodRawShape>
 
-// #3329: outcome language only — never "delegation", "caveat" or "UserOp".
+// #3329 / #4825: outcome language only — never "delegation", "caveat" or
+// "UserOp". The tool stays registered and refuses: opening a task budget needs
+// a signature from the Haven signer, and a --local install has no signer tool.
 const OPEN_TASK_BUDGET_DESCRIPTION = [
   'Open a budget for one task that ends by itself: a spending cap, good for at most ttl_minutes,',
   'reserved out of the agent\'s own budget and separate from its period reset.',
   'Pass max_amount_human (whole tokens, e.g. "5" for 5 USDC), ttl_minutes (1-1440), and optionally',
   'recipient (pins every payment against this task budget to one address), label, and token',
-  '(defaults to USDC). Returns { task_budget, next_action: "sign", next_tool, next_arguments } —',
-  'call next_tool with next_arguments EXACTLY as given to get a signature, then relay it with',
-  'haven_submit. Spending anything above the reserved amount, past the deadline, or to a',
+  '(defaults to USDC). This runtime cannot open a task budget: opening one needs a signature from the',
+  'Haven signer, and a --local install has no signer tool, so the call refuses with',
+  'TASK_BUDGET_SIGNING_UNAVAILABLE and nothing is reserved. Task budgets are a hosted-plus-signer',
+  'feature — use a hosted MCP install with the Haven signer connected, or ask the owner to open the',
+  'budget there. Spending anything above the reserved amount, past the deadline, or to a',
   'different recipient than the one pinned here is declined on the spot — nothing is queued.',
   'A recipient pin is checked against where each payment first goes: haven_pay_x402 and',
   'haven_pay_x402_quote first move funds into the agent\'s own wallet, so a budget pinned to a',
@@ -305,12 +480,13 @@ const OPEN_TASK_BUDGET_DESCRIPTION = [
 
 const CLOSE_TASK_BUDGET_DESCRIPTION = [
   'End a task budget early, before its deadline, releasing whatever of its cap was unspent back',
-  'to the agent\'s own budget. Pass task_budget_id. If the budget was never signed (still pending),',
-  'this ends it immediately with { task_budget, status: "closed" } and nothing was ever reserved',
-  'on-chain. Otherwise it returns a signature request: { task_budget, next_action: "sign",',
-  'next_tool, next_arguments } — call next_tool with next_arguments EXACTLY as given, then relay',
-  'the signature with haven_submit. A task budget past its own deadline closes immediately, the',
-  'same as the pending case.',
+  'to the agent\'s own budget. Pass task_budget_id. A budget that was never signed (still pending)',
+  'or is past its own deadline ends immediately with { task_budget, status: "closed" } and nothing',
+  'was ever reserved on-chain. A budget that is open or closing needs a signature from the Haven',
+  'signer, and a --local install has no signer tool: the call refuses with',
+  'TASK_BUDGET_SIGNING_UNAVAILABLE, nothing is closed and the budget is left unchanged. Task',
+  'budgets are a hosted-plus-signer feature — use a hosted MCP install with the Haven signer',
+  'connected, or ask the owner to close it there.',
 ].join(' ')
 
 // #3518: the status check a close refusal's "re-check the budget's status"
@@ -324,13 +500,18 @@ const GET_TASK_BUDGET_DESCRIPTION = [
   'haven_get_agent lists live task budgets only; this reads any one, closed or expired included.',
 ].join(' ')
 
+// #3329 / #3506 / #4825: the relay step. The local runtime has no signer tool,
+// so it cannot produce a task-budget or sub-budget signature — the description
+// says so instead of naming a signer step.
 const SUBMIT_DESCRIPTION = [
-  'Relay a signature from the local signer. Pass exactly one of task_budget_id (from',
+  'Relay a signature you already hold. Pass exactly one of task_budget_id (from',
   'haven_open_task_budget or haven_close_task_budget), sub_budget_id (from haven_get_agent',
   'pendingSubBudgetSignatures[]) or payment_id — never two, never none — plus signature.',
   'For a task budget this opens or closes it on-chain and returns { task_budget,',
   'status }; a close in progress may return { task_budget, status: "closed", close_tx_hash }.',
-  'A sub_budget_id returns { sub_budget, status } with the next signer step, if one is owed.',
+  'A sub_budget_id returns { sub_budget, status }. This runtime has no signer tool, so it cannot',
+  'produce a signature for a task budget or a sub-budget: a pendingSubBudgetSignatures[] row names',
+  'no next tool and says the owner signs it from a hosted-plus-signer install.',
 ].join(' ')
 
 /**
@@ -339,16 +520,26 @@ const SUBMIT_DESCRIPTION = [
  * surface and the MCP surface pointed at the same prose source means new
  * guidance lands in both places at once and a parity test can catch drift.
  */
+/**
+ * #4872: checkout details on the paid request, on the local tools that reach
+ * the SDK seam (`haven.fetch`, `haven.payX402Quote`, `haven.resumeX402Payment`).
+ * Local-only for now: the hosted tools say it when the hosted paths carry it.
+ */
+const LOCAL_CHECKOUT_DETAILS_SENTENCE =
+  'When the merchant\'s challenge asks for checkout details (a receipt email, billing or shipping address) and the owner turned sharing on for this agent, the paid request carries only the fields asked for, in X-Checkout-Details, to the seller only. If the merchant marks a field required and this agent cannot share it, the call refuses with CHECKOUT_DETAILS_UNAVAILABLE before any payment is created: stop and tell the user which field the merchant needs.'
+const LOCAL_RESUME_CHECKOUT_DETAILS_SENTENCE =
+  'Resumed from a resume_state that carries the merchant\'s challenge: when it asks for checkout details and a required field cannot be shared, the resume refuses with CHECKOUT_DETAILS_UNAVAILABLE and does not deliver the funded payment — tell the user, and resume again once the owner has saved the field and turned sharing on. Resumed by payment_id alone, the stored state carries no challenge extensions, so checkout details are neither shared nor refused and the payment is delivered as today.'
+
 export const toolDescriptions: Record<HavenMcpToolName, string> = {
   haven_send: composeDescription(sharedDescriptions.send, 'local'),
-  haven_pay_mcp_tool: composeDescription(sharedDescriptions.payMcpTool),
+  haven_pay_mcp_tool: `${composeDescription(sharedDescriptions.payMcpTool)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
   haven_quote_x402: composeDescription(sharedDescriptions.quoteX402),
-  haven_pay_x402_quote: composeDescription(sharedDescriptions.payX402),
-  haven_pay_x402: composeDescription(sharedDescriptions.payX402OneShot),
-  haven_resume_x402_payment: composeDescription(sharedDescriptions.resumeX402),
+  haven_pay_x402_quote: `${composeDescription(sharedDescriptions.payX402)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
+  haven_pay_x402: `${composeDescription(sharedDescriptions.payX402OneShot)} ${LOCAL_CHECKOUT_DETAILS_SENTENCE}`,
+  haven_resume_x402_payment: `${composeDescription(sharedDescriptions.resumeX402)} ${LOCAL_RESUME_CHECKOUT_DETAILS_SENTENCE}`,
   haven_get_payment_status: composeDescription(sharedDescriptions.getPaymentStatus),
   haven_get_resume_state: composeDescription(sharedDescriptions.getResumeState),
-  haven_get_agent: composeDescription(sharedDescriptions.getAgent),
+  haven_get_agent: composeDescription(sharedDescriptions.getAgent, 'local'),
   haven_get_allowances: composeDescription(sharedDescriptions.getAllowances),
   haven_sweep_delegate: composeDescription(sharedDescriptions.sweep_delegate, 'local'),
   haven_discover_tools: composeDescription(sharedDescriptions.discoverTools),
@@ -416,6 +607,10 @@ export interface ToolFailure {
   next_tool_omitted_reason?: string
   resume_state?: unknown
   body?: unknown
+  /** #4872: the checkout-detail field NAMES a merchant requires and this agent cannot share (never values). */
+  missing_fields?: string[]
+  /** #4872: why they cannot be shared (`not_shared`, `not_stored`, `over_budget`, `unreadable`, …). */
+  reason?: string
   /**
    * #2983: carried on `MERCHANT_NOT_READY` — mirrors the hosted MCP's
    * `retry_with_new_quote` (`mcp-context.ts`'s `merchantNotReadyErrorFor`).
@@ -430,17 +625,64 @@ export interface ToolFailure {
 export type ToolPayload<T = unknown> = ToolSuccess<T> | ToolFailure
 
 /**
- * #3506: the next step for a sub-budget row that still needs THIS agent's
- * signature — the signer's `haven_sign` with `sub_budget_id` (it fetches the
- * signing context itself), then `haven_submit` with the same id. Same shape as
- * the task-budget handoffs above (`next_action: 'sign'`, the signer tool, its
- * arguments).
+ * #4825: the typed refusal the local runtime answers a task-budget open or a
+ * close that needs a signature with. Task budgets are a hosted-plus-signer
+ * feature: opening one, and closing one that is open, both need a signature
+ * from the Haven signer, and a `--local` install has no signer tool — the
+ * connector's local mode removes the signer server on every runtime that
+ * supports it (`packages/connect/src/runtime-install.ts`,
+ * `packages/connect/src/config-writers.ts`). The tools stay registered (the
+ * local consent hash covers the tool list, not behaviour); they refuse.
+ */
+const TASK_BUDGET_SIGNING_UNAVAILABLE = 'TASK_BUDGET_SIGNING_UNAVAILABLE'
+
+/** The one sentence both task-budget refusals share: what the owner can do instead. */
+const TASK_BUDGET_HOSTED_PLUS_SIGNER =
+  'Task budgets are a hosted-plus-signer feature: use a hosted MCP install with the Haven signer ' +
+  'connected, or ask the owner to do it there.'
+
+/**
+ * #4825: the refusal for `haven_open_task_budget` and for a
+ * `haven_close_task_budget` whose budget needs a signature. Nothing is
+ * contacted: no `POST /task-budgets`, no `POST /task-budgets/:id/close`, so no
+ * pending row is created and no budget is left `closing`.
+ */
+function taskBudgetSigningUnavailable(action: 'open' | 'close'): ToolFailure {
+  return {
+    success: false,
+    code: TASK_BUDGET_SIGNING_UNAVAILABLE,
+    message:
+      action === 'open'
+        ? 'Opening a task budget needs a signature from the Haven signer, and this --local install has no ' +
+          'signer tool. Nothing was opened and nothing was reserved. ' +
+          TASK_BUDGET_HOSTED_PLUS_SIGNER
+        : 'Closing this task budget needs a signature from the Haven signer, and this --local install has no ' +
+          'signer tool. Nothing was closed and the budget is unchanged. ' +
+          TASK_BUDGET_HOSTED_PLUS_SIGNER,
+    next_action: 'stop_and_tell_user',
+    next_tool_omitted_reason:
+      'this runtime cannot sign a task budget — no tool on this surface produces the signature, so no tool ' +
+      'follows; the owner can do it from a hosted MCP install with the Haven signer connected',
+  }
+}
+
+/**
+ * #3506 / #4825: a sub-budget row that still needs THIS agent's signature.
+ *
+ * The local surface has no sub-budget tool of its own and no signer tool: the
+ * connector's `--local` mode removes the signer server, so nothing here can
+ * produce the signature. The row therefore names no next tool and says why,
+ * plus what the owner can do instead. Spending through a sub-budget
+ * (`sub_budget_id` on the pay tools) needs no signer once the row is open.
  */
 function subBudgetSignStep(subBudgetId: string) {
   return {
-    next_action: 'sign',
-    next_tool: 'mcp__haven-signer__haven_sign',
-    next_arguments: { sub_budget_id: subBudgetId },
+    next_action: 'stop_and_tell_user',
+    next_tool_omitted_reason:
+      `sub-budget ${subBudgetId} still needs your signature, and this --local install has no signer tool: ` +
+      'the connector removes the Haven signer on a --local setup, so nothing on this surface can produce it. ' +
+      'Ask the owner to sign it from a hosted MCP install with the Haven signer connected; spending through ' +
+      'the sub-budget needs no signature once it is open.',
   }
 }
 
@@ -488,7 +730,8 @@ async function submitSubBudgetTool(haven: HavenClient, subBudgetId: string, sign
         code: 'CLOSE_NEEDS_REPREPARE',
         message:
           'The stored close operation for this sub-budget was stale, so nothing was relayed. Haven prepared a ' +
-          'fresh one: sign it with haven_sign, then call haven_submit again with the new signature.',
+          'fresh one, but this --local install has no signer tool to sign it: ask the owner to sign and submit ' +
+          'it from a hosted MCP install with the Haven signer connected.',
         statusCode: 409,
         ...subBudgetSignStep(subBudgetId),
       }
@@ -538,7 +781,8 @@ async function submitSubBudgetTool(haven: HavenClient, subBudgetId: string, sign
         next_arguments: {},
         reason:
           'This sub-budget row is open, but Haven could not say whether its tree has another row ' +
-          'awaiting your signature. Call haven_get_agent and sign any pendingSubBudgetSignatures row.',
+          'awaiting your signature. Call haven_get_agent to see; this runtime cannot sign one, so the ' +
+          'owner signs it from a hosted MCP install with the Haven signer connected.',
       }
     }
     const tree = result.subBudget.parentSubBudgetId ?? result.subBudget.id
@@ -697,11 +941,16 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       // expected price — the comparison asks about the option pay will
       // actually select (#2051), which the rail determines. Non-throwing,
       // same `.then(a => a, () => undefined)` convention as the hosted quote.
-      const agentPromise =
+      //
+      // #4830: the read's ERROR is kept beside the agent instead of being
+      // mapped to `undefined` — a stated price that could not be compared
+      // carries a next step decided by the CAUSE (a transient 5xx is worth one
+      // re-quote; a 401/403 refusal is not), exactly as `normalizeError` does.
+      const agentRead =
         args.expected_amount !== undefined
           ? haven.getAgent().then(
-              (a) => a,
-              () => undefined,
+              (a) => ({ agent: a, error: undefined as unknown }),
+              (error: unknown) => ({ agent: undefined as HavenAgent | undefined, error }),
             )
           : null
       try {
@@ -714,48 +963,66 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
         // fallback's one condition (the user's explicit go-ahead). A quote
         // makes no budget call locally — the local surface's budget gates
         // live in the pay/prepare paths, and a quote is a read.
+        //
+        // #4830: the comparison is DECIDED without the agent read wherever the
+        // rail cannot change the answer, a stated price finer than the token's
+        // scale is a decided mismatch (hosted parity), and when the comparison
+        // genuinely cannot be made the result SAYS SO and stops — never a
+        // plain quote that reads as "no expectation was stated".
         if (args.expected_amount !== undefined) {
-          const agent = agentPromise ? await agentPromise : undefined
-          const option = agent ? selectQuoteOption(data.paymentRequired.accepts, agent) : null
-          if (option && data.decimals !== null) {
-            const expectedAtomic = humanDecimalToAtomic(args.expected_amount as string, data.decimals)
-            let optionAmount: bigint | null = null
-            try {
-              // The AUTHORIZATION amount — maxAmountRequired when named.
-              optionAmount = BigInt(x402AuthorizationAmount(option))
-            } catch {
-              optionAmount = null
+          const read = agentRead ? await agentRead : { agent: undefined, error: undefined }
+          const comparison = compareExpectedAmountLocal({
+            accepts: data.paymentRequired.accepts,
+            decimals: data.decimals,
+            expectedAmount: args.expected_amount as string,
+            agent: read.agent,
+            agentError: read.error,
+          })
+          if (comparison.kind === 'compared') {
+            const priceDiffers = comparison.differs
+            const payload = {
+              ...data,
+              price_differs_from_expected: priceDiffers,
+              ...(priceDiffers
+                ? {
+                    safe_to_continue: false,
+                    next_action: AgentPaymentNextAction.StopAndTellUser,
+                    next_tool_omitted_reason:
+                      'no Haven tool follows: the quoted price does not match the stated ' +
+                      'expectation — the user decides before any payment',
+                    reason:
+                      // #4754: the symbol, not the contract address. Only reachable with
+                      // `decimals !== null`; the address arm is a defensive fallback.
+                      `The merchant's quoted price (${data.amount} ${data.decimals !== null ? data.token : data.asset}) does not match ` +
+                      `the expected price (${args.expected_amount as string}) stated with this quote. ` +
+                      'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
+                      'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
+                      "this invoice, the invoice's own deposit address MAY be an alternative — but " +
+                      "only with the user's explicit go-ahead, never automatically, and never once " +
+                      'anything has been paid via x402.',
+                  }
+                : {}),
             }
-            if (optionAmount !== null && expectedAtomic !== null) {
-              const priceDiffers = optionAmount !== expectedAtomic
-              const payload = {
-                ...data,
-                price_differs_from_expected: priceDiffers,
-                ...(priceDiffers
-                  ? {
-                      safe_to_continue: false,
-                      next_action: AgentPaymentNextAction.StopAndTellUser,
-                      next_tool_omitted_reason:
-                        'no Haven tool follows: the quoted price does not match the stated ' +
-                        'expectation — the user decides before any payment',
-                      reason:
-                        // #4754: the symbol, not the contract address. Only reachable with
-                        // `decimals !== null`; the address arm is a defensive fallback.
-                        `The merchant's quoted price (${data.amount} ${data.decimals !== null ? data.token : data.asset}) does not match ` +
-                        `the expected price (${args.expected_amount as string}) stated with this quote. ` +
-                        'Stop and tell the user before any payment; do not re-quote, re-pay, or poll. ' +
-                        'If the x402 challenge itself is wrong and nothing has been paid via x402 on ' +
-                        "this invoice, the invoice's own deposit address MAY be an alternative — but " +
-                        "only with the user's explicit go-ahead, never automatically, and never once " +
-                        'anything has been paid via x402.',
-                    }
-                  : {}),
-              }
-              return warnings.length > 0
-                ? { success: true, data: payload, warnings }
-                : { success: true, data: payload }
-            }
+            return warnings.length > 0
+              ? { success: true, data: payload, warnings }
+              : { success: true, data: payload }
           }
+          // #4830: the comparison was NOT made. The quote object is still
+          // returned (like today's mismatch stop), but the result carries
+          // `safe_to_continue: false`, the named not-compared field and the
+          // cause's next step — no prefilled cap, no pay step.
+          const payload = {
+            ...data,
+            price_comparison_made: false as const,
+            price_comparison_not_made_cause: comparison.cause,
+            safe_to_continue: false,
+            next_action: notComparedNextAction(comparison.cause),
+            next_tool_omitted_reason: notComparedOmittedReason(comparison.cause),
+            reason: notComparedReason(args.expected_amount as string, comparison.cause),
+          }
+          return warnings.length > 0
+            ? { success: true, data: payload, warnings }
+            : { success: true, data: payload }
         }
         return warnings.length > 0 ? { success: true, data, warnings } : { success: true, data }
       } catch (err) {
@@ -831,7 +1098,17 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       // in @haven_ai/sdk for the single home of this "settled x402 only"
       // attach logic (was duplicated verbatim in both packages) and for why
       // `funded_but_unsettled` is excluded from "settled".
-      return runTool(async () => haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id))
+      //
+      // #4808: the backend's message names haven_report_settlement_evidence in
+      // two states, and this surface has no such tool. Replace it whole, keyed
+      // on the structured fields — see the SDK's payment-status-message module
+      // for why the replacement lives in this layer and not in the shared read.
+      return runTool(async () =>
+        replaceSettlementEvidenceMessage(
+          await haven.getPaymentStatusWithPostPurchaseAllowance(args.payment_id),
+          'haven_get_payment_status',
+        ),
+      )
     },
 
     haven_get_resume_state: async (input) => {
@@ -963,55 +1240,58 @@ export function createToolHandlers(haven: HavenClient): Record<HavenMcpToolName,
       }),
 
     haven_open_task_budget: async (input) => {
-      const args = objectInput('haven_open_task_budget', input)
-      return runTool(async () => {
-        const token = await resolveTaskBudgetToken(haven, typeof args.token === 'string' ? args.token : undefined)
-        const maxAmountAtomic = humanToAtomicOrNull(args.max_amount_human as string, token.decimals)
-        if (maxAmountAtomic === null) {
-          throw new HavenApiError(
-            `max_amount_human ("${args.max_amount_human}") is not a valid decimal amount for ` +
-              `${token.symbol} (${token.decimals} decimal places). Nothing was reserved.`,
-            400,
-          )
-        }
-        const result = await haven.openTaskBudget({
-          tokenAddress: token.address,
-          maxAmountAtomic,
-          ttlSeconds: Number(args.ttl_minutes) * 60,
-          recipientAddress: typeof args.recipient === 'string' ? args.recipient : undefined,
-          label: typeof args.label === 'string' ? args.label : undefined,
-        })
-        // #3419: the same recovery notice the hosted task-budget handoffs
-        // carry (same builder, the SDK's TASK_SIGN_CONTEXT_VERSION) — an old
-        // signer strips the unknown task_budget_id key exactly the same way
-        // on the local surface.
-        return {
-          task_budget: result.taskBudget,
-          next_action: 'sign',
-          next_tool: 'mcp__haven-signer__haven_sign',
-          next_arguments: { task_budget_id: result.taskBudget.id },
-          signer_compatibility: taskSignerCompatibilityNotice(),
-        }
-      })
+      objectInput('haven_open_task_budget', input)
+      // #4825: opening a task budget needs a signature from the Haven signer,
+      // and a --local install has no signer tool (the connector's local mode
+      // removes the signer server). Refuse BEFORE anything is contacted: no
+      // `POST /task-budgets`, so no pending row is created and nothing is
+      // reserved. The arguments are not inspected — no argument makes this
+      // runtime able to sign.
+      return taskBudgetSigningUnavailable('open')
     },
 
     haven_close_task_budget: async (input) => {
       const args = objectInput('haven_close_task_budget', input)
-      return runTool(async () => {
-        const result = await haven.closeTaskBudget(args.task_budget_id as string)
-        if (result.status === 'closed') {
-          return { task_budget: result.taskBudget, status: 'closed' as const }
-        }
-        // #3419: same notice as the open handoff above — this result also
-        // hands the agent to haven_sign { task_budget_id }.
-        return {
-          task_budget: result.taskBudget,
-          next_action: 'sign',
-          next_tool: 'mcp__haven-signer__haven_sign',
-          next_arguments: { task_budget_id: args.task_budget_id },
-          signer_compatibility: taskSignerCompatibilityNotice(),
-        }
-      })
+      const taskBudgetId = args.task_budget_id as string
+      // #4825: read the budget FIRST. A budget that was never signed (still
+      // pending) or is past its own deadline closes without a signature, so
+      // that case still answers `status: closed`. One that was signed and is
+      // still live (open or closing) needs a signature this runtime cannot
+      // produce, and calling `POST /task-budgets/:id/close` would leave it
+      // `closing` — so it is refused without the call.
+      //
+      // The question is asked of the wire fields the backend already publishes
+      // (`closed_at`, `is_live`, `opened_at`) rather than by restating a status
+      // comparison: #3924's census counts inline budget-liveness predicates and
+      // is shrink-only. `opened_at` is set exactly when the open was signed
+      // (`SET status = 'open', … opened_at = NOW()`), so "signed and still
+      // live" is the real question, not a proxy for it.
+      let budget: Awaited<ReturnType<HavenClient['getTaskBudget']>>
+      try {
+        budget = await haven.getTaskBudget(taskBudgetId)
+      } catch (err) {
+        return normalizeError(err)
+      }
+      if (budget.closedAt !== null) {
+        return { success: true, data: { task_budget: budget, status: 'closed' as const } }
+      }
+      const live = budget.isLive ?? !budget.isExpired
+      if (live && budget.openedAt !== null) {
+        return taskBudgetSigningUnavailable('close')
+      }
+      let result: Awaited<ReturnType<HavenClient['closeTaskBudget']>>
+      try {
+        result = await haven.closeTaskBudget(taskBudgetId)
+      } catch (err) {
+        return normalizeError(err)
+      }
+      if (result.status === 'closed') {
+        return { success: true, data: { task_budget: result.taskBudget, status: 'closed' as const } }
+      }
+      // Defensive: the backend answered a signature request for a row this
+      // handler read as unsigned or expired. Refuse rather than hand off to a
+      // signer this runtime does not have.
+      return taskBudgetSigningUnavailable('close')
     },
 
     // #3518: read ONE task budget by id, any status — the status check a
@@ -1240,46 +1520,6 @@ async function responsePayload(response: Response): Promise<Record<string, unkno
   }
 }
 
-/**
- * #3329: `haven_open_task_budget` takes a symbol-or-address plus a HUMAN
- * amount, but the SDK's `openTaskBudget` takes atomic units against a
- * resolved token address — the same split `haven_check_funds` bridges on the
- * hosted surface. This agent's own allowances are the source of truth for
- * which tokens it may spend at all, so a symbol resolves against THOSE (never
- * a guess), and decimals come from the SDK's own chain registry.
- */
-async function resolveTaskBudgetToken(
-  haven: HavenClient,
-  symbolOrAddress: string | undefined,
-): Promise<{ address: string; symbol: string; decimals: number }> {
-  const wanted = (symbolOrAddress ?? 'USDC').toLowerCase()
-  const { allowances } = await haven.getAllowances()
-  const isAddress = /^0x[0-9a-fA-F]{40}$/.test(wanted)
-  const match = isAddress
-    ? allowances.find((a) => a.tokenAddress.toLowerCase() === wanted)
-    : allowances.find((a) => (a.tokenSymbol ?? '').toLowerCase() === wanted)
-  if (!match) {
-    const known = allowances.map((a) => `${a.tokenSymbol} (${a.tokenAddress})`)
-    throw new HavenApiError(
-      `token "${symbolOrAddress ?? 'USDC'}" is not the symbol or address of any allowance this ` +
-        `agent holds${known.length > 0 ? ` (it holds: ${known.join(', ')})` : ' (it holds none)'}. ` +
-        'Nothing was reserved.',
-      400,
-    )
-  }
-  const resolved = resolveTokenFromAddress(match.tokenAddress)
-  return { address: match.tokenAddress, symbol: match.tokenSymbol, decimals: resolved?.decimals ?? 6 }
-}
-
-/** A plain decimal string ("5", "0.25") to atomic units, or null if it does not fit `decimals`. */
-function humanToAtomicOrNull(human: string, decimals: number): string | null {
-  if (!/^[0-9]+(\.[0-9]+)?$/.test(human)) return null
-  const [whole, frac = ''] = human.split('.')
-  if (frac.length > decimals) return null
-  const atomic = BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, '0') || '0')
-  return atomic.toString()
-}
-
 function parseMaybeJson(text: string): unknown {
   if (!text) return null
   try {
@@ -1493,10 +1733,11 @@ function paymentScopeRefusalAnswer(errorCode: string | undefined): { code: strin
 }
 
 /**
- * #4790: the ten hand-written hosted branches, whose answers a flat table
- * cannot hold — `submission_outcome_unknown` and `prepare_reverted` change
- * their step on a body field, and `delegation_expired` is guarded on status
- * 403. The reason strings are written here rather than imported: they live in
+ * #4790: the hand-written hosted branches, whose answers a flat table cannot
+ * hold — `submission_outcome_unknown` and `prepare_reverted` change their step
+ * on a body field, `delegation_expired` is guarded on status 403, and
+ * `payment_already_submitted` (#4826) requires the body's payment_id. The
+ * reason strings are written here rather than imported: they live in
  * `packages/mcp-server/src/tools/support/errors.ts`, which this package cannot
  * depend on, and the SDK does not export them. The parity test holds every one
  * of them equal to the hosted answer.
@@ -1537,10 +1778,11 @@ interface TypedRefusalAnswer {
 }
 
 /**
- * #4790: the typed answer for one of the 20 refusal codes the hosted mapper
+ * #4790: the typed answer for one of the refusal codes the hosted mapper
  * types, or `null` for any other code — and for `delegation_expired` at a
- * status other than 403, where the hosted mapper falls back to the generic
- * answer and so does this one.
+ * status other than 403, or `payment_already_submitted` without a body
+ * payment_id, where the hosted mapper falls back to the generic answer and so
+ * does this one.
  */
 function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): TypedRefusalAnswer | null {
   if (!errorCode) return null
@@ -1593,6 +1835,24 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
         nextTool: null,
         nextToolOmittedReason: DELEGATION_EXPIRED_OMITTED_REASON,
       }
+    case 'payment_already_submitted': {
+      // #4826: an x402 authorize replay whose key belongs to a `submitted`
+      // payment. The payment is in flight, so the only follow-up is reading
+      // its status — never a retry, never a new payment. The hosted branch
+      // requires the body's payment_id (check_status_later's default tool
+      // cannot be called without one); a body without it falls through to the
+      // generic answer on both surfaces.
+      const paymentId = typeof body?.payment_id === 'string' ? body.payment_id : undefined
+      if (!paymentId) return null
+      return {
+        code: 'PAYMENT_ALREADY_SUBMITTED',
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_get_payment_status',
+        nextArguments: { payment_id: paymentId },
+        nextToolOmittedReason: null,
+        paymentId,
+      }
+    }
     case 'submission_outcome_unknown': {
       const paymentId = typeof body?.payment_id === 'string' ? body.payment_id : undefined
       // With a payment id the status read is truthful and is named; without
@@ -1613,6 +1873,19 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
             nextTool: null,
             nextToolOmittedReason: SUBMISSION_OUTCOME_UNKNOWN_OMITTED_REASON,
           }
+    }
+    case 'sweep_outcome_unknown': {
+      // #5035: a delegate sweep broadcast but not yet confirmed. A sweep has
+      // no payment_id, so the status read is the sweep tool itself — called
+      // with no arguments it answers the in-flight sweep's state. Never a new
+      // prepare, never a second payment.
+      return {
+        code: 'SWEEP_OUTCOME_UNKNOWN',
+        nextAction: AgentPaymentNextAction.CheckStatusLater,
+        nextTool: 'haven_sweep_delegate',
+        nextArguments: {},
+        nextToolOmittedReason: null,
+      }
     }
     case 'account_validation_failed':
       return {
@@ -1654,6 +1927,37 @@ function typedRefusalAnswer(err: HavenApiError, errorCode: string | undefined): 
     default:
       return null
   }
+}
+
+/** #4872: why no tool follows a checkout-details refusal. */
+const CHECKOUT_DETAILS_OMITTED_REASON =
+  'the merchant needs a checkout detail only the owner can share: tell the user to save it in business details and turn on checkout-details sharing for this agent, then retry'
+
+/**
+ * #5031: the reason per checkout-details stage, in this surface's tool names.
+ * The local surface reaches two stages: `before_payment` (a pay call refused
+ * before anything was spent: the fixed reason above, identical to hosted) and
+ * `funded` (`haven_resume_x402_payment`, which decides after funding: the
+ * payment exists, so a NEW purchase would pay twice; and only a resume_state
+ * resume carries the merchant's request — a payment_id resume would deliver
+ * without the field). The other two are built
+ * only by the hosted surface; they are mapped for exhaustiveness.
+ */
+const LOCAL_CHECKOUT_DETAILS_STAGE_REASON: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: CHECKOUT_DETAILS_OMITTED_REASON,
+  funded:
+    'the payment is funded but was not delivered: once the owner has saved the field and turned sharing on, call haven_resume_x402_payment again with the same resume_state — not payment_id alone, whose stored state carries no checkout-details request, so the merchant would get no answer — and do not start a new purchase; if they will not, check haven_get_payment_status first, then haven_sweep_delegate',
+  unsent:
+    'the settlement was never sent to the merchant, so nothing was redeemed: once the owner has saved the field and turned sharing on, start a new purchase with the pay tool you used; do not resume this payment',
+  state_unknown:
+    "Haven could not read this payment's state, so it may already be funded: call haven_get_payment_status with this payment_id first, and do not pay again if it shows funded or settled",
+}
+/** The same phase words the hosted surface answers per stage. */
+const LOCAL_CHECKOUT_DETAILS_STAGE_PHASE: Record<CheckoutDetailsRefusalStage, string> = {
+  before_payment: 'not_started',
+  funded: 'funded_but_unsettled',
+  unsent: 'not_delivered',
+  state_unknown: 'unknown',
 }
 
 function normalizeError(err: unknown): ToolFailure {
@@ -1719,6 +2023,26 @@ function normalizeError(err: unknown): ToolFailure {
       next_tool: 'haven_get_payment_status',
       next_arguments: { payment_id: err.paymentId },
       suggested_tool: 'haven_get_payment_status',
+    }
+  }
+
+  // #4872: the merchant requires a checkout detail this agent cannot share.
+  // Refused before the payment was authorised (or, on a resume, before the
+  // funded payment was delivered). Only the owner can fix it, so no tool
+  // follows. The answer names fields, never values.
+  if (err instanceof CheckoutDetailsUnavailableError) {
+    return {
+      success: false,
+      code: AgentPaymentFailureCode.CheckoutDetailsUnavailable,
+      message: err.message,
+      statusCode: err.statusCode,
+      ...(err.paymentId ? { paymentId: err.paymentId } : {}),
+      phase: LOCAL_CHECKOUT_DETAILS_STAGE_PHASE[err.stage],
+      missing_fields: err.missingFields,
+      reason: err.reason,
+      nextAction: AgentPaymentNextAction.StopAndTellUser,
+      next_action: AgentPaymentNextAction.StopAndTellUser,
+      next_tool_omitted_reason: LOCAL_CHECKOUT_DETAILS_STAGE_REASON[err.stage],
     }
   }
 

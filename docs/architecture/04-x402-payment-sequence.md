@@ -7,6 +7,7 @@ covers:
   - packages/backend/src/openapi/party-model.ts
   - packages/backend/src/routes/x402.ts
   - packages/backend/src/modules/x402/**
+  - packages/backend/src/modules/mpp/evidence.ts
   - packages/backend/src/modules/budget-scope/**
   - packages/backend/src/modules/task-budgets/**
   - packages/backend/src/routes/task-budgets.ts
@@ -21,6 +22,7 @@ covers:
   - packages/backend/src/routes/catalog.ts
   - packages/demo-merchant-mcp/src/x402.ts
   - packages/demo-merchant-mcp/src/http.ts
+  - packages/demo-merchant-mcp/src/products.ts
   - packages/backend/src/routes/machine-payments.ts
   - packages/sdk/src/client.ts
   - packages/sdk/src/x402-protocol.ts
@@ -60,13 +62,14 @@ covers:
   - packages/backend/src/modules/payments/__tests__/x402-funded-unsettled-status.test.ts
   - packages/backend/src/infra/chain/delegation-budget-reader.ts
   - packages/demo-merchant-mcp/src/invoice.ts
+  - packages/paywall-proxy/src/receipt.ts
   - packages/backend/src/openapi/request-validation.ts
 # #1496: a casp-changelog shard satisfies this doc too — every money-path PR
 # already writes one, and mandatory note-prepends to last-verified caused three
 # merge conflicts in one day between PRs that were not otherwise in conflict.
 satisfied-by:
   - docs/regulatory/casp-changelog/**
-last-verified: "2026-11-07"
+last-verified: "2026-11-26"
 ---
 
 # Haven - x402 Payment Execution Sequence
@@ -191,6 +194,26 @@ echo had grown EIP-3009 headers to 5–6.5 KB — Anchor answered 431 to a doubl
 4,969-byte one after its funding leg confirmed. A successful merchant response
 may include `PAYMENT-RESPONSE` evidence.
 
+When the merchant's challenge asks for checkout details under
+`extensions["haven-checkout-details"]` (#4872,
+[`13-checkout-details.md`](13-checkout-details.md)), the paid retry on the SDK
+paths (`fetch`, `payX402Quote`, `resumeX402Payment`, and the local MCP tools
+that call them) also carries `X-Checkout-Details: <base64url(JSON)>` with only
+the fields asked for. These paths pay the EIP-3009 option. On the hosted
+MCP-merchant completion (`haven_settle_mcp_tool`, `haven_complete_mcp_tool`)
+Haven's server attaches the same header to the paid request it sends, on
+either scheme, after the pay tools refused any required field the agent could
+not share before the intent. On the hosted plain-HTTP path
+(`haven_pay_x402_quote`, then `haven_submit`) the agent sends the paid retry
+itself: `haven_submit` reads the merchant's request back from the stored
+challenge (`GET /x402/:id/payment-required`), decides before the funding relay
+or the settlement submit, and returns the header for that retry, in
+`retry_headers` on erc7710 and in `additional_retry_headers` on EIP-3009. It is unsigned, goes to the merchant
+only, and is never merged into the echoed `extensions` in `PAYMENT-SIGNATURE`.
+It is decided before `authorizeX402`: a required field this agent cannot share
+refuses the purchase with `CHECKOUT_DETAILS_UNAVAILABLE` before any payment is
+created. A challenge that asks for nothing gets exactly today's retry.
+
 **Native MCP transport profile (#3118).** A merchant following the official
 x402 MCP transport specification (`x402-foundation/x402`,
 `specs/transports-v2/mcp.md`) never answers HTTP 402. Its challenge is a tool
@@ -232,8 +255,9 @@ HTTP-402-over-MCP layering (including the demo merchant) see one change only:
 their `tools/call` body now carries a `_meta` key they may ignore.
 
 `quoteX402()`, `haven_quote_x402`, `haven_quote_mcp_tool`, and
-`haven_quote_catalog_purchase` are read-only. The MCP variants establish the
-merchant session and send an unpaid `tools/call` probe (and may read the public
+`haven_quote_catalog_purchase` are read-only. The MCP variants complete the
+merchant's MCP handshake (a session, or — #5089 — a stateless server's valid
+`initialize` result) and send an unpaid `tools/call` probe (and may read the public
 agent delegate address to send `x402-wallet`), but none creates a Haven payment,
 approval request, signature, funding operation, paid merchant retry, or
 on-chain transaction. Every quote is informational rather than a price
@@ -252,6 +276,22 @@ no prefilled cap, no next tool — but the quote data
 itself is still returned, an unavailable pre-check fails OPEN with a warning
 (the on-chain policy remains the actual gate), and nothing about the payment
 path's own checks changes.
+
+Since #4830 a stated `expected_amount` is never silently skipped. The agent
+read only chooses BETWEEN the merchant's erc7710 and standard options, so the
+comparison is decided without it whenever that choice cannot change the answer
+(one option, equal authorization amounts, or a stated price equal to neither);
+a stated price finer than the token's scale is a decided mismatch on both
+surfaces. When the comparison genuinely cannot be made — two options at
+different amounts with the stated price equal to exactly one and the agent read
+failed, a read refused 401/403, no option this agent can pay, or an asset whose
+decimals are unknown — the result says so: `price_comparison_made: false` with
+`price_comparison_not_made_cause`, `safe_to_continue: false`, no prefilled cap
+and no pay step. The next step follows the cause, as `normalizeError` decides
+one: a transient read failure is worth one re-quote with the same arguments
+(`retry_with_explicit_context`); a refused read, an unselectable option and
+unknown decimals stop the agent (`stop_and_tell_user`). No new `next_action`
+value, no input change, and no signer surface change.
 
 Every merchant-facing SDK fetch (probes, MCP handshakes, paid retries,
 resume retries) is bounded since #1300: `config.merchantTimeout` (default
@@ -707,9 +747,22 @@ a paid authorization.
 
 The recommended three-call fast path for an x402-protected MCP tool is:
 
-1. `haven_pay_mcp_tool` — hosted MCP establishes an MCP session (`initialize`,
-   then `notifications/initialized`) and sends the unpaid, session-bound
-   `tools/call` quote probe. It records the MCP transport context and returns
+1. `haven_pay_mcp_tool` — hosted MCP completes the MCP handshake (`initialize`,
+   then `notifications/initialized`) and sends the unpaid `tools/call` quote
+   probe, session-bound on a stateful server. **A stateless server (#5089)** —
+   one that answers `initialize` with a valid JSON-RPC result (the request's
+   `id`, a `result.protocolVersion`) and no `Mcp-Session-Id` — is accepted too:
+   `McpMerchantTransport.handshake` returns `{ stateless: true }`, and
+   `withMcpHeaders` puts `Accept: application/json, text/event-stream` on every
+   later MCP request (the probe, whose snapshot keeps it, and the paid retry in
+   `completeX402MerchantCall`); a strict stateless server answers a request
+   without it with 406. A 200 that is not an `initialize` result (an HTML page
+   at a base URL), a JSON-RPC error and a failed call stay "not an MCP
+   endpoint" — the unchanged `mcpSessionNotEstablished` 502 and the #1271
+   discovery retry — and a plain-HTTP request never gains `Accept`. The local
+   SDK `fetch()` keeps its published behaviour (it reads `initialize()`, which
+   answers no session for a stateless server, so it pays such a server as
+   standard x402), and session recovery (#3171) acts only on a session. It records the MCP transport context and returns
    the unsigned funding payload plus merchant/tool context.
 2. `haven_sign_x402` — the local signer signs the funding payload and creates the
    merchant-bound payment header.
@@ -782,6 +835,57 @@ and it settles. Storing a context at `haven_pay_x402_quote` time was considered
 and rejected: the tool has no tool name or arguments to store, so accepting
 them optionally would leave every caller who omitted them in exactly the state
 this removes.
+
+**Where a paid MCP call is delivered (#5084, #5086).** The MCP counterpart of
+the #3097 paragraph above: a hosted MCP payment's identity is the merchant's
+DECLARED address, and delivery is checked against the endpoint Haven stored,
+on both schemes. The two schemes store different addresses (#3527): EIP-3009's
+`createX402Intent` stores the challenge's `resource.url`, which the backend's
+binding signs and the signer compares the challenge with
+(`assertX402MatchesExpected`); erc7710 stores the endpoint. Both store the
+endpoint Haven called at quote time in the intent's MCP call context. So a
+merchant whose challenge names `mcp://tool/<name>` (the form the public
+`@x402/mcp` README uses) while its tool lives at `https://<host>/mcp` is
+payable on EIP-3009: the payment's address stays `mcp://tool/<name>` (receipts
+and the funding evidence report carry it — the backend refuses evidence that
+names another, `resource_mismatch`), and the paid `tools/call` goes only to the
+stored endpoint (owner decision (a1) on #5086, "Check against the stored server
+address"). Until #5086, completion compared the endpoint with the address
+column, so that payment was funded and then refused; #5084 had moved the
+refusal before the intent. The rule lives in
+`packages/mcp-server/src/tools/support/resource-address.ts`
+(`approvedDeliveryTarget`) and is handed to `completeX402MerchantCall` as
+`approvedEndpoint` (`resolveCompletionContext`, `packages/sdk/src/merchant-completion.ts`):
+
+- **The approved endpoint comes from the server.** On a rehydrated context it
+  is that context's `merchantUrl`. With an EXPLICIT `merchant_url` it is read
+  from `GET /x402/:id/merchant-call-context` — never taken from the resolved
+  context, which is the agent's own `merchant_url` and would be compared with
+  itself. A different explicit URL answers `MERCHANT_RESOURCE_MISMATCH`
+  (`retry_with_explicit_context`): on `haven_settle_mcp_tool` before the
+  funding relay or the erc7710 submit, on `haven_complete_mcp_tool` before
+  delivery.
+- **No stored context** (a 409 from that read: `haven_pay_x402_quote` with an
+  MCP challenge): the payment's stored address is compared instead, as #5084
+  did — read from the payment status on settle while it is
+  `pending_signature`, and by completion itself on complete.
+- **A failed read refuses** (fail closed): `PAYMENT_STATE_UNAVAILABLE`, the
+  status read for a transient failure, a stop for a deterministic 4xx; a 410 is
+  the expired-payment answer.
+
+Same comparison everywhere: strict `!==`, never the normalising `sameUrl`. The
+binding is per endpoint, not per tool (`tool_name` is not checked at settle).
+The signer, its binding, the stored address column, the budget pre-checks,
+replay matching, the local SDK path (#3155, no completion comparison) and plain
+HTTP are unchanged.
+
+**Residual.** A payment with no stored call context, funded through
+`haven_submit` and then completed with `haven_complete_mcp_tool` and an
+explicit `merchant_url` that is not its stored address, meets completion's
+refusal after funding (before delivery): `haven_pay_x402_quote` with an MCP
+challenge stores no context, so its endpoint is always explicit. The same holds
+for a direct SDK caller that stored a call context whose endpoint is not where
+its merchant lives.
 
 **`mcp_transport` is snake_case at this boundary, and the other spelling is
 refused (#2282).** Hosted MCP tool arguments are snake_case
@@ -888,16 +992,21 @@ never authorize payment, and any catalog price remains indicative until the
 live quote below.
 Since #3100 each entry carries `suggested_tool` **and** `suggested_arguments`,
 spelled in that tool's own vocabulary and accepted by it verbatim — on the
-hosted surface an MCP entry points at the cap-free `haven_quote_catalog_purchase`
-`{ catalog_id }` (prepare requires a cap the server must never invent) and an
-HTTP entry at `haven_quote_x402 { url }` — with `method` and `body` added to
-the hint when the row declares them (#3769: a GET-only suggestion for a
-POST-declared resource described a call the merchant cannot answer usefully;
-`body` is the JSON string of the row's `body_example`); the local runtime
-points at its pay tools with `{ merchant_url, tool_name, arguments }`
-(`arguments` only when the row carries them) / `{ url }`. A row the suggested
-tool would refuse — no `tool_name` on either surface, degraded on the hosted
-one — gets `suggested_tool_omitted_reason` instead of a hint. A hosted strict
+hosted surface an operator MCP entry points at the cap-free
+`haven_quote_catalog_purchase` `{ catalog_id }` (prepare requires a cap the
+server must never invent) and an HTTP entry at `haven_quote_x402 { url }` — with
+`method` and `body` added to the hint when the row declares them (#3769: a
+GET-only suggestion for a POST-declared resource described a call the merchant
+cannot answer usefully; `body` is the JSON string of the row's `body_example`);
+the local runtime points at its pay tools with `{ merchant_url, tool_name,
+arguments }` (`arguments` only when the row carries them) / `{ url }`. A
+self-submitted (`source: 'ingestion'`) MCP row is the exception on the hosted
+surface (#4823): it is listed to agents but the agent detail read answers it
+404, so it points at `haven_quote_mcp_tool { merchant_url, tool_name }` — the
+same by-URL path the local runtime names — instead of the catalog-id dead end.
+A row the suggested tool would refuse — no `tool_name` on either surface,
+degraded on the hosted one — gets `suggested_tool_omitted_reason` instead of a
+hint. A hosted strict
 refusal names the declared keys and the declared alias of a rejected key
 (`resource_url` → `url`, `id` → `catalog_id`; epic #3105, decision 5). The
 quote tool the hosted hint names carries no structured next step of its own:
@@ -1232,8 +1341,9 @@ the payment id remains, call `getResumeState(paymentId)` to rehydrate Haven's
 stored x402 context. It is a plain read with no status precondition, and it is
 rail-neutral. Haven stores payment context, not the agent's local request
 stream, so request bodies, tool names, and tool arguments may still need to be
-preserved or reconstructed. SDK and hosted MCP tool completion establish a
-fresh MCP transport session; callers do not need to preserve the old session
+preserved or reconstructed. SDK and hosted MCP tool completion run a
+fresh MCP handshake (a new transport session, or — #5089 — a stateless
+server's `initialize`); callers do not need to preserve the old session
 id. Local MCP normalizes most fields to camelCase while retaining
 `resume_state` (and, since #3103, dual-emits `nextAction` / `next_action` on
 its failure envelope, the converged spelling being `next_action`); backend
@@ -1457,8 +1567,24 @@ and [`party-model.ts`](../../packages/backend/src/openapi/party-model.ts). It
 also closed the one place the demo merchant's OWN invoice document (as
 opposed to the confirmation text quoted above) still called this address "the
 buyer" without qualification —
-[`invoice.ts`](../../packages/demo-merchant-mcp/src/invoice.ts)'s `kopare.roll`
-now carries the same distinction the confirmation text already made.
+its `kopare.roll` (built by the shared receipt core the demo merchant calls
+since #4890, and the merchant kit's paywall proxy since #4913) now carries the
+same distinction the confirmation text already made.
+
+**#4873 adds the buyer's checkout details to that block.** A merchant can ask
+for a receipt email and a billing or shipping address in its challenge
+(`haven-checkout-details`, the shape
+[`13-checkout-details.md`](13-checkout-details.md) §2 fixes), and Haven answers
+on the paid request with an `X-Checkout-Details` header. A merchant that prints
+them returns them on its receipt, and the buyer block then carries
+`receipt_email`, `billing_address` and `shipping_address` — the wire names, not
+renamed — beside `identifierare`, `typ`, `roll` and `deklaration`. The keys are
+absent when the paid request carried no details, so a receipt without them
+keeps its exact shape. The values are the owner's own data, shown in full
+(owner decision 2026-11-17, see #4868); the merchant does not store them beyond
+the response and does not log them, and the record a merchant sends to Stripe
+does not carry them. The demo merchant is the first merchant that asks
+(`vpn_pro`), and its README says how to try it on dev.
 
 ## Differences From Direct Payments
 
@@ -2775,7 +2901,11 @@ effective (narrower) limits, and the dashboard shows the parent→child tree.
 - Treat the delegate key as a hot payment key for x402.
 - Reconcile or sweep stranded delegate balances before scaling.
 - Do not describe demo x402 endpoints as production merchant settlement,
-  facilitator, acquiring, fiat/card, or merchant-of-record products.
+  facilitator, acquiring or fiat/card products. Haven is the merchant only of
+  its own demo products and receives payment only for them; it receives or
+  moves no funds on behalf of anyone else. The joke product is verified and
+  settled by Coinbase's facilitator (CDP); every other product is settled by
+  the merchant's own key.
 - Use [`docs/regulatory/casp-risk-guardrails.md`](../regulatory/casp-risk-guardrails.md)
   before changing x402/MPP flows or merchant-facing demos.
 

@@ -15,8 +15,32 @@
 
 export const CLIENT_RELEASE_DATA = {
   "@haven_ai/sdk": {
-    "released_version": "0.14.0-alpha.0",
+    "released_version": "0.15.0-alpha.0",
     "notes": [
+      {
+        "version": "0.15.0-alpha.0",
+        "date": "2026-11-26",
+        "summary": "quoteMcpX402 and completeX402MerchantCall accept a stateless MCP server. (+6 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "quoteMcpX402",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "completeX402MerchantCall",
+            "code": true
+          },
+          {
+            "text": " accept a stateless MCP server. (+6 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
@@ -76,28 +100,24 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.13.0-alpha.0",
-        "date": "2026-10-30",
-        "summary": "PaymentStatusResult.merchantSettlementTxHash names the recorded settlement transaction. (+1 more in the changelog)",
-        "summary_segments": [
-          {
-            "text": "PaymentStatusResult.merchantSettlementTxHash",
-            "code": true
-          },
-          {
-            "text": " names the recorded settlement transaction. (+1 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/signer": {
-    "released_version": "0.14.0-alpha.0",
+    "released_version": "0.15.0-alpha.0",
     "notes": [
+      {
+        "version": "0.15.0-alpha.0",
+        "date": "2026-11-26",
+        "summary": "A gateway 502 or a 429 on the signing-context fetch is no longer reported as \"Haven refused\".",
+        "summary_segments": [
+          {
+            "text": "A gateway 502 or a 429 on the signing-context fetch is no longer reported as \"Haven refused\".",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
@@ -121,24 +141,64 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.13.0-alpha.0",
-        "date": "2026-10-30",
-        "summary": "No changes to this package in this release.",
-        "summary_segments": [
-          {
-            "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/mcp": {
-    "released_version": "0.14.0-alpha.0",
+    "released_version": "0.15.0-alpha.0",
     "notes": [
+      {
+        "version": "0.15.0-alpha.0",
+        "date": "2026-11-26",
+        "summary": "Checkout details on the paid x402 request. haven_pay_x402, haven_pay_x402_quote, haven_pay_mcp_tool and haven_resume_x402_payment reach the SDK seam that answers a merchant's checkout-details request (docs/architecture/13-checkout-details.md). (+5 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "Checkout details on the paid x402 request. ",
+            "code": false
+          },
+          {
+            "text": "haven_pay_x402",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "haven_pay_x402_quote",
+            "code": true
+          },
+          {
+            "text": ", ",
+            "code": false
+          },
+          {
+            "text": "haven_pay_mcp_tool",
+            "code": true
+          },
+          {
+            "text": " and ",
+            "code": false
+          },
+          {
+            "text": "haven_resume_x402_payment",
+            "code": true
+          },
+          {
+            "text": " reach the SDK seam that answers a merchant's checkout-details request (",
+            "code": false
+          },
+          {
+            "text": "docs/architecture/13-checkout-details.md",
+            "code": true
+          },
+          {
+            "text": "). (+5 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
@@ -170,24 +230,32 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.13.0-alpha.0",
-        "date": "2026-10-30",
-        "summary": "No changes to this package in this release.",
-        "summary_segments": [
-          {
-            "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/connect": {
-    "released_version": "0.14.0-alpha.0",
+    "released_version": "0.15.0-alpha.0",
     "notes": [
+      {
+        "version": "0.15.0-alpha.0",
+        "date": "2026-11-26",
+        "summary": "The runtime this connector installs moves to 0.15.0-alpha.0. (+1 more in the changelog)",
+        "summary_segments": [
+          {
+            "text": "The runtime this connector installs moves to ",
+            "code": false
+          },
+          {
+            "text": "0.15.0-alpha.0",
+            "code": true
+          },
+          {
+            "text": ". (+1 more in the changelog)",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
@@ -239,24 +307,48 @@ export const CLIENT_RELEASE_DATA = {
           }
         ],
         "action_required": false
-      },
-      {
-        "version": "0.13.0-alpha.0",
-        "date": "2026-10-30",
-        "summary": "No changes to this package in this release.",
-        "summary_segments": [
-          {
-            "text": "No changes to this package in this release.",
-            "code": false
-          }
-        ],
-        "action_required": false
       }
     ]
   },
   "@haven_ai/cli": {
-    "released_version": "0.14.0-alpha.0",
+    "released_version": "0.15.0-alpha.0",
     "notes": [
+      {
+        "version": "0.15.0-alpha.0",
+        "date": "2026-11-26",
+        "summary": "The feedback secret check recognises the Sales key. A sk_merchant_… credential — the receive-only key a merchant's server uses to report sales to Haven — is refused by haven feedback submit before any request carrying it is sent, with the reason merchant_api_key.",
+        "summary_segments": [
+          {
+            "text": "The feedback secret check recognises the Sales key. A ",
+            "code": false
+          },
+          {
+            "text": "sk_merchant_…",
+            "code": true
+          },
+          {
+            "text": " credential — the receive-only key a merchant's server uses to report sales to Haven — is refused by ",
+            "code": false
+          },
+          {
+            "text": "haven feedback submit",
+            "code": true
+          },
+          {
+            "text": " before any request carrying it is sent, with the reason ",
+            "code": false
+          },
+          {
+            "text": "merchant_api_key",
+            "code": true
+          },
+          {
+            "text": ".",
+            "code": false
+          }
+        ],
+        "action_required": false
+      },
       {
         "version": "0.14.0-alpha.0",
         "date": "2026-11-11",
@@ -268,18 +360,6 @@ export const CLIENT_RELEASE_DATA = {
           },
           {
             "text": "'s runbook says signup is passkey-only. Its copy of the agent runbook drops \"or a wallet\" from the account step and the signup hand-off script, regenerated from the SDK runbook: signup offers a passkey, and a wallet joins an existing account's signer set later. (+2 more in the changelog)",
-            "code": false
-          }
-        ],
-        "action_required": false
-      },
-      {
-        "version": "0.13.0-alpha.0",
-        "date": "2026-10-30",
-        "summary": "No changes to this package in this release.",
-        "summary_segments": [
-          {
-            "text": "No changes to this package in this release.",
             "code": false
           }
         ],

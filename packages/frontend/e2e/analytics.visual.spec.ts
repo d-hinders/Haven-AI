@@ -107,7 +107,9 @@ import {
   dismissMobileSidebar,
   expectNoHorizontalOverflow,
   mockHavenApi,
+  SALES_FROZEN_NOW,
   seedAuthenticatedSession,
+  serveSales,
 } from './fixtures/haven-api'
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore — plain .mjs; the SINGLE source of evidence viewports, shared
@@ -284,15 +286,27 @@ const OVERVIEW_FAILURE = analyticsOverviewFailure
 type OverviewBody = typeof analyticsOverview | typeof analyticsOverviewEmpty
 
 type Scenario = {
-  name: 'populated' | 'empty' | 'error' | 'filtered'
+  name: 'populated' | 'empty' | 'error' | 'filtered' | 'revenue'
   /**
    * The query the page is opened with. `filtered` (#4401) lands on
    * `?agentId=agent-research`, whose agent the `/agents` handler then names
    * with {@link LONG_AGENT_NAME}: the header state that ran 420 px wide at 390.
+   * `revenue` (#4901) lands on `?view=revenue`, the switch's URL state.
    */
   query?: string
   /** What `GET /analytics/overview` answers with. `null` = the 503. */
   body: OverviewBody | null
+  /**
+   * #4901: turn merchant services ON and serve the Sales reads, so the
+   * Spending / Revenue switch exists and the revenue side has its one answer.
+   */
+  sales?: boolean
+  /**
+   * The instant the page's clock is frozen to. The default is the analytics
+   * fixture's own window; the revenue side reads the Sales fixture, whose days
+   * sit inside the 30 days before `SALES_FROZEN_NOW`, so it freezes there.
+   */
+  now?: Date
   /**
    * The state the capture is of, pinned before the shutter: one assertion per
    * distinguishing feature, so a locator that drifts is a red test rather than
@@ -591,6 +605,68 @@ const SCENARIOS: Scenario[] = [
     },
   },
   {
+    // #4901: the Spending / Revenue switch, on the revenue side. Merchant
+    // services are ON (the Sales reads are served) and the page opens on
+    // `?view=revenue`, so the capture is the side the switch adds: the tiles,
+    // the by-product chart and the by-product breakdown, with the Agent facet
+    // gone and the link to Sales in its place.
+    name: 'revenue',
+    query: '?view=revenue',
+    body: analyticsOverview,
+    sales: true,
+    now: SALES_FROZEN_NOW,
+    async assert(page) {
+      // The switch is on the page, Revenue selected — the URL state landed.
+      const tabs = page.getByRole('tablist', { name: 'Analytics view' })
+      await expect(tabs).toHaveCount(1)
+      await expect(page.getByRole('tab', { name: 'Revenue' })).toHaveAttribute('aria-selected', 'true')
+      await expect(page.getByRole('tab', { name: 'Spending' })).toHaveAttribute('aria-selected', 'false')
+
+      // The Agent facet is hidden on the revenue side; the link to Sales takes
+      // its place, and the period control stays.
+      await expect(page.getByRole('button', { name: COPY.agentFacetTrigger })).toHaveCount(0)
+      await expect(page.getByRole('link', { name: 'View in Sales' })).toHaveCount(1)
+      await expect(page.getByRole('button', { name: COPY.periodTrigger })).toHaveCount(1)
+
+      // The tiles: the period's total, the count of sales, the average, and
+      // what moved between the owner's own accounts (in no total).
+      const tiles = page.getByTestId('analytics-revenue-tiles')
+      await expect(tiles).toHaveCount(1)
+      await expect(tiles.getByText('Revenue', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('$2.14', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('Sales', { exact: true })).toHaveCount(1)
+      // Every revenue payment (3 sales + 1 without a product), and the total over them (#4981).
+      await expect(tiles.getByText('4', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('per payment')).toHaveCount(1)
+      await expect(tiles.getByText('Not counted', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('$0.50', { exact: true })).toHaveCount(1)
+      await expect(tiles.getByText('1 transfer between your accounts')).toHaveCount(1)
+
+      // The chart is the SHARED StackedBarChart, and its screen-reader table
+      // carries no Refusals column (#4900's opt-in).
+      const chart = page.getByTestId('analytics-revenue-by-day')
+      await expect(chart).toHaveCount(1)
+      await expect(chart.getByTestId('stacked-bar-chart').filter({ visible: true })).toHaveCount(1)
+      await expect(chart.getByTestId('chart-data-table').getByText('Refusals')).toHaveCount(0)
+
+      // By product is the shared breakdown card, fed by the same summary.
+      const byProduct = page.getByTestId('analytics-revenue-by-product')
+      await expect(byProduct).toHaveCount(1)
+      await expect(byProduct.getByText('Chat completion').filter({ visible: true })).toHaveCount(1)
+
+      // The spend side is gone with its request: no spend tiles, no spend
+      // chart, no agents table.
+      await expect(page.getByTestId('analytics-tiles')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-spend-section')).toHaveCount(0)
+      await expect(page.getByTestId('analytics-agents-section')).toHaveCount(0)
+
+      // The header holds the link and the period control inside its own box at
+      // 390, and the page never scrolls sideways (#4401's rule, on the side
+      // that adds a control).
+      expect(await expectNoHorizontalOverflow(page)).toMatchObject({ hasOverflow: false })
+    },
+  },
+  {
     name: 'error',
     body: null,
     async assert(page) {
@@ -757,8 +833,12 @@ test.describe('analytics visual regression', () => {
         const label = `${scenario.name} · ${vp.name} · ${scheme}`
 
         // BEFORE `goto`: the page reads `Date.now()` during its first render.
-        await page.clock.setFixedTime(FROZEN_NOW)
-        await serveOverview(page, scenario.body, scenario.query !== undefined)
+        await page.clock.setFixedTime(scenario.now ?? FROZEN_NOW)
+        await serveOverview(page, scenario.body, scenario.query?.includes('agentId=') ?? false)
+        // #4901: the revenue side's switch exists only while merchant services
+        // are on, and its one read is the Sales summary — served here, after
+        // the overview override, so the merchant routes answer first.
+        if (scenario.sales) await serveSales(page, 'overview')
 
         await page.setViewportSize({ width: vp.width, height: vp.height })
         await page.goto(`/analytics${scenario.query ?? ''}`)

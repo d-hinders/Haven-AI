@@ -8,6 +8,7 @@ import {
   getX402SignContext,
   getX402IntentByIdempotencyKey,
   getX402MerchantCallContext,
+  getX402StoredPaymentRequired,
   isPositiveDecimalAtomicAmount,
   normaliseAddress,
   chainIdFromX402Network,
@@ -183,6 +184,20 @@ export default async function x402Routes(app: FastifyInstance): Promise<void> {
     async (request, reply) => {
       const agent = request.agent as AgentContext
       const result = await getX402MerchantCallContext(agent, request.params.id)
+      return reply.code(result.code).send(result.body)
+    },
+  )
+
+  // ── GET /x402/:id/payment-required — the stored challenge (#4872) ───────
+  // Read-only, agent-scoped, writes nothing. The hosted haven_submit reads
+  // the merchant's checkout-details request from it before it relays a
+  // plain-HTTP payment. All checks live in the module.
+  app.get<{ Params: { id: string } }>(
+    '/:id/payment-required',
+    { config: moneyPathRateLimit },
+    async (request, reply) => {
+      const agent = request.agent as AgentContext
+      const result = await getX402StoredPaymentRequired(agent, request.params.id)
       return reply.code(result.code).send(result.body)
     },
   )

@@ -43,6 +43,7 @@ export { fetchAccountTransactions } from './aggregate.js'
 export { fetchLastOutgoingAt } from './last-outgoing.js'
 export { enrichTransactionsWithAgents } from './enrichment.js'
 export { enrichTransactionsWithAccounting } from './accounting.js'
+export { attachSaleMarkers, foldAndMarkSales, saleWire } from './sale-marker.js'
 export { serveTimeAmount, serveTimeAmountTriple } from './serve-time.js'
 export {
   ACTIVITY_GROUP_LIMIT,
@@ -82,10 +83,30 @@ export {
 } from './period.js'
 export {
   ingestInboundTransfers,
+  ingestInboundTransferByTxHash,
+  explorerRowsToLegs,
+  readInboundTransferByTxHash,
+  TX_HASH_PATTERN,
   matchInboundTransferForAccount,
   findX402PaytoSettlement,
   type InboundMatchResult,
+  type InboundTransferLeg,
+  type IngestByTxHashResult,
+  type ChainInboundLeg,
+  type ChainReadResult,
 } from './receive.js'
+export {
+  runMerchantInboundIndexTick,
+  refreshMerchantAccountIndex,
+  productionMerchantIndexDeps,
+  MAX_BLOCKS_PER_PASS,
+  MERCHANT_INDEX_REFRESH_INTERVAL_SECONDS,
+  type MerchantIndexRefreshResult,
+  type MerchantIndexDeps,
+  type MerchantIndexTickResult,
+} from './merchant-index.js'
+// #4897: the sales ingest, consumed by routes/merchant-sales.ts.
+export { ingestMerchantSale, serializeSale, type SaleRecordInput } from './merchant-sales.js'
 export {
   findOffRampDestination,
   setOffRampDestination,
@@ -111,13 +132,49 @@ export {
   type TransactionFilterTokenOption,
 } from './orchestration.js'
 
-// The counterparty-name module (#4332): the analytics route names merchants
-// through the module's public surface, per the module-boundary rule —
-// imports of `modules/` go through `index.ts`, never a private file.
+// The recipient-naming module (#4332, #4882): every route names the other
+// side of a payment through the module's public surface, per the
+// module-boundary rule — imports of `modules/` go through `index.ts`.
 export {
-  ownAccountNameForAddress,
-  resolveCounterpartyName,
+  EMPTY_RECIPIENT_NAME_INDEX,
+  allRecipientNames,
+  recipientNameKey,
+  recipientAddressOf,
+  recipientNameSnakeWire,
+  recipientNameWithoutHost,
+  resolveRecipientName,
   type CounterpartyKind,
   type CounterpartyName,
-  type CounterpartyNameInputs,
+  type RecipientNameIndex,
+  type RecipientNameSource,
+  type RecipientTarget,
 } from './counterparty-name.js'
+export { loadRecipientNameIndex, type LoadRecipientNameIndexOptions } from './recipient-name-index.js'
+// #4897: the owner's sales reads and the clear action, consumed by
+// routes/merchant-sales-reads.ts.
+export {
+  clearSaleRecord,
+  decodePaymentsCursor,
+  emptySummary,
+  PAYMENTS_DEFAULT_LIMIT,
+  PAYMENTS_MAX_LIMIT,
+  parsePeriod,
+  readPaymentDetail,
+  readPaymentsPage,
+  readSalesFacets,
+  readSalesSummaryForOwner,
+  resolveSalesScope,
+  type SalesFilterInput,
+} from './merchant-sales-reads.js'
+// #4952: the Stripe deposit-address registry, consumed by
+// routes/merchant-deposit-addresses.ts. #5028 adds the testnet gate both the
+// routes and the sales ingest ask.
+export {
+  DEPOSIT_ADDRESS_VERIFICATION_NOTE,
+  DEPOSIT_ADDRESSES_TESTNET_ONLY,
+  depositAddressRegistryOpen,
+  listRegistrations,
+  registerDepositAddress,
+  retireRegistration,
+  serializeDepositAddress,
+} from './merchant-deposit-addresses.js'

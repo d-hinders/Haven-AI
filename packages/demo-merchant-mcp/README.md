@@ -2,12 +2,15 @@
 
 Internal x402 demo merchant MCP server for Haven. It exposes a small fake
 merchant catalog, gates purchases with standard x402 `PAYMENT-SIGNATURE`,
-supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns a
-Swedish-style invoice.
+supports ERC-7710 and EIP-3009 settlement options for Base USDC, and returns an
+invoice in the shape of a Swedish bookkeeping document, English by default.
 
 This package is a technical demo for a merchant-controlled wallet, not a Haven
-custody, facilitator, acquiring, fiat/card, third-party merchant settlement, or
-merchant-of-record product. Funds do not flow through Haven.
+custody, facilitator, acquiring, fiat/card or third-party merchant settlement
+product. Haven is the merchant only of its own demo products and receives
+payment only for them; it receives or moves no funds on behalf of anyone else.
+The joke product is verified and settled by Coinbase's facilitator (CDP); every
+other product is settled by the merchant's own key.
 
 ## What It Demonstrates
 
@@ -19,8 +22,11 @@ merchant-of-record product. Funds do not flow through Haven.
   `PAYMENT-RESPONSE`.
 - Haven compatibility: `X-PAYMENT` is accepted as an alias for
   `PAYMENT-SIGNATURE` while Haven SDK clients transition.
-- Merchant self-settlement with EIP-3009 `transferWithAuthorization`; the
-  submitter key only pays gas and does not need to be the receiving wallet.
+- Two settlement paths (see [Settlement paths](#settlement-paths-4852)):
+  merchant self-settlement with EIP-3009 `transferWithAuthorization` for every
+  product but the joke — the submitter key only pays gas and does not need to
+  be the receiving wallet — and, for the joke only, verification and settlement
+  by Coinbase's hosted facilitator (CDP).
 - ERC-7710 settlement by simulating and submitting `redeemDelegations` against
   an operator-configured trusted DelegationManager. The submitter key is the
   redeemer; it is not a Haven key and cannot spend without a buyer-signed
@@ -30,9 +36,23 @@ merchant-of-record product. Funds do not flow through Haven.
   handlers run.
 - The x402 v2 extensions echo, advertised in every challenge and enforced on
   every payment (see [Extensions echo](#extensions-echo-x402-v2-enforced)).
-- An invoice after a settled purchase: Swedish bookkeeping JSON (also sent as
-  the `x-receipt-json` header) and a rendered text, English by default and
-  Swedish with `locale: 'sv'` (#1550).
+- An invoice after a settled purchase: bookkeeping JSON with Swedish keys
+  (also sent as the `x-receipt-json` header) and a rendered text, English by
+  default and Swedish with `locale: 'sv'` (#1550). The JSON's keys and codes
+  (`SE_25`, `REVERSE_CHARGE`, `USDC`, `blockkedjeadress`) never change; its
+  human-readable values follow the locale of the call that paid (#4980) —
+  English by default (`"status": "Paid"`, `"betalningssatt": "Cryptocurrency
+  (USDC on Base Sepolia testnet)"`, the English product line with
+  `(one-time purchase)` or `(1 month)`), Swedish with `locale: 'sv'`
+  (`"Betald"`, `"Kryptovaluta (USDC på …)"`, `(engångsköp)`). A plain-HTTP
+  x402 call carries no locale and gets English. The receipt is one document
+  per payment: a later call for the same payment in the other locale changes
+  only the headings around it.
+- Stripe machine payments (#4853): with a deposit address and a restricted key
+  configured, the joke is paid to the Stripe deposit address and each settled
+  payment is recorded as a PaymentIntent in `transaction_verification` mode,
+  keyed on the transaction hash. A reconciliation script records the ones the
+  request path missed.
 
 ## Products
 
@@ -45,10 +65,14 @@ merchant-of-record product. Funds do not flow through Haven.
 | CloudNest 50 GB | `buy_cloud_storage` | 0.0005 USDC |
 | CloudNest 200 GB | `buy_cloud_storage` | 0.0015 USDC |
 | CloudNest 1 TB | `buy_cloud_storage` | 0.004 USDC |
+| Haven Joke (only with CDP configured) | `buy_joke` | 0.01 USDC, EIP-3009 only, one-time |
+| Haven Field Notes (only with the Sales settings) | `buy_field_notes` | 0.0025 USDC, one-time, paid into a Haven Sales account ([below](#haven-sales-account-the-merchant-services-demo-product-4950)) |
 
-`vpn_legacy` (`plan: "legacy"`) is the one EIP-3009-only product (#1441): the QA
-harness's hosted funding-leg scenario needs a merchant offer the erc7710
-preference cannot pick. Every other product supports both methods.
+`vpn_legacy` (`plan: "legacy"`) is the one self-settled EIP-3009-only product
+(#1441): the QA harness's hosted funding-leg scenario needs a merchant offer the
+erc7710 preference cannot pick. The joke is EIP-3009-only too, but Coinbase's
+facilitator settles it (see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)).
+Every other product supports both methods.
 
 Every product's x402 capability shows in `list_products`, in its text line and
 in its `structuredContent.products` record:
@@ -88,7 +112,8 @@ the invoice, or on-chain settlement state as the source of truth for
 bookkeeping/reconciliation, and every field is read off the already-settled
 payment (never re-derived from the quoted catalog price).
 
-Purchase tools accept an optional `settlement_method` argument. It decides
+Purchase tools (all but the one-product tools `buy_joke`, which offers one method, and `buy_field_notes`) accept an optional
+`settlement_method` argument. It decides
 which option comes FIRST in the 402's `accepts`; every other method the product
 and the merchant support is still offered after it:
 
@@ -98,7 +123,8 @@ and the merchant support is still offered after it:
 - `eip3009`: the EIP-3009 option first
 
 A method the merchant has not enabled, or the product does not support, is
-refused. The tools also take `locale` (`sv` for Swedish text) and
+refused. The tools also take `locale` (`sv` for Swedish text and receipt
+values) and
 `result_detail` (`summary` drops the rendered invoice and the bookkeeping JSON
 from the text; the structured content, including `summary`, and the
 `x-receipt-json` header are the same either way).
@@ -108,6 +134,47 @@ EIP-3009 by default. Haven's clients read `extra.assetTransferMethod`: under
 the #1450 preference rule, whose selector came with #1453, they prefer the option tagged `assetTransferMethod: "erc7710"` when the
 account is on the delegation rail and fall back to EIP-3009 otherwise
 (`selectX402SettlementScheme` in `packages/sdk/src/x402.ts`).
+
+## Settlement paths (#4852)
+
+Each product carries a settlement kind (`settlement` in `src/products.ts`, read
+through `productSettlementKind`; #4850). There are two:
+
+| | Own key (`self`) | Coinbase facilitator (`cdp`) |
+|---|---|---|
+| Products | the seven VPN and storage products, `vpn_legacy` included, and Haven Field Notes when the Sales settings are set (#4950) | the joke (`buy_joke`, 0.01 USDC) |
+| Offered | always | only with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` both set |
+| Methods | EIP-3009, plus ERC-7710 when enabled (`vpn_legacy`: EIP-3009 only) | EIP-3009 only |
+| Verifies | this merchant: signature, amount, recipient, window, or a simulated `redeemDelegations` | this merchant's own checks first, then CDP's `verify` (including its sanctions and risk screening) |
+| Submits and pays gas | `SETTLEMENT_PRIVATE_KEY` | CDP |
+| Receives the USDC | `MERCHANT_ADDRESS`; for Haven Field Notes, the Sales account (`MERCHANT_SALES_ADDRESS`) | the Stripe deposit address when Stripe is on (#4853), else `MERCHANT_ADDRESS` |
+| Readiness gate on the merchant's gas wallet | applies | exempt |
+| After a failure | EIP-3009: the pre-submit `authorizationState` read (#1519); ERC-7710: the pinned enforcer's `spentMap` check (#1515) | the merchant's own chain read and event search ([Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)) |
+
+In both, the merchant is paid in one transfer from the payer straight to the
+product's receiving address (#4850): `MERCHANT_ADDRESS`, or the Stripe deposit
+address for the joke when Stripe recording is on (#4853, below). On the
+merchant's side Haven takes part only as the seller of its own demo products:
+no Haven key, account or delegation of the merchant's is in that transfer. On
+the payer's side, a Haven agent pays from the account it acts for: with
+ERC-7710 the transfer comes from that smart account through the Haven-built
+settlement delegation the merchant redeems; with EIP-3009 the payer is the
+agent's delegate wallet, which Haven's bridge funded from the agent's budget
+just before — that funding leg is Haven's, not the merchant's.
+
+**Why the joke is not in Haven's catalog.** The demo store's funding target —
+which merchant-locked budgets are pinned to — is computed over all of its
+active, verified catalog rows
+(`MERCHANT_FUNDING_AGGREGATES_SQL` in
+`packages/backend/src/infra/repositories/merchants.ts`): the rows must all
+offer ERC-7710 and must agree on one `payTo`. One EIP-3009-only row would make
+merchant-locked budgets for the demo store refuse with 409, failing the QA
+`merchant-locked-budget` scenario, and a second receiving address (Stripe's
+deposit address, epic #4849 M2) would make the target conflicting. Like
+`vpn_legacy`, which has no catalog row either (and would hit the same refusal if
+it had one), the joke is paid at
+this merchant's MCP endpoint directly: quote, then pay, as for any MCP merchant
+outside the catalog. Listing it would need a change to that aggregate.
 
 ## Extensions echo (x402 v2, enforced)
 
@@ -124,7 +191,9 @@ every payment must echo it. Since #2361 the challenge advertises exactly this
 }
 ```
 
-The rule (`assertExtensionsEchoed` in `src/x402.ts`) is the first thing
+The rule (`assertExtensionsEchoed`, in the shared core's
+`packages/merchant-payments/src/payment-checks.ts` since #4890, called from
+`src/x402.ts`) is the first thing
 `verifyAndSettle` does after decoding the payment header — **before** scheme
 dispatch, so it applies identically to `eip3009` and `erc7710` payments and
 runs before any signature recovery, delegation simulation, RPC call or
@@ -241,7 +310,13 @@ Endpoints:
   `settlements_remaining`, the band `status` (`usable` | `warn` | `fail`) and
   both floors (`warn_floor` 25 / `fail_floor` 12) beside the legacy `ok`
   boolean (`ok` is true unless `status` is `fail`). A read failure reports
-  `ok: null` + `error` instead of taking health down.
+  `ok: null` + `error` instead of taking health down. A `cdp` block appears
+  only when CDP is configured (#4851), and a `stripe` block only when Stripe
+  recording is on (#4853): `deposit_address`, `api_version`, `network`,
+  `recorded`, `pending`, `declined` and `record_failures` (#4866: `recorded`
+  counts only PaymentIntents Stripe accepted), and a `sales` block only when
+  the Sales settings are set (#4950): `address`, `reported`, `pending`,
+  `refused` and `gave_up`. No block ever carries a credential.
 
 ### Sessions: unknown-session 404, idle TTL, and what a redeploy does (#1578, #3171)
 
@@ -256,6 +331,21 @@ guarantee, and the Haven SDK acts on exactly that shape: it re-initializes once
 and resends the SAME payment header on the new session, which then settles
 exactly once (`src/http-session-restart.test.ts`). `initialize` is exempt from
 the guard even with a stale id attached, so the recovery door is always open.
+
+### Tool calls the payment gate does not know (#5069)
+
+The HTTP payment gate resolves each buy-tool call to its product through the
+product registry (`productToolArgs` in `src/products.ts`), the same derivation
+the tool schemas use. A `tools/call` naming a tool that is neither free
+(`FREE_TOOL_NAMES`, today `list_products`) nor a buy tool the registry knows is
+answered by the gate, before any session or handler runs, in the MCP SDK's own
+unknown-tool shape: HTTP 200 with an `isError` result reading `MCP error
+-32602: Tool <name> not found`. A JSON-RPC batch carrying a `tools/call` is
+refused with HTTP 400 and `-32600`: the gate reads one request per body, so a
+batch could otherwise skip the 402. To add a tool, register it in `server.ts`
+AND add it to `FREE_TOOL_NAMES` (free) or give its product a branch in
+`productToolArgs` (paid); `src/payment-gate-registry.test.ts` fails when a
+registration is in neither.
 
 The session store is memory-only (`Map` in `http.ts`) — deliberately, this is
 a demo merchant with no shared state. Two consequences, both written here
@@ -309,7 +399,9 @@ wallet that drains between the two is caught before anything is settled.
   unchanged — same "never block on an unknown" rule as `/healthz`.
 - **Exempt**: free (unpaid) tools, and the `MERCHANT_SKIP_SETTLE_PRODUCT`
   QA fixture below — neither one settles anything on-chain, so a drained
-  wallet cannot block a settlement that never runs.
+  wallet cannot block a settlement that never runs. Also exempt: a
+  CDP-settled product (the joke, #4851) — Coinbase's facilitator pays that
+  gas, not this wallet.
 
 The existing merchant-fault 402 body (the #1517 fault-class message) also now
 carries a `reason_code` additively — `settlement_wallet_out_of_gas`,
@@ -323,7 +415,9 @@ already-settled decision, served) and otherwise refuses it as a payer-side
 DECISION — a 402 whose `error` names the revert, then the next action (nothing
 settled; re-quote, pay with a fresh authorization), then the likely causes (the
 child's transfer-amount caveat exhausted, the delegator short of the price, the
-child redeemed elsewhere). No `reason_code` rides a decision. Only a PROVEN
+child redeemed elsewhere). No `reason_code` rides that decision; only the CDP
+path's decisions carry one (`facilitator_refused` / `facilitator_retryable`,
+see [Coinbase facilitator](#coinbase-facilitator-cdp-joke-product-4851)). Only a PROVEN
 revert takes that branch — viem's `ContractFunctionRevertedError` carrying
 decoded data, an error signature or an "execution reverted" reason, the
 node's `ExecutionRevertedError` (minus geth's "gas required exceeds
@@ -341,9 +435,19 @@ hosted server relays the first 500 characters of this body
 (`packages/mcp-server/src/tools/paid-mcp-completion.ts`).
 
 `MERCHANT_ADDRESS` is required and must be the Base address that receives USDC.
+Startup refuses a value that is not an address (#5070): it must be `0x` and 40
+hex characters, either all lowercase (normalised to the checksummed form) or
+with a correct EIP-55 checksum. Surrounding whitespace is trimmed, and a
+whitespace-only value counts as missing. A wrong checksum is refused, because
+it means a mistyped address. It is the default receiving address: a product may name its own
+(`receivingAddress` in `src/products.ts`, read through
+`productReceivingAddress`), and the 402's `payTo`, the verification and the
+invoice's recipient address all follow the product being bought. Today no
+product names one, so every payment goes to `MERCHANT_ADDRESS`.
 `SETTLEMENT_PRIVATE_KEY` is the gas-funded key that submits USDC
-`transferWithAuthorization`; it does not need to be the receiving wallet and
-should not hold user or agent funds.
+`transferWithAuthorization` (and `redeemDelegations`) for every own-key product;
+it does not settle the joke, which CDP settles. It does not need to be the
+receiving wallet and should not hold user or agent funds.
 
 `MERCHANT_X402_SETTLEMENT_METHODS` defaults to EIP-3009 only unless the trusted
 DelegationManager is configured. If `erc7710` is requested but the manager is
@@ -361,6 +465,609 @@ domain name (`"USDC"` vs mainnet's `"USD Coin"`). `BASE_RPC_URL` must point at t
 matching chain's RPC (Base mainnet, or `https://sepolia.base.org` for Sepolia),
 and `SETTLEMENT_PRIVATE_KEY` must be gas-funded on that chain.
 
+## Coinbase facilitator (CDP): joke product (#4851)
+
+`buy_joke` sells one joke for 0.01 USDC. It is the only product verified and
+settled by Coinbase's hosted x402 facilitator (CDP) instead of this merchant's
+own `SETTLEMENT_PRIVATE_KEY`; CDP pays the gas. It is offered only when both
+`CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` are set. With neither, the merchant
+behaves exactly as it does without the product. With only one, it logs a
+warning and does not offer the product; it still starts. `/healthz` carries a
+`cdp` block only when CDP is configured, and never a credential.
+
+- **EIP-3009 only.** Haven agents prefer ERC-7710 whenever it is offered, and
+  CDP does not settle it, so the joke offers EIP-3009 alone. An agent whose
+  budget is pinned to one recipient cannot pay it: EIP-3009 needs an open budget.
+- **The merchant checks its own quote first.** The extensions echo, x402
+  version, quoted option, resource, recipient, amount, signature and validity
+  window are checked before CDP is called at all. A signed window
+  (`validBefore - validAfter`) longer than 42,600 s (just under 12 h) is
+  refused too: the recovery search below could not cover it in full.
+- **The chain decides every failure.** After any settle failure or timeout
+  (30 s per call), the merchant reads USDC's `authorizationState` itself and
+  matches no facilitator error string. Used: USDC's events decide whether it
+  was this payment (next bullet). Unused: a
+  retryable refusal; the same header retried runs the check again and settles
+  at most once. A retry after `validBefore` is served when the chain says the
+  money moved, and refused as expired when it did not.
+- **Settled or cancelled.** `authorizationState` reads "used" for a payment,
+  a cancelled authorization and a nonce spent by another authorization alike.
+  The merchant searches USDC's `AuthorizationUsed` event for this payer and
+  nonce inside the authorization's own validity window — the only time a
+  payment for it can land. Found, and its transaction paid this merchant the
+  price: served, with that hash. Found paying anything else, or the whole
+  window empty: a final refusal. "Whole" means `validBefore` is at least
+  300 blocks (about 10 minutes) behind the RPC's head, so a node lagging a few
+  blocks cannot hide a payment that just landed. When the search fails, the
+  window is too long to search in full, or it closed too recently, the buyer is
+  served with the reference marked unavailable — never refused.
+  The search reads in `eth_getLogs` windows the RPC serves (#4866): 500
+  blocks by default, narrowed by `ETH_GETLOGS_MAX_BLOCK_RANGE` and by the
+  provider's refusal. Before #4866 a node that serves fewer blocks (the
+  public Base Sepolia RPC serves 200) refused every window wider than that,
+  so on the dev merchant a final refusal was unreachable and the buyer was
+  always served. It is reachable there now, as on mainnet. At 200-block
+  windows the 21,600-block cap is up to 108 sequential calls. Since #4890
+  each chain read is bounded at 10 s with no retries and the whole search at
+  30 s (`SETTLE_RESOLVE_MS`). A search that runs out of time is not served:
+  the buyer is told the outcome is unknown and to retry the same header
+  (`facilitator_retryable`), because serving it would let a cancelled
+  authorization with a long window be served by a slow search.
+- **Refusal codes.** The 402 body carries `reason_code: "facilitator_refused"`
+  (final: CDP refused at verification — including its sanctions and risk
+  screening — and the chain shows the authorization unused, or the
+  authorization was consumed by something other than this
+  payment) or `"facilitator_retryable"` (nothing has moved yet; retry the SAME
+  header, never a newly signed one). Haven's
+  clients read `reason_code` only inside a 503 `merchant_not_ready` body, so
+  these degrade to the ordinary refusal there.
+- **Not in Haven's catalog.** Like `vpn_legacy`, the joke is paid at this
+  endpoint directly; a catalog row would change the demo store's funding target.
+
+## Stripe recording (#4853)
+
+**Dev and Stripe sandbox only** (owner decision, 2026-11-17, epic #4849). The
+dev merchant records the joke in a Stripe sandbox, against Base Sepolia. The
+production merchant sets no `STRIPE_*` variable, so once its CDP key is set
+(epic #4849 operator step) its joke is paid to `MERCHANT_ADDRESS` through CDP,
+and nothing is sent to a live Stripe account. A
+sandbox cannot stand in for production: its deposit address is a Base Sepolia
+address (see *What we learned from Stripe sandbox* below), so a Base mainnet
+transaction cannot be recorded against it, and real USDC sent to that address
+on mainnet could be unrecoverable. The code still supports a live key
+(`STRIPE_API_VERSION_LIVE` on Base mainnet); turning it on is a new decision
+(#4858, closed as not planned).
+
+With `STRIPE_DEPOSIT_ADDRESS` and `STRIPE_SECRET_KEY` both set, the joke's
+receiving address is the Stripe deposit address, and every settled joke payment
+is recorded in Stripe as a PaymentIntent in `transaction_verification` mode,
+keyed on the transaction hash. No other product can name the deposit address:
+the address belongs to the recorded product (`stripeRecording` in
+`src/products.ts`), resolved through `productReceivingAddress`.
+
+Stripe is **off**, with a logged warning, and the joke keeps `MERCHANT_ADDRESS`,
+when:
+
+| Condition | What happens |
+|---|---|
+| only one of the two variables is set | warning; the joke keeps `MERCHANT_ADDRESS` |
+| CDP is not configured | warning; the joke is not offered at all (#4851) |
+| the joke's price is below one cent or not a whole number of cents | warning; the joke keeps `MERCHANT_ADDRESS` |
+| `STRIPE_DEPOSIT_ADDRESS` is not a 20-byte hex address | warning; the joke keeps `MERCHANT_ADDRESS` |
+
+The merchant never refuses to start over any of them. With neither variable set
+it says nothing, exactly as before.
+
+A third, optional variable — `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` — names the
+deposit address this one replaces, so a payment that already settled to it is
+still served. See [the operator note](#operator-note-changing-the-stripe-variables-changes-the-quoted-address).
+
+**The PaymentIntent.** `amount` in US cents (the joke is 10,000 atomic USDC =
+one cent), `currency=usd`, `confirm=true`, `payment_method_data[type]=crypto`,
+`allowed_payment_method_types=[crypto]`, and
+`payment_method_options[crypto][mode]=transaction_verification` with
+`network=base` and the transaction hash. The transaction hash is also the
+idempotency key, and it is stored in `metadata.transaction_hash`. The API
+version follows the chain: `2026-07-29.preview` on Base Sepolia (the dev
+merchant), `2026-05-27.preview` on Base. The network name is `base` on both — a
+sandbox deposit address is a Base Sepolia address, but the parameter does not
+change.
+
+**What the record carries (#4880).** Enough for an accountant to work from the
+Stripe export alone, without the receipt the merchant returned in its API
+response. The receipt is built first and the PaymentIntent is recorded after
+it, still without waiting for Stripe: both steps before it are synchronous.
+
+| Field | Value | When |
+|---|---|---|
+| `description` | product name and receipt number, e.g. `Haven Joke — FAK-0123456789012345` | always |
+| `metadata.receipt_number` | the receipt's `fakturanummer` | always |
+| `metadata.product_id`, `metadata.transaction_hash` | as before | always |
+| `metadata.vat_treatment` | `SE_25` or `REVERSE_CHARGE`, the receipt's `momsbehandling` | merchant only |
+| `metadata.vat_amount` | the receipt's VAT in atomic USDC with the unit, e.g. `2000 (USDC atomic)`: the joke's VAT is a fifth of a cent and cannot be stated in cents | merchant only |
+| `metadata.buyer_vat_nr`, `metadata.buyer_country` | the buyer's declared VAT number and country | only when the paid request carried an accepted declaration (#4855) and each has the shape of one (two letters; a two-letter prefix and 2–13 letters or digits); absent otherwise, never empty |
+| `metadata.recorded_by` | `reconciliation` | reconciliation only |
+
+These fields apply to PaymentIntents recorded from this change on: one
+recorded earlier keeps its metadata, and reconciliation answers
+`already_recorded` for it without updating anything. Values are cut to
+Stripe's 500-character limit. The buyer's company name,
+organisation number and the time its VAT number was checked are not in the
+declaration Haven sends, so they are not recorded. A Stripe refusal caused by
+any of these fields is an ordinary recording failure: logged, counted, and the
+goods delivered. Because the idempotency key is the hash while the parameters
+differ between the merchant and reconciliation, a repeat inside Stripe's ~24 h
+key window can be refused with `idempotency_error`; the recorder then searches
+again and reports the PaymentIntent it finds, and fails only if there is none.
+
+**The receipt number is derived from the transaction (#4880).** A payment
+settled on-chain is numbered `FAK-` and the transaction hash modulo 10^16 as
+sixteen zero-padded digits, so the same transaction always gets the same
+number — after a restart, and in the reconciliation script, which has the hash
+and nothing else. No date is part of it: the merchant knows the hash when it
+answers but not the block's timestamp, and its clock and the block's can fall
+on either side of midnight. The OCR reference built from it stays 17 digits. A
+payment served without a transaction hash keeps the clock-seeded counter
+(`FAK-<year>-<n>`), and that number is never in Stripe: reconciliation later
+records the number derived from the transaction it finds, which differs from
+the one on that buyer's receipt. That receipt carries no transaction reference
+either (`blockkedje_referens` is null), so it cannot be matched to a
+PaymentIntent from the receipt alone.
+
+**"Already recorded" is a read, not the idempotency key.** Stripe prunes
+idempotency keys after about 24 hours, so a key cannot answer "did this
+transaction get recorded?" a day later. The recorder first searches
+PaymentIntents for `metadata.transaction_hash`, and only creates when the search
+finds nothing. The idempotency key is still sent: it closes the window between
+the search and the create. **The restricted key therefore needs read access to
+PaymentIntents as well as create** — "create PaymentIntents; read balance
+transactions" is not enough.
+
+**Recording never blocks delivery.** The payment has settled before Stripe is
+called, so the call is fire-and-forget: a refusal, a timeout (10 s per call) or
+a network error is logged and counted, and the goods are delivered regardless.
+The durable signals are the log lines
+
+```
+[stripe] record_failed tx=<hash> reason=<stripe type/code | StripeTimeoutError>
+[stripe] record_declined tx=<hash> payment_intent=<pi_…> code=<Stripe's decline code>
+[stripe] record_pending tx=<hash> payment_intent=<pi_…>
+[stripe] not_recorded tx=<hash> reason=paid_other_address
+```
+
+and `/healthz` carries a `stripe` block with `recorded`, `pending`, `declined`
+and `record_failures`. Those counters are process-local — the merchant sleeps
+after about 10 minutes — so the log lines are what an operator greps for.
+
+**Stripe's verdict, not the create call's (#4866).** Stripe verifies a
+`transaction_verification` PaymentIntent after create returns: create answers
+`processing`, and Stripe later moves it to `succeeded` or declines it
+(`requires_payment_method` with `last_payment_error.code`; `canceled` counts as
+declined too). The recorder logs `[stripe] submitted …` on create, then reads
+the PaymentIntent every 3 s, for up to 60 s of waiting plus the reads (each
+read is bounded at 10 s) — well under the merchant's sleep — and only a
+`succeeded` one is `recorded`. A failed read ends the wait as `pending`. One still undecided at the bound is
+`record_pending`, and the reconciliation script reads it again later. A decline
+is permanent: Stripe allows one PaymentIntent per transaction, so the
+transaction cannot be recorded again — say so to Stripe, not to this script.
+When create is refused with `resource_already_exists` (a PaymentIntent tracks
+the transaction but the metadata search missed it — no metadata, or Stripe's
+search has not indexed it yet), the recorder reads the PaymentIntent Stripe
+names instead of failing; only that `pi_…` ID is taken from the error, never
+the message.
+
+**Only payments to the current deposit address are sent (#4866).** A payment
+recovered after an address change paid the previous address (served through
+`recoverCdpPaymentAfterQuoteChange`, see the operator note below). Stripe
+declines a transaction that did not pay the deposit address, so it is not
+sent: it is logged as `[stripe] not_recorded … reason=paid_other_address`. No Stripe secret is ever logged:
+a failure names the hash and Stripe's own error `type`/`code`, never the
+response body or the request.
+
+**A payment served through recovery without a transaction hash** (#4851) creates
+no PaymentIntent at request time: there is nothing to key one on. The
+reconciliation script picks it up from the chain.
+
+### Reconciliation
+
+```sh
+npm run build -w packages/demo-merchant-mcp
+npm run reconcile:stripe -w packages/demo-merchant-mcp -- \
+  --from-block 12345678 --to-block 12349999
+```
+
+It lists the settled payments to the deposit address that have no
+PaymentIntent, and records them. The range is read in `eth_getLogs` windows the
+RPC serves (#4866): 500 blocks by default, narrowed by
+`ETH_GETLOGS_MAX_BLOCK_RANGE` when set, and by the provider's own refusal — the
+public Base Sepolia RPC serves 200 and says so, and the script learns it from
+that refusal and asks again narrower. The same windows serve #4851's recovery
+search. There is no database to remember a block range,
+so the range is an argument.
+
+- Only an **EIP-3009 transfer of the joke's exact price** is recorded. An
+  EIP-3009 transfer is the on-chain shape CDP's settlement leaves: USDC's
+  `AuthorizationUsed` for the payer in the same transaction as the `Transfer`.
+- Any other transfer to the address — a plain `transfer`, a Permit2 pull, an
+  ERC-7710 redemption — is listed as `not_recorded` with reason `not_eip3009`
+  and left alone. Recording a transfer CDP did not settle needs Stripe's
+  confirmation first (epic #4849, Out of scope). A transfer of another amount is
+  listed as `amount_mismatch` and left alone too.
+- It is idempotent: "already recorded" is the same Stripe read, so a second run
+  over the same range creates nothing.
+- It records the description, `product_id` and the receipt number the merchant
+  gives that transaction, plus `recorded_by=reconciliation`, and leaves out
+  `vat_treatment`, `vat_amount` and the buyer keys (#4880): it has no paid
+  request and no declaration, so a reverse-charge sale is never recorded as a
+  25% sale.
+
+The report is JSON on stdout (the recorder's log lines go to stderr):
+`recorded`, `already_recorded`, `pending`, `declined`, `not_recorded` and
+`failed` arrays of transaction hashes and PaymentIntent IDs. `recorded` and
+`already_recorded` hold only PaymentIntents Stripe accepted (#4866).
+
+| Exit | Meaning |
+|---|---|
+| 0 | nothing declined or failed — `pending` entries are listed, not an error; run again later |
+| 1 | usage or configuration |
+| 2 | a payment is listed under `failed` or `declined` — a Stripe refusal, decline, timeout or API error on that payment (Stripe errors never stop the run) |
+| 3 | an RPC error stopped the run, printed as one line naming the error class — never a stack trace, never the message (a viem error message carries the RPC URL, which can hold an API key). Payments before the error may already be recorded; run the same range again, it is idempotent |
+
+**Where it runs.** Inside the merchant service's environment, as a one-off
+command using that service's variables. The key is never exported to a local
+shell or written to a file, and the report recorded on #4854 carries
+hashes and PaymentIntent IDs only. The logic lives in `src/stripe-reconcile.ts`
+and `src/reconcile-cli.ts` — under the money-path list, because it creates
+PaymentIntents — and `scripts/reconcile-stripe.mjs` is the thin wrapper.
+
+**Who runs it.** The merchant's operator, on dev, after a test batch. The merchant itself cannot: it has no database and sleeps.
+
+### The joke reports its Stripe-settled sales (#4953)
+
+Dev and the Stripe sandbox only. With Stripe configured **and**
+`MERCHANT_SALES_KEY` and `MERCHANT_HAVEN_BASE_URL` set, each joke payment that
+the Stripe recorder sends to Stripe is also reported to Haven, with the
+transaction hash it settled with (`settled_onchain`), through the same reporter
+and the same record as Field Notes. `MERCHANT_SALES_ADDRESS` is **not** needed:
+it concerns Field Notes only. A payment the recorder skips (for instance
+`paid_other_address`) is not reported, and a replayed payment header reports
+nothing new. The buyer's answer, status and timing do not depend on Haven. With
+any of Stripe, the key or the base URL unset the joke reports nothing and
+behaves as before.
+
+**Before a demo, register the Stripe deposit address in Haven**, under the Sales
+account the Sales key belongs to, on **Sales → Setup → Stripe deposit
+addresses** (or with `POST /merchant-deposit-addresses` from the owner's
+session; the screen is #4954).
+The full demo, step by step, is
+[`docs/operations/merchant-services-demo.md`](../../docs/operations/merchant-services-demo.md). Register it **before the first demo payment**: Haven accepts a sale only
+if the address was registered at or before the payment's block time, and the
+merchant never resends a refused report, so a joke paid before registration
+never appears on the Sales page. The address
+is the owner's own statement and is shown as "registered by you, not verified by
+Haven". **Any x402 buyer can pay, but only a buyer other than the Sales
+account's owner makes a sale:** a Field Notes payment from the owner's own agent
+goes through and is a move between the owner's accounts ("Not counted", outside
+Revenue), and a joke from one goes through too, but Haven refuses its sale, so
+it never appears on the Sales page. A
+Stripe-held sale never counts in a Haven balance; it counts in Revenue, split as
+"in Stripe", and its row is marked "Received in Stripe". When the deposit address changes, register the new one and
+retire the old one only after the last payment to it has settled (see
+`docs/operations/secret-rotation.md`).
+
+### Operator note: changing the Stripe variables changes the quoted address
+
+`STRIPE_DEPOSIT_ADDRESS` is the joke's `payTo`, so changing it (or turning
+Stripe on or off) changes the address a new quote names. A payment quoted before
+the change and paid after it is refused **only while its authorization is
+unsettled**: the quote no longer matches and nothing has moved, so the buyer
+re-quotes and pays the new address.
+
+A retry of an authorization that **already settled** to the previous receiving
+address is served, not refused — but only when the merchant is told which
+address that was. Set `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` to the address you are
+replacing, for one deploy:
+
+```sh
+STRIPE_DEPOSIT_ADDRESS=0xNEW
+STRIPE_PREVIOUS_DEPOSIT_ADDRESS=0xOLD
+```
+
+The chain is then checked first (#4851's rule), and a buyer whose authorization
+settled to `0xOLD` is served with that transaction's hash. Remove the variable
+once no quote from the old address can still be paid.
+
+**Why it is a variable and not inferred.** The payment's own `payTo` is
+attacker-chosen: a buyer can sign an authorization to any address, pay it, and
+send the header here. Serving a used authorization addressed to whatever the
+payment names would hand goods to anyone who paid an address of their own. Only
+an address this merchant actually quoted before can be honoured, and the
+merchant has no database to remember one — so the operator names it.
+
+Without the variable, a settled retry after a change is refused. The
+reconciliation script still records the payment from the chain if you run it
+over the range with the old deposit address, so the money is accounted for.
+
+### What we learned from Stripe sandbox (#4854)
+
+One run on 2026-11-16: the dev merchant (Base Sepolia) with a Stripe sandbox,
+API version `2026-07-29.preview`. A Haven dev agent bought the joke —
+transaction `0x6c210cfc73766647b5081f89b27c96369b74de7d87263ba3ac838cbfb90ed31b`,
+recorded as `pi_3UcQXqJ1wRWdOmCA1hKg75Zh`, shown as Succeeded in the sandbox
+Dashboard. Four more create calls were made by hand from inside the service,
+with the merchant's own key, to answer what Stripe's page does not say: one
+created a PaymentIntent, and Stripe refused the other three.
+Each answer below is what the sandbox did, not what Stripe documents.
+
+**Deposit address.** `POST /v1/crypto/deposit_addresses` with `network=base` in
+a sandbox returns a Base Sepolia address: its `supported_tokens` lists USDC at
+`0x036CbD53842c5426634e7929541eC2318f3dCF7e`, Circle's Base Sepolia USDC. The
+address object has `metadata`. Creating one needs the *Crypto Deposit
+Addresses* permission (under *Crypto Payins*); the merchant's key does not need
+it, because the operator creates the address once. In Stripe Shell,
+`stripe post` is refused ("only supported by the locally installed Stripe
+CLI"), so the call was made with `curl`.
+
+**The restricted key.** *PaymentIntents: Write* (which includes read) and
+*Balance: Read* are enough for the merchant, the reconciliation script and
+reading balance transactions.
+
+**`metadata`, `receipt_email`, `customer`.**
+
+| Parameter | Result |
+|---|---|
+| `metadata` | Accepted; shown on the PaymentIntent (`product_id`, `transaction_hash`). |
+| `receipt_email` | Accepted at create and returned on the object. |
+| `customer` | The parameter is recognised: an unknown ID is refused with `resource_missing` on `customer`, not `parameter_unknown`. Not tested with a real Customer — the key has no Customers permission and this merchant keeps no customers. |
+| `description` | Accepted (#4880 probe, 2026-11-17). Stripe validates parameters before it checks the transaction: a create for an already-tracked hash with an unknown parameter is refused `parameter_unknown`, one with `description` of the wrong type is refused on `description`, and one with a plain `description` (alone, or with the #4880 metadata keys) gets as far as `resource_already_exists`. |
+| `receipt_url` | Stripe creates a receipt for these payments: the charge (`py_…`, `latest_charge`) carries a `receipt_url` on `pay.stripe.com`, with `receipt_number` null (#4880 probe). It is created after the merchant answers — recording is not awaited — so it is not on the merchant's receipt; find it on the payment in the Dashboard or through `latest_charge.receipt_url`. |
+
+**How Stripe matches the hash.** For both new hashes tried, create answered 200
+with status `processing`, and Stripe checked the transaction afterwards. A hash
+of a transaction that does not exist or reverted was not tried.
+
+- The joke's transaction: `processing` → `succeeded` in about 3 seconds.
+- The hash of a USDC transfer to another address (the buyer's funding leg):
+  within 30 seconds the PaymentIntent was `requires_payment_method` with
+  `last_payment_error.code` `payment_method_provider_decline` ("The payment has
+  invalid information. Retries won't succeed.").
+- Stripe reads the payer itself: the payment method shows the address that sent
+  the transfer — for a Haven agent, its delegate address, not the owner's
+  account.
+
+**One PaymentIntent per transaction, permanently.** A second create for the
+same hash, with a new idempotency key (as after the old one is pruned), is refused with 400
+`resource_already_exists` on `payment_method_options[crypto][transaction_verification_options]`,
+naming the PaymentIntent already tracking the transaction. This held for the
+succeeded PaymentIntent and for the declined one. So Stripe itself keeps a
+transaction from being recorded twice after its idempotency keys are pruned —
+and a hash whose PaymentIntent was declined cannot be recorded again.
+
+**Handled since #4866.** At the time of this run the recorder counted
+`recorded` when the create call returned, while the PaymentIntent was still
+`processing`, and the reconciliation script treated a declined PaymentIntent as
+`already_recorded`, so a decline was silent. A payment recovered to the address
+named in `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` was also sent to Stripe, the same
+shape as the declined probe. Both are fixed: see [Stripe's verdict, not the
+create call's](#stripe-recording-4853) above.
+
+**The SEK amount and the rate.** The balance transaction for the one-cent
+payment: `amount` 10 (öre), `currency` `sek`, `exchange_rate` 10.0742, `fee` 0,
+`net` 10, `reporting_category` `charge`, `status` `pending`. The balance
+transaction was created at 14:06:08 UTC, a second before the payment
+succeeded, so the SEK amount and rate are known at once;
+the funds become available seven days later (`available_on` 2026-11-23 00:00
+UTC for a payment on 2026-11-16). The Dashboard says the charge "was received in
+USD, but the funds will be transferred to you in SEK". The payment object is a
+`py_…`, not a `ch_…`. The sandbox fee is 0; the live fee is not known from this
+run. Stripe applies no tax ("No tax rate applied"): the VAT on the receipt is
+this merchant's own (#4855).
+
+**Refunds.** The Dashboard's refund dialog asks only for an amount and a reason
+— no address — and says crypto refunds "may take up to an hour to reach the
+customer's crypto wallet". The refund (`pyr_…`) is a `payment_refund` balance
+transaction of −10 SEK at the original payment's rate, 10.0742, with the same
+`available_on`, and the payment reads `refunded: true`.
+The refund object (`pyr_1UcQgFJ1wRWdOmCAXbr6Pro6`, created 14:14:47 UTC) reads
+`status: succeeded` with `destination_details.crypto.reference: null`, but
+**nothing moved on chain**: one hour later there was no USDC transfer out of the
+deposit address and none into the payer's address. In this run the refund was
+bookkeeping only, and the run cannot say where a live refund is sent.
+The Dashboard names no destination, and the only address Stripe shows for the
+payment is the sender — for a Haven agent its delegate address, not the owner's
+account. If a live refund goes there, it lands on the delegate and has to be
+swept back. No live refund is planned, since Stripe is dev and sandbox only
+(#4858 is closed as not planned), so this stays unknown.
+
+**The reconciliation run.** Inside the dev service (`railway ssh`), over the
+200 blocks around the purchase:
+
+```sh
+node scripts/reconcile-stripe.mjs --from-block 59580400 --to-block 59580599
+```
+
+```json
+{
+  "from_block": "59580400",
+  "to_block": "59580599",
+  "transfers": 1,
+  "recorded": [],
+  "already_recorded": [
+    {
+      "tx_hash": "0x6c210cfc73766647b5081f89b27c96369b74de7d87263ba3ac838cbfb90ed31b",
+      "payment_intent": "pi_3UcQXqJ1wRWdOmCA1hKg75Zh"
+    }
+  ],
+  "not_recorded": [],
+  "failed": []
+}
+```
+
+The public Base Sepolia RPC (`https://sepolia.base.org`) answers `eth_getLogs`
+for at most 200 blocks, and the script asks for the whole range in one call: a
+1,001-block range failed with RPC error -32614 ("eth_getLogs is limited to a 200
+range") and a stack trace. Since #4866 the script reads in windows that RPC
+serves and an error ends in one line with exit 3; see § *Reconciliation*.
+
+### The receipt for the Stripe product (#4856)
+
+The receipt is built before Stripe is contacted (#4880), and the merchant
+never waits for Stripe (#4853), so when it answers no PaymentIntent ID and no
+Stripe SEK figure exist yet. When Stripe will record the payment — Stripe on,
+the joke, settled on chain, paid to the current deposit address
+(`stripeRecordingDecision` in `src/stripe.ts`, the same rule the recording
+uses) — the receipt carries two more blocks, in its JSON and in both rendered
+texts, before the closing thank-you box:
+
+- `stripe_referens`: `status: "Pending"` (`"Väntar"` with `locale: 'sv'`,
+  #4980) and `sok_med`, the receipt
+  number and the transaction hash. Those are the PaymentIntent's
+  `receipt_number` and `transaction_hash` metadata, so the payment is found in
+  the Stripe Dashboard by either.
+- `belopp_sek`: an indicative SEK amount, never Stripe's own figure. With a
+  rate: `tillganglig: true`, `belopp` (SEK, two decimals), `kurs` (SEK per
+  USDC), `kalla` (`coingecko_spot`) and `tidpunkt` (when the rate was read).
+  Without one: `tillganglig: false`, `status: "Not available at the time of
+  purchase"` (`"Ej tillgängligt vid köptillfället"` with `locale: 'sv'`). The
+  merchant never
+  estimates a rate.
+
+The rate is CoinGecko's spot price for USD Coin in SEK, the source Haven's
+backend records its own SEK values from. `src/sek-rate.ts` reads it at startup
+and every 30 minutes in the background, only while Stripe recording is on; the
+purchase path only reads the cached value. The interval is above Railway's
+idle threshold, so the refresh does not keep a sleeping merchant awake; a woken
+merchant restarts and reads the rate again, and a purchase in the first moments
+after a cold start may get "not available". A rate older than an hour, or a
+merchant that has not read one yet, gives "not available". A failed read keeps
+the previous rate until it ages out.
+
+Every other receipt — every other product, the joke with Stripe off, and a
+payment that paid the previous deposit address — is unchanged: no new keys and
+the same text, byte for byte (`src/receipt-fixtures.test.ts`).
+
+## Haven Sales account: the merchant-services demo product (#4950)
+
+`buy_field_notes` sells **Haven Field Notes**, one short note on running agent
+payments, for 0.0025 USDC (2,500 atomic units), one-time. It is the
+merchant-services demo (epic #4885): the payment goes into the merchant's
+**Haven Sales account**, and each settled sale is reported to Haven, so it
+shows on that account's Sales page.
+
+Reporting needs `MERCHANT_SALES_KEY` and `MERCHANT_HAVEN_BASE_URL` (the Haven
+API origin, shared with the passport check). The Sales product itself also
+needs `MERCHANT_SALES_ADDRESS`, because it is paid into that account (#4953
+split these: the joke reports with the key and base URL alone, see
+[below](#the-joke-reports-its-stripe-settled-sales-4953)):
+
+| Variable | Value |
+|---|---|
+| `MERCHANT_SALES_ADDRESS` | the Sales account's address (Settings → Business → Sales on Haven), checksummed |
+| `MERCHANT_SALES_KEY` | a Sales key of that account (`sk_merchant_…`, receive-only), created on Sales → Setup → Sales keys |
+
+There are three states (#4953):
+
+- **Key and base URL unset or unusable:** nothing reports and the Sales product
+  is offered nowhere — not in `list_products`, the discovery document, the tool
+  list or the payment gate. `/healthz` has no `sales` block, every surface is
+  byte-identical to a merchant without it, and the banner reads
+  `Sales: not reporting`.
+- **Key and base URL set, no usable `MERCHANT_SALES_ADDRESS`:** the Stripe-settled
+  joke reports, but the Sales product is still offered nowhere. `/healthz`
+  carries a `sales` block (`configured: true`, the counts, no `address`) and the
+  banner reads `Sales: reporting joke (Stripe-settled) to <base> — field_notes
+  not offered`.
+- **All three set:** both products report, and `/healthz` names the address.
+
+A half-set or unusable configuration logs a warning naming the variable (never
+its value) and stays off; it never refuses to start:
+
+| Configuration | Result |
+|---|---|
+| `MERCHANT_SALES_ADDRESS` is set without `MERCHANT_SALES_KEY` | warning; not offered, nothing reported |
+| `MERCHANT_SALES_ADDRESS` is not a checksummed EVM address | warning; not offered (the joke still reports) |
+| `MERCHANT_SALES_ADDRESS` is `MERCHANT_ADDRESS`, `STRIPE_DEPOSIT_ADDRESS` or `STRIPE_PREVIOUS_DEPOSIT_ADDRESS` | warning; not offered (the joke still reports) |
+| `MERCHANT_SALES_KEY` does not start with `sk_merchant_` | warning; not offered, nothing reported |
+| `MERCHANT_HAVEN_BASE_URL` is unset or not an http(s) URL | warning; not offered, nothing reported |
+
+**Nothing else moves.** The product has its own id (`field_notes`), its own
+category and a one-product tool, like the joke, so no existing product's
+argument schema changes. Its receiving address is resolved by
+`productReceivingAddress`; every other product keeps its address, id, price and
+settlement. It is self-settled (`SETTLEMENT_PRIVATE_KEY` pays the gas) with
+EIP-3009, plus ERC-7710 when enabled. It is not in Haven's catalog (the demo store's
+catalog rows share one `pay_to`), so an agent buys it at this endpoint with
+`haven_quote_mcp_tool` and `haven_pay_mcp_tool`.
+
+**The report.** After a paid call settles, the merchant sends one sale record
+(`docs/architecture/12-merchant-kit.md` §5) to `POST /merchant/sales` on
+`MERCHANT_HAVEN_BASE_URL`, with `Authorization: Bearer <MERCHANT_SALES_KEY>`.
+The record is built and sent by the shared core (`buildSaleRecord`,
+`reportSale` in `@haven_ai/merchant-payments`), the reporter the paywall
+proxy will use (#4898):
+
+- `tx_hash` is the settlement transaction, `amount` the product's price, `payer`
+  the authorization's payer (for EIP-3009 the agent's delegate address),
+  `merchant_reference` the payment's `sale_<ULID>` (reserved once per payment,
+  so every resend carries the same one), and `receipt_number` and
+  `vat_treatment` the receipt's `fakturanummer` and `momsbehandling`.
+- It is sent only for this product, only for a payment `settled_onchain`
+  (never one recovered as `already_settled_earlier`, which has no hash), and
+  once per transaction: replaying the same payment header sends nothing more.
+- It is fire-and-forget. The buyer's answer, its status and its timing are the
+  same whether Haven accepts, refuses, answers slowly or cannot be reached.
+
+**Retries, and their limit.** A record Haven cannot accept *yet* is resent: the
+answer 425 `transaction_not_visible` (Haven waits for 3 confirmations, so the
+first send usually gets it), a 5xx, a network failure, or no answer within
+10 s. The waits are 1 s, 4 s and 16 s (`SALE_REPORT_RETRY_DELAYS_MS`), each
+raised to the answer's `Retry-After` (10 s for the 425, capped at 60 s), so
+**at most four sends**: against Haven's own answers the waits total 36 s at
+most, and each send may take up to 10 s. After the fourth the merchant
+logs `[sales] sales_report_gave_up` and keeps nothing. Any other 4xx (a refused
+key, a record conflict, no payment to the account) is logged as
+`[sales] sales_report_refused` and never resent. Pending reports and the
+per-transaction dedupe are held in memory only, like the rest of this
+merchant's state: a restart forgets them. `/healthz` counts `reported`,
+`pending`, `refused` and `gave_up` for the running process. No log line,
+`/healthz` field or error names the Sales key.
+
+**A sale needs a buyer other than the Sales account's owner.** Any x402 buyer
+can pay (every live run so far used a Haven agent; no live payment from a buyer
+outside Haven has been exercised). Haven counts a transfer from the owner's own
+addresses — every delegate address of the owner's agents included — as a move
+between the owner's accounts, not a sale. On EIP-3009 the payer is the buying
+agent's delegate, so a sale bought by the Sales account owner's own agent is
+stored as an internal move and shows no revenue. The demo's buying agent
+belongs to a different Haven user from the Sales account's owner.
+
+**The product list for the Sales page (#4987).** With `MERCHANT_SALES_ADDRESS`
+set, `GET /.well-known/x402` serves the merchant kit's discovery document
+(`src/kit-discovery.ts`), which is what the Sales page's Products tab reads
+once the merchant saves this deployment's origin as the product list address. It is a
+reduced version 1 document (`docs/architecture/12-merchant-kit.md` §4): the
+Sales account as `pay_to`, and only the products that report a sale, which are
+Field Notes and, with Stripe recording on, the joke, with atomic prices. The
+joke is paid to the Stripe deposit address, not to `pay_to`; nothing pays from
+this document, and Haven only labels products with it. Without the Sales
+address the path is a 404. This merchant's own discovery document at `/` and
+`/.well-known/haven-demo-merchant` is unchanged.
+
+## Seller details (#4856)
+
+The seller block comes from configuration. With no `MERCHANT_SELLER_*`
+variable set it is the demo seller (`Haven Demo AB`, with its demo bank
+details), exactly as before. To carry a real seller, set all four of
+`MERCHANT_SELLER_NAME`, `MERCHANT_SELLER_ADDRESS`, `MERCHANT_SELLER_ORG_NR` and
+`MERCHANT_SELLER_MOMS_NR`, and optionally `MERCHANT_SELLER_IBAN` and
+`MERCHANT_SELLER_BIC`. A configured seller never inherits the demo's bank
+details. With any `MERCHANT_SELLER_*` set but one of the four required ones
+missing (`IBAN` or `BIC` alone included), the merchant warns, naming the missing
+variables, and keeps the demo seller. The keys stay `name`,
+`org_nr` and `moms_nr`: Haven's accounting reads them off the receipt
+(`packages/backend/src/modules/accounting/receipt-underlag.ts`). The startup
+banner names the seller and whether it is the demo one.
+
 ## Agent Passport check (advisory, #4723)
 
 The merchant is the first consumer of the SDK's merchant-side passport verifier.
@@ -374,7 +1081,7 @@ Two env values, and **both** must be set:
 
 | Variable | Value |
 |---|---|
-| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against |
+| `MERCHANT_HAVEN_BASE_URL` | the Haven API origin to resolve passports against (shared with the [Sales product](#haven-sales-account-the-merchant-services-demo-product-4950)) |
 | `MERCHANT_PASSPORT_ISSUER` | the issuer address from `GET /passport/issuer` on that deployment |
 
 With either missing, the merchant advertises only `haven-demo` and reports
@@ -404,6 +1111,183 @@ a service that is not mid-quote. See
 Rotating `PASSPORT_RECEIPT_SIGNING_KEY` breaks the pin: the merchant answers
 `not_signed_by_issuer` for every receipt until `MERCHANT_PASSPORT_ISSUER` is
 updated.
+
+## Buyer tax declaration and VAT treatment (#4855)
+
+A paid request may carry a signed `X-Tax-Declaration` header: base64url(JSON) of
+the SDK's seven-field declaration (`version`, `jurisdiction`, `taxableStatus`,
+`taxId`, `validUntil`, `principalId`, `principalAttributionHash`) plus its
+EIP-712 `signature`. The buyer's own payment key signs it — the same key that
+signs the EIP-3009 authorization — and it travels only to the seller, never to
+Haven or a facilitator. It is sent on EIP-3009 payments made through the SDK or
+the local MCP server; the hosted, keyless path does not send one.
+
+The merchant **accepts** a declaration only when all of these hold, and treats
+it as absent otherwise:
+
+- the signature verifies and recovers to the payment's payer
+  (`authorization.from`);
+- `principalId` is that payer on the payment's network
+  (`did:pkh:eip155:<chainId>:<payer>`);
+- `principalAttributionHash` recomputes from `principalId`;
+- `validUntil` is in the future.
+
+A refused declaration never refuses the purchase: the payment settles and the
+receipt is the same as if no header had been sent. The check runs after
+settlement, like the passport check.
+
+**What the receipt shows.** The declaration carries no company name and no
+organisation number, so the buyer block shows only what is there — the declared
+country, the VAT number, the status, and the date the declaration is valid
+until:
+
+```json
+"kopare": {
+  "identifierare": "0x…",
+  "typ": "blockkedjeadress",
+  "roll": "agent_delegate",
+  "deklaration": {
+    "land": "DE",
+    "moms_nr": "DE123456789",
+    "status": "TAXABLE_PERSON",
+    "giltig_till": "2027-06-30"
+  }
+}
+```
+
+`deklaration` is absent when no declaration was accepted, so a receipt without
+one keeps its previous shape apart from the new `momsbehandling` field.
+
+**VAT treatment, display only.** For a Swedish seller of an electronic service:
+
+| `momsbehandling` | When | Amounts |
+|---|---|---|
+| `SE_25` | the declared country is Sweden, or there is no accepted declaration | unchanged: 25% VAT taken out of the price |
+| `REVERSE_CHARGE` | the declared country is another EU country | net = total = the product price, VAT rate 0, VAT amount 0 |
+
+Under `REVERSE_CHARGE` the rendered invoice names both VAT numbers and says
+"reverse charge" (English) / "omvänd betalningsskyldighet" (Swedish). The price
+does not change with the treatment.
+
+**Limits.** The merchant applies a display rule; it does not compute, assert or
+file tax, and it does not verify the VAT number against VIES. A non-EU
+treatment is not built — a Haven buyer only ever sends a declaration for an EU
+VAT number, and a non-EU jurisdiction falls back to `SE_25`. The declaration is
+not persisted: it lives on the receipt for the payment that carried it.
+
+## Checkout details (#4873)
+
+The demo merchant is the first merchant that asks for checkout details. One
+product asks — **NordShield VPN Pro** (`buy_vpn { plan: "pro" }`) — and every
+other product's challenge is unchanged. The wire shape is
+[`docs/architecture/13-checkout-details.md`](../../docs/architecture/13-checkout-details.md)
+§2 and §3.
+
+**The request.** `vpn_pro`'s 402 challenge carries one extra entry under
+`extensions`, keyed `haven-checkout-details`:
+
+```json
+"haven-checkout-details": {
+  "info": {
+    "version": 1,
+    "fields": {
+      "receipt_email": { "required": false },
+      "billing_address": { "required": false }
+    }
+  },
+  "schema": { "$schema": "https://json-schema.org/draft/2020-12/schema", "…": "…" }
+}
+```
+
+Both fields are optional. A client that does not know the entry echoes it
+verbatim (the x402 v2 echo rule this merchant enforces) and answers nothing;
+the purchase is served exactly as today.
+
+**The answer.** A paid request may carry one header:
+
+```
+X-Checkout-Details: <base64url of the UTF-8 JSON, no padding>
+```
+
+```json
+{
+  "version": 1,
+  "receipt_email": "philip@example.se",
+  "billing_address": { "line1": "Sveavagen 1", "city": "Stockholm", "postCode": "111 57", "country": "SE" }
+}
+```
+
+Only the fields the merchant asked for are read. The address shape is the
+compliance-fields / EN 16931 BG-8 shape (`line1`, `line2`, `line3`, `city`,
+`postCode`, `subdivision`, `country`), and an absent optional member is omitted
+rather than sent as `null` or an empty string.
+
+**What the receipt shows.** The values appear in full in the buyer block, under
+the wire names the design doc fixes:
+
+```json
+"kopare": {
+  "identifierare": "0x…",
+  "typ": "blockkedjeadress",
+  "roll": "agent_delegate",
+  "receipt_email": "philip@example.se",
+  "billing_address": { "line1": "Sveavagen 1", "city": "Stockholm", "postCode": "111 57", "country": "SE" }
+}
+```
+
+The rendered invoice prints them under KÖPARE (`E-post`, `Fakturaadress`,
+`Leveransadress`; `Email`, `Billing address`, `Shipping address` in English).
+A paid request without the header produces today's receipt, byte for byte: the
+keys are absent, not empty.
+
+**A malformed or oversized header is treated as absent.** The header is
+base64url(JSON) of at most 1,536 bytes; anything that is not that — bad
+encoding, not an object, a version other than `1`, a field without the shape,
+a header over the budget — is dropped, and the purchase is served. A header
+never turns a settled purchase into an error, the same rule the tax declaration
+follows.
+
+**The required-field case, on dev only.** `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD=receipt_email`
+(or `billing_address`) turns one of `vpn_pro`'s optional fields into a required
+one, so Haven's "stopped before paying" behaviour (#4872) can be exercised
+against this merchant. It is **testnet-only, enforced in code**: the merchant
+refuses to start unless `MERCHANT_CHAIN_ID=84532`. Unset (the default), no
+field is required and the QA scenarios see the optional shape. A paid request
+for the required-field product that arrives without the header — an older
+client, or a path #4869 marks as not supported — is still served, and its
+receipt shows no buyer details.
+
+**What happens to the values.** The merchant does not store them beyond the
+response and does not log them: the receipt is built for the response and the
+values are never written to a log line. The paying client reports the
+merchant's receipt back to Haven (`POST /machine-payments/:id/merchant-receipt`),
+so the values are then stored in `merchant_receipts` and attached as a PDF in
+every accounting connection the owner has (Fortnox, Accounted, Igdrasil). The
+receipt shows them in full — owner decision 2026-11-17, see #4868 — because it
+is the owner's own bookkeeping record.
+
+**The Stripe record does not carry them.** The PaymentIntent's metadata carries
+the receipt number, the VAT treatment and amount and, from an accepted tax
+declaration, the buyer's declared VAT number and country. The receipt email and
+the addresses are never read into it (`stripeDetailsFromReceipt`).
+
+**Try it on dev.** Against the dev merchant
+(`https://demo-merchant-dev-84e4.up.railway.app/mcp`, Base Sepolia):
+
+1. Call `buy_vpn { "plan": "pro" }` with no payment header and read the 402's
+   `extensions["haven-checkout-details"]`.
+2. Pay it with a Haven agent whose owner has saved a receipt email and a
+   billing address and turned sharing on for that agent (#4870, #4871). The
+   SDK attaches `X-Checkout-Details` to the paid request.
+3. Read the `x-receipt-json` response header: `kopare.receipt_email` and
+   `kopare.billing_address` are there, and the purchase text prints them.
+4. Pay the same product with no header (or with a malformed one) and confirm
+   the receipt has neither key and the purchase still succeeds.
+5. To exercise the refusal, set
+   `MERCHANT_CHECKOUT_DETAILS_REQUIRED_FIELD=receipt_email` on the dev service
+   and pay `vpn_pro` with an agent whose owner has not saved a receipt email:
+   Haven refuses before paying (`CHECKOUT_DETAILS_UNAVAILABLE`). A paid request
+   that arrives without the header is still served.
 
 ## QA hook: verify-without-settle (testnet-only)
 
@@ -475,7 +1359,8 @@ the merchant **verifies by simulating**
 [executionCallData])` (the calldata encodes `USDC.transfer(merchant, amount)`),
 then settles by submitting that same call from `SETTLEMENT_PRIVATE_KEY`.
 
-Because the merchant self-settles, the settlement key is the **redeemer** — a
+Because the merchant self-settles every ERC-7710 payment (CDP settles no
+ERC-7710, and the joke offers none), the settlement key is the **redeemer** — a
 delegation with a redeemer caveat must name the settlement account. Each
 delegation settles at most one product here (in-process dedupe keyed on the
 `permissionContext` hash); scoping of token, amount, recipient, and expiry is

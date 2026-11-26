@@ -18,6 +18,13 @@
  * ordering was unguaranteed (race-dependent whenever this file was a worker's
  * first and migrations were pending); under the fixed harness it is a
  * guarantee.
+ *
+ * Since #4971 the worker schema is per pool SLOT, not per file, so the COLD
+ * ordering (migrations still pending when `resetDb()` runs) happens only when
+ * this file is the first real-DB file on its slot. Later on a slot the schema
+ * is already at head and this file proves the warm resetDb-first path only.
+ * It proved the cold ordering only in CI before, too: locally the schema is
+ * almost always warm from an earlier run.
  */
 import { beforeEach, expect, it } from 'vitest'
 import db from '../../../../db.js'

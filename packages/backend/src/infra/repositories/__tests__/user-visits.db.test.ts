@@ -21,7 +21,7 @@ import { randomUUID } from 'node:crypto'
 import { beforeAll, beforeEach, expect, it } from 'vitest'
 import db from '../../../db.js'
 import { describeDb, initDbHarness, resetDb } from '../../__tests__/helpers/db-harness.js'
-import { openUserVisit } from '../users.js'
+import { openUserVisit, type UserVisitRow } from '../users.js'
 
 let seq = 0
 
@@ -48,6 +48,22 @@ async function marker(userId: string): Promise<{
     [userId],
   )
   return rows[0]
+}
+
+/**
+ * Which of two entries on a FRESH user ran first? Decided by the link, never
+ * by comparing `current`: the first entry has no previous visit, and the
+ * second's `previous` is the first's `current` (asserted separately by the
+ * callers, so it is not true by construction). The timestamps can tie (#4947):
+ * `NOW()` is the transaction start, so an entry whose transaction started first
+ * but took the row lock second keeps the other's `current` under `GREATEST`,
+ * and the parsed `Date` keeps milliseconds only. A tie broken by argument order
+ * picks the wrong one.
+ */
+function orderByLink(a: UserVisitRow, b: UserVisitRow): [UserVisitRow, UserVisitRow] {
+  const firsts = [a, b].filter((v) => v.previous === null)
+  expect(firsts).toHaveLength(1)
+  return firsts[0] === a ? [a, b] : [b, a]
 }
 
 describeDb('openUserVisit — the visit marker (#4709)', () => {
@@ -116,10 +132,7 @@ describeDb('openUserVisit — the visit marker (#4709)', () => {
         openUserVisit(laptopEntry, userId, laptop),
       ])
 
-      const [earlier, later] =
-        phoneVisit!.current.getTime() <= laptopVisit!.current.getTime()
-          ? [phoneVisit!, laptopVisit!]
-          : [laptopVisit!, phoneVisit!]
+      const [earlier, later] = orderByLink(phoneVisit!, laptopVisit!)
 
       // The later entry's previous is the earlier entry's current: the windows
       // `(previous, current]` are consecutive and share only the boundary.
@@ -136,6 +149,48 @@ describeDb('openUserVisit — the visit marker (#4709)', () => {
     const stored = await marker(userId)
     expect(stored.visit_entry_id).not.toBeNull()
     expect(stored.visit_current_at).not.toBeNull()
+  })
+
+  it('an entry whose transaction started first but locked second ties on current, and its window is empty (#4947)', async () => {
+    const userId = await seedUser()
+    const phoneEntry = randomUUID()
+    const laptopEntry = randomUUID()
+
+    // Force the interleaving the near-simultaneous case can only hit by
+    // chance: the phone's transaction starts first, so its NOW() is earlier,
+    // but the laptop takes the lock and commits before the phone's statement
+    // runs. GREATEST keeps the laptop's current rather than going backwards.
+    const phone = await db.connect()
+    const laptop = await db.connect()
+    try {
+      await phone.query('BEGIN')
+      await phone.query('SELECT NOW()')
+      await laptop.query('BEGIN')
+      const laptopVisit = await openUserVisit(laptopEntry, userId, laptop)
+      await laptop.query('COMMIT')
+      const phoneVisit = await openUserVisit(phoneEntry, userId, phone)
+      await phone.query('COMMIT')
+
+      expect(laptopVisit!.previous).toBeNull()
+      expect(phoneVisit!.previous).toEqual(laptopVisit!.current)
+      // The tie: equal, not earlier — the phone's window `(T, T]` is empty.
+      expect(phoneVisit!.current).toEqual(laptopVisit!.current)
+
+      // Ordering by the link picks the laptop as earlier even though the
+      // phone is passed first and the timestamps tie.
+      const [earlier, later] = orderByLink(phoneVisit!, laptopVisit!)
+      expect(earlier).toBe(laptopVisit)
+      expect(later).toBe(phoneVisit)
+    } finally {
+      await phone.query('ROLLBACK').catch(() => undefined)
+      await laptop.query('ROLLBACK').catch(() => undefined)
+      phone.release()
+      laptop.release()
+    }
+
+    const stored = await marker(userId)
+    expect(stored.visit_entry_id).toBe(phoneEntry)
+    expect(stored.visit_current_at).toEqual(stored.visit_previous_at)
   })
 
   it('current never goes backwards — a future marker is kept, not rewound', async () => {

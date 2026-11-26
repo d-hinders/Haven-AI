@@ -733,8 +733,11 @@ least twice.
     "…")` — **not a rerun candidate, and not the test's fault.** Another session
     holds a lock on that worker's tables: in CI that is a transaction some test
     in the same worker left open (the quoted statement says which); locally it
-    is usually an orphaned vitest worker from an earlier run with the same
-    `VITEST_WORKER_ID` — find it in `pg_stat_activity` by the pid and kill it.
+    is usually an orphaned vitest worker from an earlier run on the same pool
+    slot (`VITEST_POOL_ID`, which names the schema since #4971), or a second
+    suite running against the same database without its own
+    `HAVEN_TEST_SCHEMA_SUFFIX` — find it in `pg_stat_activity` by the pid and
+    kill it.
     A rerun that happens to pass only means the holder went away.
   - `… in phase "emptying (N DELETEs)"` with **no** holder line, on a call whose
     `DELETE` batch measures ~5 ms quiet — the machine is saturated. That reports

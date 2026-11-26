@@ -14,8 +14,8 @@
  * company details", the purpose line and **Add company details**, which
  * reveals the form — because a first-time owner no longer meets a wall of
  * empty inputs; the purpose line stays above it either way
- * (`owner-company-details.md`: the purpose text is shown above the form —
- * in the empty state too — and the error state does not show it).
+ * (`owner-company-details.md`: the purpose text is shown above the form — in
+ * the empty state too — and the error state does not show it).
  *
  * The reads come from `BusinessDataProvider` (#4359): the card, the
  * Connections card and the Business tab's visibility rule share ONE
@@ -31,24 +31,48 @@
  * any `^[A-Z]{2}$`, and the buyer country on receipts must never change
  * silently.
  *
+ * ── Receipt email and addresses (#4870) ──────────────────────────────────
+ * Three optional fields, saved with the rest of the business details:
+ *
+ * - **Receipt email.** Prefilled from the SIGN-UP email only while the owner
+ *   has no company details saved (#4946), and stored only when the owner
+ *   saves — the sign-up email is never used as a receipt email anywhere else
+ *   (owner decision 2026-11-17, #4868). Clearing the box saves `null`, and a
+ *   saved row with no receipt email shows the box empty.
+ * - **Billing and shipping addresses.** Structured, not free text, so a
+ *   merchant can use them: street address, second line, postal code, city
+ *   and country. The stored shape is
+ *   `docs/architecture/13-checkout-details.md` § *The address shape*; the
+ *   form edits the five members an owner types and CARRIES OVER `line3` and
+ *   `subdivision` from the stored address, so a value written by another
+ *   client is never silently dropped by this form. An address with every box
+ *   blank is saved as `null` (cleared).
+ * - **"Shipping address is the same as billing"** is a FORM CONVENIENCE, not
+ *   a stored flag: ticking it hides the shipping block and saves the billing
+ *   address as the shipping address. It is shown ticked when the two stored
+ *   addresses are equal.
+ *
+ * Nothing here is sent to a merchant by this slice (#4870): the fields are
+ * stored, and #4871 is the slice that answers a merchant's request.
+ *
  * ── VIES ─────────────────────────────────────────────────────────────────
  * The status renders as a `StatusBadge` plus the checked date and "Check
  * again" (#4359). The badge follows the product doc's naming discipline:
  * "checked against VIES", never "verified" — see
- * `docs/product/owner-company-details.md` § The VIES states. The badge —
- * and "Check again" — are about the SAVED VAT number, so both hide while
- * the VAT field has been edited to something else (design review 11/12).
- * The hook polls while `pending`, bounded; once the bound elapses "Check
- * again" replaces the frozen "Checking…" badge (#3332 review M1).
+ * `docs/product/owner-company-details.md` § The VIES states. The badge — and
+ * "Check again" — are about the SAVED VAT number, so both hide while the VAT
+ * field has been edited to something else (design review 11/12). The hook
+ * polls while `pending`, bounded; once the bound elapses "Check again"
+ * replaces the frozen "Checking…" badge (#3332 review M1).
  *
  * ── Validation ───────────────────────────────────────────────────────────
  * Client-side checks mirror the backend's own allowed-character rules
- * (`ORG_NUMBER_RE`/`CONTROL_CHAR_RE` in `modules/owner-profile/service.ts`)
- * so a rejected value names the actual cause instead of a generic one. Any
- * 400 that still reaches the backend is mapped from its own message text
- * back onto the field it describes (no API change — the backend has no
- * field code on the wire, only the message), and the first invalid field
- * gets focus on submit (design review 3).
+ * (`ORG_NUMBER_RE`/`CONTROL_CHAR_RE`/`EMAIL_RE` in
+ * `modules/owner-profile/service.ts`) so a rejected value names the actual
+ * cause instead of a generic one. Any 400 that still reaches the backend is
+ * mapped from its own message text back onto the field it describes (no API
+ * change — the backend has no field code on the wire, only the message), and
+ * the first invalid field gets focus on submit (design review 3).
  *
  * ── Delete ───────────────────────────────────────────────────────────────
  * "Remove company details" asks for confirmation through the shared
@@ -63,7 +87,9 @@
  */
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { useT } from '@/context/LocaleContext'
+import { useAuth } from '@/context/AuthContext'
 import { Button } from '@/components/ui/Button'
+import { Checkbox } from '@/components/ui/Checkbox'
 import ConfirmDialog from '@/components/ConfirmDialog'
 import { InlineAlert } from '@/components/ui/InlineAlert'
 import { Input } from '@/components/ui/Input'
@@ -79,32 +105,124 @@ const COUNTRY_RE = /^[A-Za-z]{2}$/
 const ORG_NUMBER_ALLOWED_RE = /^[A-Za-z0-9 .\-/]*$/
 // Mirrors `CONTROL_CHAR_RE` in the same file: C0, DEL, C1, and the bidi
 // override/isolate controls — never rendered in a legal name (#3332 review).
-const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F-\u009F‪-‮⁦-⁩]/
+const CONTROL_CHAR_RE = /[\u0000-\u001F\u007F-\u009F\u202A-\u202E\u2066-\u2069]/
+// Mirrors `EMAIL_RE` in the same file (#4870): one `@`, no whitespace, a dot
+// in the domain — which also refuses a display name and any CR/LF.
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+// Mirrors `ADDRESS_MAX_LENGTHS` in the same file (#4870).
+const ADDRESS_MAX = { line1: 70, line2: 70, postCode: 16, city: 50 } as const
+const MAX_RECEIPT_EMAIL_LENGTH = 254
 
-type FieldKey = 'legalName' | 'country' | 'orgNumber' | 'vatNumber'
+type AddressKey = 'billing' | 'shipping'
+type AddressField = 'line1' | 'line2' | 'postCode' | 'city' | 'country'
+type FieldKey =
+  | 'legalName'
+  | 'country'
+  | 'orgNumber'
+  | 'vatNumber'
+  | 'receiptEmail'
+  | `${AddressKey}.${AddressField}`
 
 const FIELD_ID: Record<FieldKey, string> = {
   legalName: 'company-legal-name',
   country: 'company-country',
   orgNumber: 'company-org-number',
   vatNumber: 'company-vat-number',
+  receiptEmail: 'company-receipt-email',
+  'billing.line1': 'company-billing-line1',
+  'billing.line2': 'company-billing-line2',
+  'billing.postCode': 'company-billing-postcode',
+  'billing.city': 'company-billing-city',
+  'billing.country': 'company-billing-country',
+  'shipping.line1': 'company-shipping-line1',
+  'shipping.line2': 'company-shipping-line2',
+  'shipping.postCode': 'company-shipping-postcode',
+  'shipping.city': 'company-shipping-city',
+  'shipping.country': 'company-shipping-country',
 }
 
-const FIELD_ORDER: FieldKey[] = ['legalName', 'country', 'orgNumber', 'vatNumber']
+const FIELD_ORDER: FieldKey[] = [
+  'legalName',
+  'country',
+  'orgNumber',
+  'vatNumber',
+  'receiptEmail',
+  'billing.line1',
+  'billing.line2',
+  'billing.postCode',
+  'billing.city',
+  'billing.country',
+  'shipping.line1',
+  'shipping.line2',
+  'shipping.postCode',
+  'shipping.city',
+  'shipping.country',
+]
+
+interface AddressDraft {
+  line1: string
+  line2: string
+  postCode: string
+  city: string
+  country: string
+}
 
 interface Draft {
   legalName: string
   country: string
   orgNumber: string
   vatNumber: string
+  receiptEmail: string
+  billing: AddressDraft
+  shipping: AddressDraft
+  shippingSameAsBilling: boolean
 }
 
-function draftFrom(details: CompanyDetailsRow | null): Draft {
+const EMPTY_ADDRESS: AddressDraft = { line1: '', line2: '', postCode: '', city: '', country: '' }
+
+function addressDraftFrom(address: CompanyDetailsRow['billing_address'] | undefined): AddressDraft {
+  if (!address) return { ...EMPTY_ADDRESS }
+  return {
+    line1: address.line1 ?? '',
+    line2: address.line2 ?? '',
+    postCode: address.postCode ?? '',
+    city: address.city ?? '',
+    country: address.country ?? '',
+  }
+}
+
+/** True when both stored addresses exist and carry the same five typed members. */
+function addressesEqual(
+  a: CompanyDetailsRow['billing_address'] | undefined,
+  b: CompanyDetailsRow['billing_address'] | undefined,
+): boolean {
+  if (!a || !b) return false
+  return (
+    a.line1 === b.line1 &&
+    (a.line2 ?? '') === (b.line2 ?? '') &&
+    (a.postCode ?? '') === (b.postCode ?? '') &&
+    a.city === b.city &&
+    a.country === b.country
+  )
+}
+
+function draftFrom(details: CompanyDetailsRow | null, signupEmail: string): Draft {
   return {
     legalName: details?.legal_name ?? '',
     country: details?.country ?? '',
     orgNumber: details?.org_number ?? '',
     vatNumber: details?.vat_number ?? '',
+    // #4870: the sign-up email is a SUGGESTION, never a stored value — it is
+    // saved only if the owner saves. #4946 (owner decision 2026-11-18): it is
+    // suggested ONLY when the owner has no company details at all. Once a row
+    // exists, a `null` receipt email is shown empty: the database cannot tell
+    // a cleared email from one never set (migration 129 has no backfill), and
+    // prefilling a cleared one would store the sign-up email again on the
+    // owner's next, unrelated save.
+    receiptEmail: details == null ? signupEmail : (details.receipt_email ?? ''),
+    billing: addressDraftFrom(details?.billing_address),
+    shipping: addressDraftFrom(details?.shipping_address),
+    shippingSameAsBilling: addressesEqual(details?.shipping_address, details?.billing_address),
   }
 }
 
@@ -156,6 +274,15 @@ function clientFieldErrors(
     orgNumberTooLong: string
     orgNumberInvalidChars: string
     vatNumberTooLong: string
+    receiptEmailInvalid: string
+    receiptEmailTooLong: string
+    addressLine1Required: string
+    addressLine1TooLong: string
+    addressLine2TooLong: string
+    addressPostCodeTooLong: string
+    addressCityRequired: string
+    addressCityTooLong: string
+    addressCountryInvalid: string
   },
 ): Partial<Record<FieldKey, string>> {
   const errors: Partial<Record<FieldKey, string>> = {}
@@ -176,13 +303,83 @@ function clientFieldErrors(
   const vatNumber = draft.vatNumber.trim()
   if (vatNumber.length > 32) errors.vatNumber = copy.vatNumberTooLong
 
+  // #4870: the receipt email is optional; blank means "clear it".
+  const receiptEmail = draft.receiptEmail.trim()
+  if (receiptEmail.length > MAX_RECEIPT_EMAIL_LENGTH) errors.receiptEmail = copy.receiptEmailTooLong
+  else if (receiptEmail.length > 0 && !EMAIL_RE.test(receiptEmail)) errors.receiptEmail = copy.receiptEmailInvalid
+
+  // #4870: an address is optional as a whole. Once ANY box is filled it must
+  // be a usable address — a street line, a city and a two-letter country —
+  // because that is what the backend stores and a merchant reads.
+  const addressKeys: AddressKey[] = draft.shippingSameAsBilling ? ['billing'] : ['billing', 'shipping']
+  for (const key of addressKeys) {
+    const address = draft[key]
+    const touched =
+      address.line1.trim().length > 0 ||
+      address.line2.trim().length > 0 ||
+      address.postCode.trim().length > 0 ||
+      address.city.trim().length > 0 ||
+      address.country.trim().length > 0
+    if (!touched) continue
+
+    if (address.line1.trim().length === 0) errors[`${key}.line1`] = copy.addressLine1Required
+    else if (address.line1.trim().length > ADDRESS_MAX.line1) errors[`${key}.line1`] = copy.addressLine1TooLong
+    if (address.line2.trim().length > ADDRESS_MAX.line2) errors[`${key}.line2`] = copy.addressLine2TooLong
+    if (address.postCode.trim().length > ADDRESS_MAX.postCode) errors[`${key}.postCode`] = copy.addressPostCodeTooLong
+    if (address.city.trim().length === 0) errors[`${key}.city`] = copy.addressCityRequired
+    else if (address.city.trim().length > ADDRESS_MAX.city) errors[`${key}.city`] = copy.addressCityTooLong
+    if (!COUNTRY_RE.test(address.country.trim())) errors[`${key}.country`] = copy.addressCountryInvalid
+  }
+
   return errors
+}
+
+/**
+ * The wire shape for one address, or `null` when every box is blank (which
+ * CLEARS it). `line3` and `subdivision` are not edited by this form, so they
+ * are carried over from the stored address rather than dropped — another
+ * client may have written them.
+ */
+function addressPayload(
+  draft: AddressDraft,
+  stored: CompanyDetailsRow['billing_address'] | undefined,
+): {
+  line1: string
+  line2?: string
+  line3?: string
+  city: string
+  postCode?: string
+  subdivision?: string
+  country: string
+} | null {
+  const line1 = draft.line1.trim()
+  const line2 = draft.line2.trim()
+  const postCode = draft.postCode.trim()
+  const city = draft.city.trim()
+  const country = draft.country.trim().toUpperCase()
+  if (line1.length === 0 && line2.length === 0 && postCode.length === 0 && city.length === 0 && country.length === 0) {
+    return null
+  }
+  const payload: {
+    line1: string
+    line2?: string
+    line3?: string
+    city: string
+    postCode?: string
+    subdivision?: string
+    country: string
+  } = { line1, city, country }
+  if (line2.length > 0) payload.line2 = line2
+  if (postCode.length > 0) payload.postCode = postCode
+  if (stored?.line3) payload.line3 = stored.line3
+  if (stored?.subdivision) payload.subdivision = stored.subdivision
+  return payload
 }
 
 // The backend has no field CODE on the wire (`VALIDATION_MESSAGES` in
 // `routes/owner-company-details.ts` sends only the message) — this maps its
-// four known, stable message strings back onto the field each describes, so
-// a 400 that reaches the backend (chiefly the VAT shape check, which is not
+// known, stable message strings back onto the field each describes, so a 400
+// that reaches the backend (chiefly the VAT shape check, which is not
 // duplicated client-side) still lands under the right field rather than a
 // generic banner (design review 3, "no API change").
 const BACKEND_VALIDATION_FIELD: Record<string, FieldKey> = {
@@ -190,12 +387,16 @@ const BACKEND_VALIDATION_FIELD: Record<string, FieldKey> = {
   'Country must be a two-letter ISO 3166-1 code, e.g. "SE".': 'country',
   'Enter an organisation number using 32 characters or fewer.': 'orgNumber',
   'Enter a VAT number as a two-letter country prefix followed by up to 20 letters or digits.': 'vatNumber',
+  'Enter a receipt email address using 254 characters or fewer, e.g. "name@example.com".': 'receiptEmail',
+  'Enter a billing address with a street line, a city and a two-letter country code.': 'billing.line1',
+  'Enter a shipping address with a street line, a city and a two-letter country code.': 'shipping.line1',
 }
 
 export function CompanyDetailsCard() {
   const t = useT()
   const copy = t.settings.companyDetails
   const { company } = useBusinessData()
+  const { user } = useAuth()
   const {
     status,
     details,
@@ -212,7 +413,8 @@ export function CompanyDetailsCard() {
     pollTimedOut,
   } = company
 
-  const [draft, setDraft] = useState<Draft>(() => draftFrom(details))
+  const signupEmail = user?.email ?? ''
+  const [draft, setDraft] = useState<Draft>(() => draftFrom(details, signupEmail))
   const [adding, setAdding] = useState(false)
   const [touched, setTouched] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -228,11 +430,28 @@ export function CompanyDetailsCard() {
   // time, and the draft's own pending edits are not clobbered by a VIES poll
   // tick, which changes `vies_status`/`vies_checked_at` but never the fields
   // this form owns.
+  //
+  // #4870: the addresses are objects, and a poll tick hands back a NEW object
+  // with the same value — depending on the object itself would reset the
+  // draft every few seconds. The serialised value is the stable key.
+  const billingKey = JSON.stringify(details?.billing_address ?? null)
+  const shippingKey = JSON.stringify(details?.shipping_address ?? null)
   useEffect(() => {
-    setDraft(draftFrom(details))
+    setDraft(draftFrom(details, signupEmail))
     setTouched(false)
     setFieldErrors({})
-  }, [details?.legal_name, details?.country, details?.org_number, details?.vat_number])
+    // `signupEmail` is deliberately NOT a dependency: it is a prefill, and a
+    // session refresh must not overwrite what the owner has typed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    details?.legal_name,
+    details?.country,
+    details?.org_number,
+    details?.vat_number,
+    details?.receipt_email,
+    billingKey,
+    shippingKey,
+  ])
 
   useEffect(() => {
     if (justRemoved) removedNoticeRef.current?.focus()
@@ -263,23 +482,27 @@ export function CompanyDetailsCard() {
 
   // #3332 review round 2, design 2: a field error REPLACES its helper text
   // IN THE SAME PARAGRAPH — never a helper line plus a separate error line
-  // both in red, which read as the same point made twice. The three fields
-  // below pass `helperText={fieldError(field) ?? copy.fields.xHelp}` for
-  // exactly this reason, always a truthy string, so `Input`'s conditional
+  // both in red, which read as the same point made twice. The fields below
+  // pass `helperText={fieldError(field) ?? copy.fields.xHelp}` for exactly
+  // this reason, always a truthy string, so `Input`'s conditional
   // `if (!helperText) return inputEl` branch never flips: the helper
   // paragraph — and the `<input>` beside it — stay the same element across
   // the invalid/valid transition instead of a structural change React
-  // reconciles as a different subtree, which was unmounting and
-  // recreating the `<input>` DOM node on that transition and silently
-  // dropping the focus this same code path sets right after (caught by the
-  // round-2 fix pass, not by design review 2 itself — a mutation of the
-  // "focuses it" assertion in the VAT-shape-400 test would have caught it
-  // too, and does now).
+  // reconciles as a different subtree, which was unmounting and recreating
+  // the `<input>` DOM node on that transition and silently dropping the
+  // focus this same code path sets right after (caught by the round-2 fix
+  // pass, not by design review 2 itself — a mutation of the "focuses it"
+  // assertion in the VAT-shape-400 test would have caught it too, and does
+  // now).
 
   function onFieldChange(mutate: (draft: Draft) => Draft) {
     setDraft(mutate)
     setSaved(false)
     setJustRemoved(false)
+  }
+
+  function onAddressChange(key: AddressKey, field: AddressField, value: string) {
+    onFieldChange((d) => ({ ...d, [key]: { ...d[key], [field]: value } }))
   }
 
   const submit = async (event: FormEvent) => {
@@ -298,11 +521,20 @@ export function CompanyDetailsCard() {
     setFieldErrors({})
     setFormError(null)
     const vatNumber = draft.vatNumber.trim()
+    const receiptEmail = draft.receiptEmail.trim()
+    const billingAddress = addressPayload(draft.billing, details?.billing_address)
+    const shippingAddress = draft.shippingSameAsBilling
+      ? billingAddress
+      : addressPayload(draft.shipping, details?.shipping_address)
     const result = await save({
       legal_name: draft.legalName.trim(),
       country: draft.country.trim().toUpperCase(),
       org_number: draft.orgNumber.trim(),
       vat_number: vatNumber === '' ? null : vatNumber.toUpperCase(),
+      // #4870: blank clears (`null`), a value is stored as typed.
+      receipt_email: receiptEmail === '' ? null : receiptEmail,
+      billing_address: billingAddress,
+      shipping_address: shippingAddress,
     })
     if (result.ok) {
       setSaved(true)
@@ -353,6 +585,126 @@ export function CompanyDetailsCard() {
   // 'empty' shows the "No company details" state until Add company details
   // reveals the form (#4359); 'ready' shows the filled form directly.
   const showForm = status === 'ready' || (status === 'empty' && adding)
+
+  /**
+   * One address block. `fieldset`/`legend` is the native grouping for a set
+   * of inputs that belong together — no new pattern, and the legend is what
+   * a screen reader announces before the first field.
+   */
+  function renderAddress(key: AddressKey, title: string) {
+    const address = draft[key]
+    const label = (field: AddressField) => copy.addresses[`${key}.${field}`]
+    return (
+      <fieldset className="space-y-3 border-0 p-0" data-testid={`company-details-${key}-address`}>
+        <legend className="text-sm font-medium text-[var(--v2-ink)]">{title}</legend>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="sm:col-span-2">
+            <label htmlFor={FIELD_ID[`${key}.line1`]} className="block text-sm font-medium text-[var(--v2-ink)]">
+              {label('line1')}
+            </label>
+            <Input
+              id={FIELD_ID[`${key}.line1`]}
+              value={address.line1}
+              onChange={(event) => onAddressChange(key, 'line1', event.target.value)}
+              placeholder={copy.addresses.line1Placeholder}
+              invalid={Boolean(fieldError(`${key}.line1`))}
+              maxLength={ADDRESS_MAX.line1}
+              className="mt-1"
+              autoComplete="off"
+              aria-describedby={fieldError(`${key}.line1`) ? `${FIELD_ID[`${key}.line1`]}-error` : undefined}
+            />
+            {fieldError(`${key}.line1`) ? (
+              <InlineAlert id={`${FIELD_ID[`${key}.line1`]}-error`}>{fieldError(`${key}.line1`)}</InlineAlert>
+            ) : null}
+          </div>
+
+          <div className="sm:col-span-2">
+            <label htmlFor={FIELD_ID[`${key}.line2`]} className="block text-sm font-medium text-[var(--v2-ink)]">
+              {label('line2')}
+            </label>
+            <Input
+              id={FIELD_ID[`${key}.line2`]}
+              value={address.line2}
+              onChange={(event) => onAddressChange(key, 'line2', event.target.value)}
+              placeholder={copy.addresses.line2Placeholder}
+              invalid={Boolean(fieldError(`${key}.line2`))}
+              maxLength={ADDRESS_MAX.line2}
+              className="mt-1"
+              autoComplete="off"
+              aria-describedby={fieldError(`${key}.line2`) ? `${FIELD_ID[`${key}.line2`]}-error` : undefined}
+            />
+            {fieldError(`${key}.line2`) ? (
+              <InlineAlert id={`${FIELD_ID[`${key}.line2`]}-error`}>{fieldError(`${key}.line2`)}</InlineAlert>
+            ) : null}
+          </div>
+
+          <div>
+            <label htmlFor={FIELD_ID[`${key}.postCode`]} className="block text-sm font-medium text-[var(--v2-ink)]">
+              {label('postCode')}
+            </label>
+            <Input
+              id={FIELD_ID[`${key}.postCode`]}
+              value={address.postCode}
+              onChange={(event) => onAddressChange(key, 'postCode', event.target.value)}
+              placeholder={copy.addresses.postCodePlaceholder}
+              invalid={Boolean(fieldError(`${key}.postCode`))}
+              maxLength={ADDRESS_MAX.postCode}
+              className="mt-1"
+              autoComplete="off"
+              aria-describedby={fieldError(`${key}.postCode`) ? `${FIELD_ID[`${key}.postCode`]}-error` : undefined}
+            />
+            {fieldError(`${key}.postCode`) ? (
+              <InlineAlert id={`${FIELD_ID[`${key}.postCode`]}-error`}>{fieldError(`${key}.postCode`)}</InlineAlert>
+            ) : null}
+          </div>
+
+          <div>
+            <label htmlFor={FIELD_ID[`${key}.city`]} className="block text-sm font-medium text-[var(--v2-ink)]">
+              {label('city')}
+            </label>
+            <Input
+              id={FIELD_ID[`${key}.city`]}
+              value={address.city}
+              onChange={(event) => onAddressChange(key, 'city', event.target.value)}
+              placeholder={copy.addresses.cityPlaceholder}
+              invalid={Boolean(fieldError(`${key}.city`))}
+              maxLength={ADDRESS_MAX.city}
+              className="mt-1"
+              autoComplete="off"
+              aria-describedby={fieldError(`${key}.city`) ? `${FIELD_ID[`${key}.city`]}-error` : undefined}
+            />
+            {fieldError(`${key}.city`) ? (
+              <InlineAlert id={`${FIELD_ID[`${key}.city`]}-error`}>{fieldError(`${key}.city`)}</InlineAlert>
+            ) : null}
+          </div>
+
+          <div>
+            <label htmlFor={FIELD_ID[`${key}.country`]} className="block text-sm font-medium text-[var(--v2-ink)]">
+              {label('country')}
+            </label>
+            <Select
+              id={FIELD_ID[`${key}.country`]}
+              value={address.country}
+              onChange={(event) => onAddressChange(key, 'country', event.target.value.toUpperCase())}
+              className="mt-1"
+              aria-invalid={Boolean(fieldError(`${key}.country`)) || undefined}
+              aria-describedby={fieldError(`${key}.country`) ? `${FIELD_ID[`${key}.country`]}-error` : undefined}
+            >
+              <option value="">{copy.addresses.countryPlaceholder}</option>
+              {countryOptions(address.country).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+            {fieldError(`${key}.country`) ? (
+              <InlineAlert id={`${FIELD_ID[`${key}.country`]}-error`}>{fieldError(`${key}.country`)}</InlineAlert>
+            ) : null}
+          </div>
+        </div>
+      </fieldset>
+    )
+  }
 
   return (
     <SettingsSection title={copy.title} description={copy.description}>
@@ -459,7 +811,39 @@ export function CompanyDetailsCard() {
                   aria-describedby={`${FIELD_ID.vatNumber}-help`}
                 />
               </div>
+
+              <div className="sm:col-span-2">
+                <label htmlFor={FIELD_ID.receiptEmail} className="block text-sm font-medium text-[var(--v2-ink)]">
+                  {copy.fields.receiptEmail}
+                </label>
+                <Input
+                  id={FIELD_ID.receiptEmail}
+                  type="email"
+                  value={draft.receiptEmail}
+                  onChange={(event) => onFieldChange((d) => ({ ...d, receiptEmail: event.target.value }))}
+                  placeholder={copy.fields.receiptEmailPlaceholder}
+                  invalid={Boolean(fieldError('receiptEmail'))}
+                  maxLength={MAX_RECEIPT_EMAIL_LENGTH}
+                  helperText={fieldError('receiptEmail') ?? copy.fields.receiptEmailHelp}
+                  helperTextId={`${FIELD_ID.receiptEmail}-help`}
+                  className="mt-1"
+                  autoComplete="off"
+                  aria-describedby={`${FIELD_ID.receiptEmail}-help`}
+                />
+              </div>
             </div>
+
+            {renderAddress('billing', copy.addresses.billingTitle)}
+
+            <Checkbox
+              label={copy.addresses.sameAsBilling}
+              checked={draft.shippingSameAsBilling}
+              onChange={(event) =>
+                onFieldChange((d) => ({ ...d, shippingSameAsBilling: event.target.checked }))
+              }
+            />
+
+            {draft.shippingSameAsBilling ? null : renderAddress('shipping', copy.addresses.shippingTitle)}
 
             {vies ? (
               <div className="flex flex-wrap items-center gap-3" data-testid="vies-status-line">

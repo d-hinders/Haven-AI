@@ -37,6 +37,7 @@ import {
   resolveTokenFromAddress,
   verifyPaymentReceipt,
   x402RetryHeadersFor,
+  X_CHECKOUT_DETAILS_HEADER,
   type AgentNextStep,
   type PaymentReceipt,
   type SweepAuthorization,
@@ -61,6 +62,12 @@ import {
   submitSignatureWithExpiryMapping,
 } from './support/mcp-context.js'
 import { isPendingApproval } from './support/quote-response.js'
+import {
+  checkoutDetailsAfterSubmit,
+  checkoutDetailsBeforeSubmit,
+  checkoutDetailsWhilePending,
+  storedChallengeForSubmit,
+} from './support/checkout-details.js'
 
 /**
  * #3277 / #3495: the next-step reason every direct-payment (`haven_send` /
@@ -94,7 +101,8 @@ import { isPendingApproval } from './support/quote-response.js'
  * `directSignerCompatibilityNotice` (`support/signer-compat.ts`) for the
  * exact signer-side mapping this text now names separately: `fallback:
  * 'typed_data_b64'` (any code — a currently-published signer's transport
- * failure, malformed body, or a 404 on an older backend) versus
+ * failure, malformed body, a 5xx or 429 from Haven since #4829, or a 404 on an
+ * older backend) versus
  * `SIGN_CONTEXT_REFUSED` / `sign_context_unavailable` with NO `fallback`
  * field (a signer predating #3271, which has no direct-fetch fallback of its
  * own to try).
@@ -102,7 +110,7 @@ import { isPendingApproval } from './support/quote-response.js'
 const DIRECT_SIGN_REASON =
   'Sign locally: call next_tool with next_arguments EXACTLY as given — the signer fetches the ' +
   "exact bytes by payment_id. If haven_sign refuses that call — carrying fallback: 'typed_data_b64' " +
-  '(any code: a transport failure, a malformed body, or a 404 on an older backend), or code ' +
+  '(any code: a transport failure, a malformed body, a 5xx or 429 from Haven, or a 404 on an older backend), or code ' +
   "SIGN_CONTEXT_REFUSED with backend_error_code 'sign_context_unavailable' from a signer older " +
   'than 0.5.0-alpha.1 — nothing was signed either way: re-run this same tool with the SAME idempotency_key ' +
   '(echoed on this result as idempotency_key) plus include_signing_payload: true — repeating the ' +
@@ -321,6 +329,23 @@ function subBudgetSignHandoff(subBudgetId: string) {
 export type SubmitX402Flow = 'mcp_tool' | 'plain_http' | 'unknown'
 
 function submitFollowUpHandoff(
+  submitStatus: string,
+  status: { rail: string } | null,
+  paymentId: string,
+  x402Flow: SubmitX402Flow,
+  checkoutDetailsHeaders = false,
+): { nextAction: AgentNextStep['next_action']; reason: string } & HostedHandoff {
+  const handoff = submitFollowUpBase(submitStatus, status, paymentId, x402Flow)
+  // #4872: one sentence for every branch that can lead to the agent's own retry.
+  return checkoutDetailsHeaders ? { ...handoff, reason: `${handoff.reason} ${CHECKOUT_DETAILS_RETRY_SENTENCE}` } : handoff
+}
+
+/** #4872: the merchant asked for checkout details and the agent sends the paid request itself. */
+const CHECKOUT_DETAILS_RETRY_SENTENCE =
+  'The merchant asked for checkout details: when you retry it yourself, also set every header in ' +
+  'additional_retry_headers, unchanged, and never log or store its value.'
+
+function submitFollowUpBase(
   submitStatus: string,
   status: { rail: string } | null,
   paymentId: string,
@@ -991,6 +1016,24 @@ export function createStateDirectRecoveryHandlers(
         // confirm; here it is the settlement child and there is no funding
         // transaction to relay, wait for, or later sweep.
         if (args.settlement_scheme === 'erc7710') {
+          // #4872 part 2b: the merchant's checkout-details request, read back
+          // from the challenge stored at authorize, is decided BEFORE the
+          // settlement child is submitted (availability) and right after it
+          // (the real block, on the header Haven assembles). The agent sends
+          // this paid request itself, so the answer rides retry_headers. A
+          // refusal before the submit stands only while the intent is still
+          // pending (`checkoutDetailsWhilePending`); one after it returns no
+          // payment_header, so nothing can be redeemed (`unsent`).
+          //
+          // #5030: the stored-challenge read itself moves INSIDE the guard, so
+          // a failed read is decided under the same pending rule. When it fails
+          // and the intent recorded a required checkout detail, the submit
+          // refuses before the child is submitted; every other payment
+          // proceeds as today (owner decision 2026-11-22, option b).
+          const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, async () => {
+            const stored = await storedChallengeForSubmit(haven, args.payment_id)
+            return checkoutDetailsBeforeSubmit(haven, { stored, scheme: 'erc7710', paymentId: args.payment_id })
+          })
           // #2041 (haven-reviewer, SHOULD-FIX): route this through the SAME
           // expiry mapping the 3009 relay uses. The settlement child's own
           // expiry is the binding window on this scheme and it is the SHORTEST
@@ -1007,6 +1050,9 @@ export function createStateDirectRecoveryHandlers(
           // state as haven_settle_mcp_tool, not a client-failure refusal.
           if (typeof submitted !== 'string') return submitted.settledReplay
           const paymentHeader = submitted
+          const checkoutDetailsHeader = checkoutDetails
+            ? checkoutDetailsAfterSubmit(checkoutDetails, { paymentHeader, requestHeaders: undefined, paymentId: args.payment_id })
+            : undefined
           return {
             payment_id: args.payment_id,
             settlement_scheme: 'erc7710',
@@ -1022,7 +1068,11 @@ export function createStateDirectRecoveryHandlers(
             // from the SDK's live name rule, so on erc7710 this is
             // PAYMENT-SIGNATURE ONLY (the delegation chain would double past
             // the header-size ceiling under the legacy alias).
-            retry_headers: x402RetryHeadersFor(paymentHeader),
+            // #4872: plus the merchant's checkout-details answer when it asked.
+            retry_headers: {
+              ...x402RetryHeadersFor(paymentHeader),
+              ...(checkoutDetailsHeader ? { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetailsHeader } : {}),
+            },
             ...buildAgentGuidance({
               // The shared vocabulary's value for "retry the merchant" (#1308).
               // Its own doc comment mentions resuming, so the reason below says
@@ -1043,8 +1093,10 @@ export function createStateDirectRecoveryHandlers(
               nextArguments: { payment_id: args.payment_id },
               safeToContinue: true,
               reason:
-                'Retry the ORIGINAL merchant request yourself, setting PAYMENT-SIGNATURE ' +
-                '(x402 v2) to this payment_header, and ONLY that header name on this scheme. ' +
+                'Retry the ORIGINAL merchant request yourself, setting exactly the headers in ' +
+                'retry_headers: PAYMENT-SIGNATURE (x402 v2) set to this payment_header, the only ' +
+                'payment header name on this scheme, plus X-Checkout-Details when the merchant ' +
+                'asked for checkout details. ' +
                 'Then call next_tool with next_arguments, adding settlement_tx_hash (the ' +
                 "`transaction` field of the merchant's base64 PAYMENT-RESPONSE header), so the " +
                 'payment is recorded as settled. If the merchant refuses the retry, do NOT re-quote ' +
@@ -1061,6 +1113,21 @@ export function createStateDirectRecoveryHandlers(
             }),
           }
         }
+        // #4872 part 2b: an x402 intent's stored checkout-details request is
+        // decided BEFORE the funding relay — availability and the estimated
+        // block (this tool never sees the agent's payment header). A direct
+        // payment has no stored challenge (a 409), so nothing is read. A
+        // refusal stands only while the intent is still pending.
+        //
+        // #5030: the stored-challenge read itself moves INSIDE the guard, so a
+        // failed read is decided under the same pending rule. When it fails and
+        // the intent recorded a required checkout detail, the submit refuses
+        // before the relay; every other payment proceeds as today (owner
+        // decision 2026-11-22, option b).
+        const checkoutDetails = await checkoutDetailsWhilePending(haven, args.payment_id, async () => {
+          const stored = await storedChallengeForSubmit(haven, args.payment_id)
+          return checkoutDetailsBeforeSubmit(haven, { stored, scheme: 'eip3009', paymentId: args.payment_id })
+        })
         const result = await submitSignatureWithExpiryMapping(
           haven,
           args.payment_id,
@@ -1093,11 +1160,22 @@ export function createStateDirectRecoveryHandlers(
                     : 'unknown',
               )
             : 'unknown'
+        // #4872: the agent sends a plain-HTTP paid request itself, so the
+        // answer rides this result — ONLY once the relay confirmed and the
+        // flow is known to be plain HTTP. Never on the MCP-tool flow (there
+        // haven_complete_mcp_tool decides and sends it on the paid call), and
+        // never while the flow is unknown: an unconfirmed relay is told not to
+        // retry yet, and a failed flow read may be an MCP-tool payment.
+        const additionalRetryHeaders =
+          checkoutDetails?.header && result.status === 'confirmed' && x402Flow === 'plain_http'
+            ? { [X_CHECKOUT_DETAILS_HEADER]: checkoutDetails.header }
+            : undefined
         return {
           status: result.status,
           tx_hash: result.txHash ?? null,
+          ...(additionalRetryHeaders ? { additional_retry_headers: additionalRetryHeaders } : {}),
           ...buildAgentGuidance({
-            ...submitFollowUpHandoff(result.status, statusRead, args.payment_id, x402Flow),
+            ...submitFollowUpHandoff(result.status, statusRead, args.payment_id, x402Flow, additionalRetryHeaders !== undefined),
             safeToContinue: true,
             summary: { payment_id: args.payment_id, status: result.status },
           }),

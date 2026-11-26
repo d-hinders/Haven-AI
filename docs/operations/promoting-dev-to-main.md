@@ -11,7 +11,7 @@ covers:
   - docs/operations/dev-environment.md
   - packages/backend/src/index.ts
   - scripts/release-scope.mjs
-last-verified: "2026-10-29"
+last-verified: "2026-11-20"
 ---
 
 # Promoting `dev → main` (production release)
@@ -307,16 +307,26 @@ so this is a rule to point at rather than a question to ask the release runner.
       either can be rotated alone.
 
       **One accepted exception (owner, 2026-09-29, #3456):** prod's
-      `RPC_URL_BASE_FALLBACK` and dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` share
-      one Infura free Core key, because the free plan allows one key, and
-      that key fails the #3336 burst of 20. Both are fallbacks, but the two
-      **primaries** are apps on one Alchemy account with one account-wide
-      monthly compute-unit allowance. If that allowance runs out, both
-      primaries fail together and both environments land on the one Infura
-      key at once, where the shared budget will throttle. Alchemy's usage
-      alerts are the early warning. The owner re-confirmed the acceptance with
-      that failure mode stated on 2026-10-01. Revisit when a paid RPC plan is
-      considered.
+      `RPC_URL_BASE_FALLBACK` is an Infura free Core key, which fails the
+      #3336 burst of 20; dev's `RPC_URL_BASE_SEPOLIA_FALLBACK` shared it until
+      2026-11-20. Prod's **primary** is an app on the one Alchemy account whose
+      account-wide monthly compute-unit allowance dev's Alchemy app (now dev's
+      fallback) also draws on. If that allowance runs out, prod's primary fails
+      and prod lands on the Infura key, which throttles: on 2026-11-20 it
+      answered every request with 429 within minutes of carrying dev's
+      traffic. Alchemy's usage alerts are the early warning. The owner
+      re-confirmed the acceptance with that failure mode stated on 2026-10-01.
+      Revisit when a paid RPC plan is considered.
+
+      **The merchant inbound index (#4903) reads only while its owner views
+      Sales (#5012).** There is no scheduled pass: a refresh runs at most once
+      per 30 s per merchant account while a Sales screen is open, through
+      Alchemy's transfer index when `ALCHEMY_HISTORY_API_KEY` is set (about one
+      call a refresh, plus one receipt per new payment), else `eth_getLogs`
+      over the range. The scheduled pass it replaced cost ~24–30M compute units
+      a month per merchant account at Alchemy's 10-block span (dev, 2026-11-20,
+      PR #5004). An environment with no merchant account makes no such call.
+      `MERCHANT_INBOUND_INDEX_DISABLED=true` (exactly `true`) stops it.
 
       **Before any of these variables — or `RPC_URL_BASE_FALLBACK` /
       `RPC_URL_BASE_SEPOLIA_FALLBACK` (#3255) — points at a new endpoint, run

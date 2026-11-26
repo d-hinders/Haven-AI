@@ -13,7 +13,7 @@ covers:
   - packages/connect/src/runtime.ts
   - packages/backend/src/modules/fee/fee-module.ts
   - packages/backend/src/middleware/safe-inflow-retired.ts
-last-verified: "2026-11-02"
+last-verified: "2026-11-23"
 ---
 
 # Haven — Architecture
@@ -37,6 +37,8 @@ is canonical; exported PNG and SVG files are convenience artifacts.
 | 9 | [Rail-agnostic Fee Module](09-fee-module.md) | Current disabled zero-fee backend scaffold plus future per-rail settlement design; no fee transfer executes today. |
 | 10 | [Module Boundaries](10-module-boundaries.md) | Deciding where new backend code goes, or reviewing a change that moves it. Target module structure and the dependency rules CI enforces (epic #980). |
 | 11 | [L0 Agent Passport — EAS schema](11-agent-passport-schema.md) | Working on agent identity: what L0 attests (governance, not identity), the schema fields, the dual address binding, the zero-address sentinel, the revocation model and re-anchoring after a re-key — Haven's verifier decides, the chain is an eventually-consistent anchor (epic #970). |
+| 12 | [Merchant kit: design](12-merchant-kit.md) | Building or reviewing the merchant kit (epic #4884): the four parts, the two workspace-private packages, the products file, the discovery document, the sale record, the consumed-payment store, the proxy's refusals and the settlement cost per call. |
+| 13 | [Checkout details: how a merchant asks and how Haven answers](13-checkout-details.md) | Building or reviewing the checkout-details slices (epic #4868): the merchant's request extension, the address shape #4870 stores and #4871 returns, the answer header and its byte budget, the payment paths that carry it, the refusal before payment, and the privacy record. |
 
 The detailed Connect Agent 2 contract and its rollout closeout were point-in-time
 artifacts for shipping that feature; they now live in

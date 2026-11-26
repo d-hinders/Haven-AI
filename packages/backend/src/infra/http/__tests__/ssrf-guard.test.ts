@@ -326,12 +326,67 @@ describe('safeGetText', () => {
     expect(result).toMatchObject({ ok: false, reason: 'redirect_missing_location' })
   })
 
+  /**
+   * #4899: `sameHostOnly` — the merchant catalogue's read. The default policy
+   * follows a hop to another host (the test above proves it does); a caller
+   * that named ONE host must not, because a merchant could otherwise point
+   * Haven's read at a document it does not serve.
+   */
+  it('refuses a redirect to another host when sameHostOnly is set, without resolving it', async () => {
+    const resolver = vi.fn(publicResolver)
+    const transport = vi.fn(async () => ({ status: 302, location: 'https://elsewhere.example.net/x', body: '' }))
+    const result = await safeGetText('https://shop.example.com/x', {
+      resolver,
+      transport,
+      sameHostOnly: true,
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'redirect_off_host' })
+    // The off-host URL is never resolved and never connected to: the refusal
+    // happens before the next hop begins.
+    expect(resolver).toHaveBeenCalledTimes(1)
+    expect(resolver).toHaveBeenCalledWith('shop.example.com')
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it('still follows a SAME-host redirect when sameHostOnly is set', async () => {
+    let hop = 0
+    const result = await safeGetText('https://shop.example.com/x', {
+      resolver: publicResolver,
+      sameHostOnly: true,
+      transport: async () => {
+        hop += 1
+        return hop === 1
+          ? { status: 301, location: '/.well-known/x402', body: '' }
+          : { status: 200, location: null, body: '{"version":1}' }
+      },
+    })
+    expect(result).toMatchObject({ ok: true, body: '{"version":1}', finalUrl: 'https://shop.example.com/.well-known/x402' })
+  })
+
+  it('refuses a redirect back to the original host from a hop that left it — the host is the ORIGINAL one', async () => {
+    // A chain that leaves the host and comes back is still a chain that left
+    // it: the first off-host hop is refused, so the return never happens.
+    let hop = 0
+    const result = await safeGetText('https://shop.example.com/x', {
+      resolver: publicResolver,
+      sameHostOnly: true,
+      transport: async () => {
+        hop += 1
+        return hop === 1
+          ? { status: 302, location: 'https://other.example.net/x', body: '' }
+          : { status: 302, location: 'https://shop.example.com/x', body: '' }
+      },
+    })
+    expect(result).toMatchObject({ ok: false, reason: 'redirect_off_host' })
+    expect(hop).toBe(1)
+  })
+
   it('refuses a non-200 status', async () => {
     const result = await safeGetText('https://shop.example.com/x', {
       resolver: publicResolver,
       transport: transportReturning({ status: 404, location: null, body: 'nope' }),
     })
-    expect(result).toMatchObject({ ok: false, reason: 'http_status' })
+    expect(result).toMatchObject({ ok: false, reason: 'http_status', detail: 'HTTP 404' })
   })
 
   it('passes a byte cap down to the transport', async () => {

@@ -303,6 +303,12 @@ describe('index.ts readers', () => {
       // body-less with one uuid path parameter; the PUT (owner auth) takes the
       // spec's UpsertAgentTaxDeclarationRequest.
       'routes/agent-tax-declaration.ts',
+      // #4871: the checkout-details sharing module is born enforced on the
+      // same reasoning — a brand-new module has no installed caller to shadow
+      // for. The owner PUT takes the spec's
+      // UpsertAgentCheckoutDetailsSharingRequest; the agent GET is body-less
+      // with one uuid path parameter.
+      'routes/agent-checkout-details.ts',
       'routes/agent-rekey.ts',
       'routes/agent-connection-setups.ts',
       'routes/agent-passports.ts',
@@ -316,6 +322,25 @@ describe('index.ts readers', () => {
       'routes/ops.ts',
       // #3597: brand-new module with no live caller, born ENFORCED.
       'routes/feedback.ts',
+      // #4895: merchant services — brand-new money-path module, born ENFORCED
+      // (its request body is closed, so a body naming an account to mark is
+      // refused by the schema).
+      'routes/merchant-services.ts',
+      // #4896: the Sales key's dashboard routes — brand-new money-path module,
+      // born ENFORCED (its create body is closed, so a body naming an account
+      // to bind the key to is refused by the schema).
+      'routes/merchant-keys.ts',
+      // #4899: the merchant catalogue — brand-new money-path module, born
+      // ENFORCED (its save body is closed, so a body carrying anything but the
+      // deployment address is refused by the schema).
+      'routes/merchant-catalogue.ts',
+      // #4897: the sales ingest — the merchant key's one write, born ENFORCED
+      // (its body is closed: a record is exactly the section 5 shape).
+      'routes/merchant-sales.ts',
+      // #4897: the owner's sales reads and the clear route, born ENFORCED.
+      'routes/merchant-sales-reads.ts',
+      // #4952: the Stripe deposit-address registry, born ENFORCED.
+      'routes/merchant-deposit-addresses.ts',
     ])
   })
 })

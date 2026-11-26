@@ -1,14 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import {
+  CHECKOUT_DETAILS_REQUIRED_FIELD_ENV,
   PRODUCTS,
   buildProductMetadata,
+  checkoutDetailsForProduct,
   formatUsdc,
   merchantEnvironmentForChain,
+  offeredProducts,
   productArgumentsSchema,
+  productBillingPeriod,
+  productReceivingAddress,
+  productSettlementKind,
   productToolArgs,
+  requiredCheckoutFieldFromEnv,
   settlementMethodsForProduct,
   type SettlementMethod,
 } from './products.js'
+
+const MERCHANT_DEFAULT = '0x15179876c595922999C2d5DC7c23Cc7711fE799a' as const
 
 describe('productToolArgs (#1274)', () => {
   it('derives the buy_cloud_storage call for a storage product', () => {
@@ -124,7 +133,7 @@ describe('buildProductMetadata (#1274) — machine-readable product contract', (
   })
 })
 
-describe('vpn_legacy is the EIP-3009-only product (#1441)', () => {
+describe('vpn_legacy is the self-settled EIP-3009-only product (#1441)', () => {
   /**
    * `x402-hosted-mcp-signer` covers the funding-leg topology from the
    * `haven_pay_mcp_tool` entry point, and that topology only exists on
@@ -150,10 +159,101 @@ describe('vpn_legacy is the EIP-3009-only product (#1441)', () => {
     ])
   })
 
-  it('is the ONLY product with that property, so the leg has one unambiguous target', () => {
-    const threeThousandNineOnly = Object.values(PRODUCTS)
+  // #4851 rewrote this on purpose. The joke is EIP-3009-only too, but Coinbase's
+  // facilitator settles it, and the QA leg exists to exercise the merchant's
+  // OWN settlement of the funding-leg topology. So the property that must stay
+  // unique is "EIP-3009-only AND self-settled", and vpn_legacy must keep it.
+  it('is the ONLY self-settled EIP-3009-only product, so the leg has one unambiguous target', () => {
+    const selfSettledThreeThousandNineOnly = Object.values(PRODUCTS)
       .filter((p) => p.x402.settlementMethods.length === 1 && p.x402.settlementMethods[0] === 'eip3009')
+      .filter((p) => productSettlementKind(p) === 'self')
       .map((p) => p.id)
-    expect(threeThousandNineOnly).toEqual(['vpn_legacy'])
+    expect(selfSettledThreeThousandNineOnly).toEqual(['vpn_legacy'])
+  })
+})
+
+describe('the CDP-settled joke product (#4851)', () => {
+  it('is 0.01 USDC, EIP-3009 only, settled by CDP, paid to the merchant default, one-time', () => {
+    const joke = PRODUCTS.joke
+    expect(joke.price_usdc).toBe(10_000n)
+    expect(joke.x402.settlementMethods).toEqual(['eip3009'])
+    expect(settlementMethodsForProduct(joke, ['eip3009', 'erc7710'])).toEqual(['eip3009'])
+    expect(productSettlementKind(joke)).toBe('cdp')
+    expect(productReceivingAddress(joke, MERCHANT_DEFAULT)).toBe(MERCHANT_DEFAULT)
+    expect(productBillingPeriod(joke)).toBe('one_time')
+  })
+
+  it('is the only CDP-settled product, and is offered only with CDP configured', () => {
+    expect(Object.values(PRODUCTS).filter((p) => productSettlementKind(p) === 'cdp').map((p) => p.id)).toEqual(['joke'])
+    expect(offeredProducts({ cdpConfigured: false }).map((p) => p.id)).not.toContain('joke')
+    expect(offeredProducts({ cdpConfigured: true }).map((p) => p.id)).toContain('joke')
+    // Every other product is offered either way, in the same order.
+    expect(offeredProducts({ cdpConfigured: false }).map((p) => p.id)).toEqual(
+      offeredProducts({ cdpConfigured: true }).map((p) => p.id).filter((id) => id !== 'joke'),
+    )
+  })
+
+  it('has a buy_joke tool with no arguments, and one-time metadata', () => {
+    expect(productToolArgs(PRODUCTS.joke)).toEqual({ toolName: 'buy_joke' })
+    const metadata = buildProductMetadata(PRODUCTS.joke, {
+      enabledSettlementMethods: ['eip3009', 'erc7710'],
+      mcpUrl: 'http://127.0.0.1/mcp',
+    })
+    expect(metadata).toMatchObject({
+      product_id: 'joke',
+      price_atomic: '10000',
+      billing_period: 'one_time',
+      tool_name: 'buy_joke',
+      supported_settlement_methods: ['eip3009'],
+      default_settlement_method: 'eip3009',
+      arguments_schema: { type: 'object', properties: {}, required: [], additionalProperties: false },
+    })
+  })
+})
+
+describe('checkout details (#4873)', () => {
+  it('one product asks, and every other product asks for nothing', () => {
+    const asking = Object.values(PRODUCTS)
+      .filter((product) => checkoutDetailsForProduct(product) !== undefined)
+      .map((product) => product.id)
+    expect(asking).toEqual(['vpn_pro'])
+  })
+
+  it('the asking product wants a receipt email and a billing address, both optional', () => {
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro)).toEqual({
+      fields: {
+        receipt_email: { required: false },
+        billing_address: { required: false },
+      },
+    })
+  })
+
+  it('the dev-only hook turns one of the product’s optional fields into a required one', () => {
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro, { requiredField: 'receipt_email' })).toEqual({
+      fields: {
+        receipt_email: { required: true },
+        billing_address: { required: false },
+      },
+    })
+    // A field the product does not ask for is not added by the hook.
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_pro, { requiredField: 'shipping_address' })).toEqual(
+      checkoutDetailsForProduct(PRODUCTS.vpn_pro),
+    )
+    // A product that asks for nothing stays that way.
+    expect(checkoutDetailsForProduct(PRODUCTS.vpn_basic, { requiredField: 'receipt_email' })).toBeUndefined()
+  })
+
+  it('reads the dev-only hook from the environment, testnet-only', () => {
+    expect(requiredCheckoutFieldFromEnv({}, 84532)).toBeNull()
+    expect(requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: '  ' }, 84532)).toBeNull()
+    expect(requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'receipt_email' }, 84532)).toBe(
+      'receipt_email',
+    )
+    expect(() => requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'receipt_email' }, 8453)).toThrow(
+      /dev-only hook/,
+    )
+    expect(() => requiredCheckoutFieldFromEnv({ [CHECKOUT_DETAILS_REQUIRED_FIELD_ENV]: 'phone' }, 84532)).toThrow(
+      /must be one of/,
+    )
   })
 })

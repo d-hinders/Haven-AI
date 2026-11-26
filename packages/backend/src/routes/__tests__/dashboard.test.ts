@@ -40,10 +40,11 @@ const { mockQuery, portfolioMocks, transactionMocks } = vi.hoisted(() => ({
     // #4099: the route hands the feed an own-account name lookup built from
     // its account list.
     ownAccountNameResolver: vi.fn((_accounts: unknown[]) => (_address: string, _chainId: number): string | null => null),
-    // #4268: the route folds own-account moves before grouping. This suite
-    // feeds the feed builder directly, so the fold passes rows through; the
-    // fold itself is pinned against the real route in dashboard-activity.test.ts.
-    foldOwnAccountTransfers: vi.fn((rows: unknown[]) => rows),
+    // #4268/#5000: the route folds own-account moves and marks sales before
+    // grouping. This suite feeds the feed builder directly, so the step passes
+    // rows through; the fold is pinned against the real route in
+    // dashboard-activity.test.ts, the sale marker in transactions-sale-marker.db.test.ts.
+    foldAndMarkSales: vi.fn(async (_userId: string, rows: unknown[]) => rows),
     // #3944: the route reads the feed BUILDER — rows plus the two
     // empty-state facts — not the bare group list any more.
     buildActivityFeed: vi.fn(async () => ({
@@ -91,7 +92,11 @@ vi.mock('../../modules/accounts/index.js', () => ({
   combineBalanceFreshness,
   needsBackupSignerRecommendation,
 }))
-vi.mock('../../infra/fiat-values.js', () => ({
+// #4963: `loadTokenRates` lives in this module now, so the real one rides in
+// (it reads through the `infra/prices.js` mock below); only the booking helper
+// is stubbed.
+vi.mock('../../infra/fiat-values.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../infra/fiat-values.js')>()),
   getFiatValuesForTokenAmount: vi.fn(),
 }))
 // #3803: the route reads today's spot rates for the budget captions. A mock
@@ -101,12 +106,20 @@ vi.mock('../../infra/prices.js', () => ({
   getTokenPrice: vi.fn(async () => ({ usd: 1, eur: 0.9, sek: 10 })),
 }))
 // #992: aggregation/enrichment/caching moved to src/modules/transactions/.
-vi.mock('../../modules/transactions/index.js', () => ({
-  ...transactionMocks,
-  // #4709: the route reads the fixed "Since …" word from this barrel; the real
-  // function is spread in above so the word is the production word.
-  sinceTimeWord,
-}))
+vi.mock('../../modules/transactions/index.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../modules/transactions/index.js')>()
+  return {
+    ...transactionMocks,
+    // #4709: the route reads the fixed "Since …" word from this barrel; the
+    // real function rides in so the word is the production word.
+    sinceTimeWord,
+    // #4882: the real naming module — its loader reads through the mocked
+    // `db.js` (each source fail-soft), so the names follow the fixtures.
+    loadRecipientNameIndex: actual.loadRecipientNameIndex,
+    recipientAddressOf: actual.recipientAddressOf,
+    recipientNameWithoutHost: actual.recipientNameWithoutHost,
+  }
+})
 
 import dashboardRoutes from '../dashboard.js'
 

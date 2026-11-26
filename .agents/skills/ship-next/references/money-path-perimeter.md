@@ -186,6 +186,7 @@ file it covers.
 - `packages/backend/src/infra/chain/**`
 - `packages/backend/src/infra/repositories/**`
 - `packages/backend/src/modules/accounts/mainnet-gate.ts`
+- `packages/backend/src/modules/accounts/create-additional.ts`
 
 ### Request validation
 
@@ -209,6 +210,16 @@ was deleted with its table by #2055, so its glob left the perimeter rather than
 being repointed: the code is dead, not moved. The owner-signed relayed execution
 route left the same way in #2847, deleted with the last of the Safe rail's live
 behaviour.
+
+#4895 extracted the create-additional logic out of `routes/hybrid-accounts.ts`
+into `modules/accounts/create-additional.ts` so the merchant-services route can
+reuse it inside its own transaction; the #1892 accident-of-location rule, and the
+extraction would otherwise have taken the creation decision off the perimeter
+while the route kept its label for the signup and signer handlers. It is listed
+under *Funds recovery, gas, the outbound queue and persistence* above, beside
+the other `modules/accounts/` entry, and stays on the runtime list because the
+route it came out of is on it. The merchant-services route and its vocabulary
+are on the control list: see *Merchant services* below.
 
 - `packages/backend/src/routes/hybrid-accounts.ts`
 
@@ -285,6 +296,7 @@ the code (#1905).
 ### Agent authentication
 
 - `packages/backend/src/middleware/agentAuth.ts`
+- `packages/backend/src/middleware/merchantAuth.ts`
 
 ### The hosted MCP tool surface
 
@@ -312,6 +324,18 @@ through `QA_DEMO_MERCHANT_URL`. Scoped to `src/**` like the hosted MCP entry.
 
 - `packages/demo-merchant-mcp/src/**`
 
+### The shared merchant payment core
+
+#4890. The package the demo merchant and the paywall proxy (#4893) both settle
+through: the receipt builder and the buyer's tax-declaration check first, then the
+Coinbase facilitator client, the pre-verification checks and the chain recovery.
+The code was on this list as `packages/demo-merchant-mcp/src/**` before the move;
+the #1892 accident-of-location rule keeps it on. Runtime, not control: the demo
+merchant runs it on every paid request, and the money-flow harness pays the demo
+merchant through `QA_DEMO_MERCHANT_URL`. Scoped to `src/**` like the demo merchant.
+
+- `packages/merchant-payments/src/**`
+
 ### Migrations
 
 - `packages/backend/src/db/migrations/**`
@@ -332,6 +356,33 @@ same footing as the script that applies it.
 - `scripts/release-bump.mjs`
 - `scripts/release-version-order.mjs`
 - `.github/workflows/publish.yml`
+
+### The merchant kit's image publishing
+
+#5007. The workflow that builds and pushes the merchant kit's container image to
+`ghcr.io/d-hinders/haven-paywall-proxy`. It decides **which image a merchant
+runs**: a push to `dev` publishes `dev-<short-sha>` and moves `dev`, a push to
+`main` publishes `pilot-<short-sha>` and moves `pilot`, and nothing publishes
+`latest`. That is the same class as `publish.yml` above — a change to it decides
+what reaches the channel users install from — and the money-flow harness cannot
+exercise a CI config change, so a runtime entry would hold promotion on a QA run
+that proves nothing about it. The tag rule itself lives in
+`scripts/ci/paywall-proxy-image-tags.mjs`, with its test beside it, so the
+refusal is pinned rather than described.
+
+The Dockerfile does not join either list, following the mcp-server precedent
+recorded in the JSON: it is build plumbing the harness cannot distinguish a
+change to, and `packages/paywall-proxy/src/**` (already control) is what the
+image runs. It is pinned to the README's run step through
+`scripts/docs/package-docs.mjs`'s `covers:` instead.
+
+The tag script joined the list in #5022. The workflow hands its stdout to
+`docker/build-push-action` unchanged, so the script alone decides which image
+references are pushed. It printed bare tags until #5022, and no image was ever
+published.
+
+- `.github/workflows/publish-paywall-proxy-image.yml`
+- `scripts/ci/paywall-proxy-image-tags.mjs`
 
 ### The money-path gate itself
 
@@ -413,3 +464,182 @@ smoke and check scripts.
 
 - `packages/backend/src/ops/**`
 - `packages/backend/scripts/cancel-stuck-attest-lane.ts`
+
+### Merchant services
+
+#4895. `routes/merchant-services.ts` turns merchant services on and off: turning
+them on creates a spend-capable account and marks it as the account merchant
+payments are received into. `domain/merchant-services.ts` holds the refusal
+codes and the `merchant-service:` idempotency-key namespace the turn-on route
+derives its keys in. That namespace is what stops a user pre-creating an account
+under the derived key and having the merchant marker land on it.
+
+Control, not runtime (owner decision 2026-11-17, recorded on #4895; the
+same rule as the lane cancel and the paywall proxy): no QA scenario calls
+`POST /merchant-services`, so a green run says nothing about these two files.
+They move to the runtime list when a QA leg drives the route. The creation
+logic the route calls, `modules/accounts/create-additional.ts`, is on the
+runtime list.
+
+- `packages/backend/src/domain/merchant-services.ts`
+- `packages/backend/src/routes/merchant-services.ts`
+
+#4896. `routes/merchant-keys.ts` is the Sales key's dashboard surface: it mints
+the receive-only credential the merchant routes accept, lists the account's keys
+by prefix, and revokes one. `domain/merchant-keys.ts` holds the fixed
+`sk_merchant_` prefix (baked into two published packages' secret scrubbers), the
+refusal codes and the one hashing rule. The check that ACCEPTS the key on the
+merchant routes is `middleware/merchantAuth.ts`, which is on the runtime list
+above beside `agentAuth.ts` — it decides whether a bearer credential
+authenticates a request, which is the same job that file is listed for.
+
+Control, not runtime (owner decision 2026-11-17, recorded on #4895 and applied
+again here): no QA scenario calls `POST`/`GET`/`DELETE /merchant-keys`, so a
+green run says nothing about these two files. They move to the runtime list when
+a QA leg drives the routes.
+
+- `packages/backend/src/domain/merchant-keys.ts`
+- `packages/backend/src/routes/merchant-keys.ts`
+
+### The merchant catalogue
+
+#4899. `modules/catalog/merchant-products.ts` reads the merchant's kit discovery
+document through the shared SSRF guard (`sameHostOnly`, so a redirect off the
+host is refused) and keeps the product list in `merchant_products` — its own
+table, never `merchant_catalog`, whose `pay_to` fills the recipient of a
+merchant-locked budget. `routes/merchant-catalogue.ts` is where the owner saves
+the deployment address and asks for a refresh; `domain/merchant-catalogue.ts`
+holds the two refusal codes. The document's `pay_to` is COMPARED against the
+account's own address and stored as a label; it is never used as a payment
+destination, and nothing here charges a price, creates a sale or names a
+recipient.
+
+Control, not runtime, on the same rule as #4895/#4896/#4893: no QA scenario
+calls `/merchant-catalogue`, so a green run says nothing about these three
+files. They move to the runtime list when a QA leg drives the routes. The
+migration is already covered by `db/migrations/**`, and the two sibling catalog
+files are already control globs.
+
+- `packages/backend/src/domain/merchant-catalogue.ts`
+- `packages/backend/src/modules/catalog/merchant-products.ts`
+- `packages/backend/src/routes/merchant-catalogue.ts`
+
+### The merchant kit's paywall proxy
+
+#4893. The proxy decides when a payment counts as made and releases a paid
+upstream call on it: the challenge, the refusals before settlement, the
+consumed-payment store with its one-call policy, and the forward carrying the
+merchant's upstream key. It settles through the shared core, which is on the
+runtime list (`packages/merchant-payments/src/**`).
+
+Control, not runtime (owner decision 2026-11-16, recorded on #4893): no QA
+scenario drives the proxy yet, so a green run says nothing about it. It moves to
+the runtime list once #4892 deploys it with a harness address.
+
+- `packages/paywall-proxy/src/**`
+
+### The merchant inbound index
+
+#4903. This slice makes the chain the truth for merchant sales.
+`modules/transactions/chain-read.ts` reads one transaction by hash — the
+primitive #4897 uses to check a sale record at once — and a block range for the
+scheduled pass; both ask the chain, never a caller.
+`modules/transactions/merchant-index.ts` is the scheduled pass over every
+account marked as a merchant account, and `background-jobs.ts` carries the job
+row that starts it.
+
+Control, not runtime (the same rule as the lane cancel, the paywall proxy and
+merchant services): no QA scenario drives the scheduled pass or the by-hash read
+yet — #4897's route does not exist — so a green run says nothing about them.
+They move to the runtime list when a QA leg drives the by-hash read. The
+repository they write (`infra/repositories/inbound-transfers.ts`) and the
+migration are already on the runtime list through `infra/repositories/**` and
+`db/migrations/**`.
+
+- `packages/backend/src/background-jobs.ts`
+- `packages/backend/src/modules/transactions/chain-read.ts`
+- `packages/backend/src/modules/transactions/merchant-index.ts`
+
+### The sales ingest
+
+#4897. `POST /merchant/sales` is the merchant key's one write. A sale record is
+accepted only against a USDC transfer Haven read from the chain into the key's
+account, through the by-hash read #4903 added: amount, payer, token and time are
+copied from that read, never from the record and never from an existing
+`inbound_transfers` row. `modules/transactions/merchant-sales.ts` is the whole
+ingest — the answers, the confirmation count, the sum of the legs that count as
+revenue — and `routes/merchant-sales.ts` is the auth door, the per-key rate
+limit and the status mapping. The sale is its own table, not a match kind, so it
+cannot block a receipt or x402 match and cannot move the receive balance.
+
+Control, not runtime (the same rule as the Sales key and the inbound index): no
+QA scenario posts a sale yet, so a green run says nothing about these two files.
+They move to the runtime list when a QA leg drives the route. The repository
+(`infra/repositories/merchant-sales.ts`) and migration `131_merchant_sales.ts`
+are already on the runtime list through `infra/repositories/**` and
+`db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-sales.ts`
+- `packages/backend/src/routes/merchant-sales.ts`
+
+### The owner's sales reads
+
+#4897 (second PR). `GET /merchant-sales/summary`, `GET /merchant-sales/payments`,
+`GET /merchant-sales/facets` (#4959), `GET /merchant-sales/payments/:txHash` and `DELETE
+/merchant-sales/payments/:txHash/record` are the owner's side of the sales
+ingest: dashboard JWT only, never the Sales key, and the clear route is on the
+device-login census's must-refuse list. `modules/transactions/merchant-sales-reads.ts`
+decides every revenue figure (indexed transfers into the account, zero-value
+transfers and the owner's own addresses excluded, a sale counted once with its
+own amount, a payment with no record counted as revenue without a product) and
+classifies each payer as a contact, an own address or a wallet, which is the
+rule that keeps a read from telling the merchant that a wallet belongs to
+another Haven user or agent. `routes/merchant-sales-reads.ts` is the auth door,
+the period and cursor validation, the money-path rate limit on the clear and the
+status mapping. The one write deletes the merchant's statement, never a
+transfer. The filters and the search (#4959) narrow the same scoped relation
+and add `GET /merchant-sales/facets`. They are still reads only: the search
+term is resolved against the caller's own names before the query runs, so it
+widens nothing a read can reach.
+
+Control, not runtime (the same rule as the ingest above): no QA scenario calls
+`/merchant-sales`, so a green run says nothing about these two files. They move
+to the runtime list when a QA leg reads the totals. The repository
+(`infra/repositories/merchant-sales-reads.ts`) and migration
+`132_inbound_transfers_account_time.ts` are already on the runtime list through
+`infra/repositories/**` and `db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-sales-reads.ts`
+- `packages/backend/src/routes/merchant-sales-reads.ts`
+
+### The Stripe deposit-address registry
+
+#4952 (dev and Stripe sandbox only, enforced per Sales account by #5028: the
+registry is open only when the Sales account's chain is a testnet, and every
+route answers 403 `DEPOSIT_ADDRESSES_TESTNET_ONLY` otherwise; the ingest treats
+the registry as empty on any other chain). `GET`/`POST /merchant-deposit-addresses`
+and `POST /merchant-deposit-addresses/:id/retire` are where the Sales account's
+owner registers, lists and retires an address a payment processor receives on
+their behalf: dashboard JWT only, never the Sales key (a key route would let a
+leaked key attach any address's payments to the account), and register and
+retire are on the device-login census's must-refuse list. The registry decides
+which transfers `modules/transactions/merchant-sales.ts` attributes to the
+account as Stripe-held sales (`held_by = 'stripe'`, the address from the
+registry, no `inbound_transfers` row, never in a Haven balance), so it is a
+money-path decision surface although it signs and moves nothing. Haven cannot
+verify a registered address is the owner's: every registration is labelled
+"registered by you, not verified by Haven", and a proof of ownership is required
+before production. `modules/transactions/merchant-deposit-addresses.ts` holds
+the refusals (an invalid address, one already registered on the chain, one of
+the owner's own addresses) and the testnet predicate
+(`depositAddressRegistryOpen`), and `routes/merchant-deposit-addresses.ts` is the
+auth door, the money-path rate limit and the status mapping.
+
+Control, not runtime (the same rule as the ingest and the reads): no QA scenario
+drives the registry. The repository
+(`infra/repositories/merchant-deposit-addresses.ts`) and migration
+`134_merchant_deposit_addresses.ts` are on the runtime list through
+`infra/repositories/**` and `db/migrations/**`.
+
+- `packages/backend/src/modules/transactions/merchant-deposit-addresses.ts`
+- `packages/backend/src/routes/merchant-deposit-addresses.ts`

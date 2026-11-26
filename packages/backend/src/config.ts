@@ -471,6 +471,17 @@ export const config = {
   igdrasilClientSecret: process.env.IGDRASIL_CLIENT_SECRET ?? '',
   igdrasilRedirectUri: process.env.IGDRASIL_REDIRECT_URI ?? '',
 
+  // The merchant inbound index (#4903) is ON unless this is "true". A kill
+  // switch, not a feature flag: since #5012 the index refreshes a merchant
+  // account while its owner views Sales (at most once per 30 s per account),
+  // reading Alchemy's transfer index or eth_getLogs. Turning it off stops that
+  // refresh. It does not stop the dashboard feed's own ingest of transfers it
+  // reads (`aggregate.ts`), nor a merchant's reported sales (#4897).
+  merchantInboundIndexDisabled: parseBooleanFlag(
+    'MERCHANT_INBOUND_INDEX_DISABLED',
+    process.env.MERCHANT_INBOUND_INDEX_DISABLED,
+  ),
+
   // Merchant-catalog auto-discovery from the x402 Bazaar (#473). Off by
   // default — it calls an external catalog API and inserts rows, so it's
   // opt-in. The URL is overridable for testing/self-hosted facilitators.

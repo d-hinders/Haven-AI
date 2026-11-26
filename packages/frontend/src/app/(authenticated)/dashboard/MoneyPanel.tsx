@@ -48,6 +48,7 @@ import { UNPRICED_TOTALS_NOTE } from '@/lib/money-flow-tally'
 import {
   buildDashboardSummary,
   buildSinceLastVisitSummary,
+  sinceLineRepeatsSevenDay,
   type DashboardSummaryAgent,
 } from '@/lib/dashboard-summary'
 import type {
@@ -304,8 +305,16 @@ export default function MoneyPanel({
   // when there is nothing to say — a first ever visit (no previous marker),
   // nothing since, or a failed read — so the header reads exactly as it did
   // before. The time word is spoken in the user's own zone.
+  // #4839: hidden when it would only repeat the 7-day sentence below — every
+  // payment of the overview's 7-day window happened since the last visit.
+  const sinceRepeats = sinceLineRepeatsSevenDay({
+    since,
+    activityWindowStart: overview?.activityWindowStart,
+    activityWindowDays: overview?.activityWindowDays,
+    sevenDayPayments: spend?.d7?.payments,
+  })
   const sinceLine =
-    since && sincePrevious !== null
+    since && sincePrevious !== null && !sinceRepeats
       ? buildSinceLastVisitSummary({
           currency: since.currency,
           previous: sincePrevious,

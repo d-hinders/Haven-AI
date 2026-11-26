@@ -1,6 +1,6 @@
 {
   "packages/backend/src/routes/agent-activity.ts": {
-    "lines": 881
+    "lines": 874
   },
   "packages/backend/src/routes/agent-connection-setups.ts": {
     "lines": 1556
@@ -27,21 +27,21 @@
     "lines": 437
   },
   "packages/backend/src/routes/dashboard.ts": {
-    "lines": 1163
+    "lines": 1120
   },
   "packages/backend/src/routes/hybrid-accounts.ts": {
-    "lines": 721
+    "lines": 660
   },
   "packages/backend/src/routes/ops.ts": {
     "lines": 435
   },
   "packages/backend/src/routes/receive.ts": {
-    "lines": 485
+    "lines": 480
   },
   "packages/backend/src/routes/task-budgets.ts": {
     "lines": 457
   },
   "packages/backend/src/routes/transactions.ts": {
-    "lines": 594
+    "lines": 586
   }
 }

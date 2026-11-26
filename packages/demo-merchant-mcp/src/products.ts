@@ -257,6 +257,10 @@ export function salesAccountRoute(
   // Stripe-recorded product with Stripe on is paid there, not into Sales.
   if (product.stripeRecording && opts.stripeDepositAddress) return 'stripe_recorded'
   if (!opts.salesAddress) return null
+  // Only the products that name the Sales account answer yes here, because
+  // `resolveSalesConfig` refuses a Sales address equal to MERCHANT_ADDRESS.
+  // Callers pass the same MERCHANT_ADDRESS the 402 is quoted with (index.ts
+  // feeds both `SalesConfig.merchantAddress` and the server's).
   const receiving = productReceivingAddress(product, merchantDefault, opts)
   return receiving.toLowerCase() === opts.salesAddress.toLowerCase() ? 'paid_into_sales_account' : null
 }

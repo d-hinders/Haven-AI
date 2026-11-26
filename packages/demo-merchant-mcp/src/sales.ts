@@ -6,8 +6,9 @@
  * `reportSale` in `@haven_ai/merchant-payments`); this module decides only
  * what the demo merchant reports and holds what is in flight:
  *
- * - only the Sales product and (#4953) the Stripe-recorded joke when the
- *   recorder sends it to Stripe, only a payment `settled_onchain` (never the zero
+ * - only a product paid into the Sales account (by default the Sales product)
+ *   and (#4953) the Stripe-recorded joke when the recorder sends it to Stripe,
+ *   decided by `salesAccountRoute` (#5091), only a payment `settled_onchain` (never the zero
  *   hash of `already_settled_earlier`), and once per transaction — a replayed
  *   payment header re-serves the same payment, and the dedupe drops it;
  * - fire-and-forget: `report` returns at once and never throws, so the buyer's

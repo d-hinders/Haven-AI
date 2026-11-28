@@ -36,7 +36,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-26"
+last-verified: "2026-11-28"
 ---
 
 # Merchant kit: design

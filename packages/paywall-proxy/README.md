@@ -432,8 +432,10 @@ Once a call is paid, the proxy sends it to `UPSTREAM_BASE_URL` like this:
   buyer sent none, so do not put one there.
 - **Method and body.** The method is unchanged. A `GET` or `HEAD` is sent with no
   body. A product with `output_token_cap` has its body's output limit set to the
-  cap ([The products file](#the-products-file)). A redirect from your API is not
-  followed.
+  cap ([The products file](#the-products-file)), but the proxy never raises a
+  value the buyer set lower: a buyer who sends a lower `max_tokens` or
+  `max_completion_tokens` keeps it, and the effective limit is the buyer's. A
+  redirect from your API is not followed.
 - **Headers.** The buyer's headers are forwarded, except the payment headers,
   `Authorization`, `Cookie`, the hop-by-hop and forwarding headers, `Expect`,
   and any header the buyer names in `Connection`. The full list is in the
@@ -1169,9 +1171,11 @@ into a Haven dev account until Opper has its own, and then into Opper's.
   A reasoning model's hidden reasoning tokens count against `output_token_cap`,
   so a capped call can come back short or empty: `gemini/gemma-4-31b` returned
   `content: ""` with `finish_reason: "length"` at a cap of 300, and at 1,000 and
-  2,000 on one prompt. Size the cap with headroom and check a paid call. The
-  proxy logs `empty_answer` when a capped answer comes back empty, and a
-  streamed answer is not inspected.
+  2,000 on one prompt. An empty answer can come from the buyer's own limit as
+  well as your cap, since the proxy never raises a `max_tokens` the buyer set
+  lower, so raising the cap alone will not fix that case. Size the cap with
+  headroom and check a paid call. The proxy logs `empty_answer` when a capped
+  answer comes back empty, and a streamed answer is not inspected.
 - Where it runs and what it is set to:
   [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
   § *Paywall-proxy (the #4892 demo)*. The secrets are listed in

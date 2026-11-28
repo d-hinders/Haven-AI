@@ -36,7 +36,7 @@ covers:
   - packages/backend/src/modules/mpp/merchant-receipt.ts
   - packages/sdk/src/x402.ts
   - packages/signer/src/siwx.ts
-last-verified: "2026-11-26"
+last-verified: "2026-11-28"
 ---
 
 # Merchant kit: design
@@ -1420,6 +1420,21 @@ would corrupt the goods). The proxy logs `overage_tokens` from
 `usage.completion_tokens` when the upstream reports it, and the merchant's
 recourse is to lower the cap or raise the price.
 
+The cap can also deliver nothing. On a reasoning model the hidden reasoning
+tokens count toward `max_tokens`, so a capped call can spend the whole cap on
+reasoning and return `content: ""` with `finish_reason: "length"` — measured on
+`gemini/gemma-4-31b` at a cap of 300 (297 of 297 completion tokens were
+reasoning), and at 1,000 and 2,000 on one prompt (#5108). `overage_tokens`
+cannot see it, because the completion is under the cap. The proxy logs
+`empty_answer` after a delivered chat completion whose first choice has
+`finish_reason: "length"` and empty or absent `message.content`, with `key`,
+`product_id`, `completion_tokens` and `reasoning_tokens` when the upstream
+reports them, and never the content. A choice whose `content` is null but whose
+`tool_calls` is non-empty is an answer, not an empty one. A product with no cap
+logs nothing: the proxy did not truncate that call. A streamed (SSE) answer is
+not JSON, so neither `overage_tokens` nor `empty_answer` fires on it. The
+logging cannot throw: an unparseable body still delivers.
+
 ## 8. Refusals before settlement, and every answer after it
 
 Haven's SDK classifies the answer to a paid retry
@@ -1785,7 +1800,10 @@ What the merchant runs:
   `BASE_PATH` (the path prefix the products' routes are matched under; empty by
   default), `UPSTREAM_API_KEY` (with `UPSTREAM_AUTH_HEADER` and
   `UPSTREAM_AUTH_SCHEME` when the upstream wants them; or `UPSTREAM_AUTH=none`
-  for an upstream that needs no key, which refuses the other three), Coinbase facilitator
+  for an upstream that needs no key, which refuses the other three), optionally
+  `UPSTREAM_CHECK_PATH` (the cheap authenticated `GET` path `check` calls to
+  prove the upstream key, joined onto `UPSTREAM_BASE_URL`; unset, the check
+  reaches no upstream, #5108), Coinbase facilitator
   credentials `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (the pilot settles
   through Coinbase's facilitator only, because the #4890 core is Coinbase's
   client; startup builds one auth header locally before it listens, so a secret
@@ -1827,6 +1845,9 @@ What the merchant runs:
   (`ok`, `fail`, `skipped` or `not verified`, and a reason in words) for the
   settings (the same `loadConfig` refusal startup makes), the products file (the
   same `loadProductsFile`), the RPC's `eth_chainId` against `NETWORK`, the
+  upstream (one authenticated `GET` to `UPSTREAM_CHECK_PATH`, classified by the
+  live path's own `classifyUpstreamStatus`, so a refused key is named before a
+  buyer pays, #5108), the
   Coinbase key (one authenticated `GET …/supported`, and `exact` on the
   configured network), the Sales key (`POST /merchant/sales` with the body `{}`:
   `401` is a refused key, `403` is Sales off for the account, `400` with Haven's
@@ -1851,6 +1872,10 @@ What the merchant monitors:
   cannot sign the proof and are owed a refund by hand.
 - **Overage.** `overage_tokens` in the log: a product whose answers often run
   over its cap is priced too low or capped too high (section 7).
+- **Empty answers.** `empty_answer` in the log: a capped answer that came back
+  empty because the hidden reasoning spent the whole cap (section 7). A product
+  whose answers often come back empty needs a larger cap, or a model that does
+  not reason.
 - **Sales reporting.** The outbox depth and `sales_report_refused` lines. The
   depth counts the records waiting for a replay — a record in its first delivery
   round is in the file but not counted — so a growing depth means Haven is not

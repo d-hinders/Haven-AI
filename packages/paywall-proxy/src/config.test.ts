@@ -87,6 +87,22 @@ describe('configuration (refuses to start when it is incomplete)', () => {
     expect(problems(noKey)).toEqual(['UPSTREAM_API_KEY is required'])
   })
 
+  // #5108: the path `check` calls to prove the upstream key. It is joined onto
+  // UPSTREAM_BASE_URL, so it is a path and not a URL.
+  it('reads UPSTREAM_CHECK_PATH as an optional path, and refuses one that is not a path', () => {
+    expect(loadConfig(base).upstream.checkPath).toBeUndefined()
+    expect(loadConfig({ ...base, UPSTREAM_CHECK_PATH: '/v3/compat/models' }).upstream.checkPath).toBe('/v3/compat/models')
+    expect(problems({ ...base, UPSTREAM_CHECK_PATH: 'v3/compat/models' })).toEqual([
+      'UPSTREAM_CHECK_PATH must start with "/" (it is joined onto UPSTREAM_BASE_URL)',
+    ])
+    expect(problems({ ...base, UPSTREAM_CHECK_PATH: '/v3/compat/models?x=1' })).toEqual([
+      'UPSTREAM_CHECK_PATH must be a path, with no spaces, query string or fragment',
+    ])
+    expect(problems({ ...base, UPSTREAM_CHECK_PATH: '/v3/compat models' })).toEqual([
+      'UPSTREAM_CHECK_PATH must be a path, with no spaces, query string or fragment',
+    ])
+  })
+
   it('refuses Base mainnet at startup until the regulatory review in #4888 allows it — removing the refusal is a go-live step (#5061)', () => {
     // The refusal alone: the "must be one of" problem does not also fire for a
     // network the chain table knows.

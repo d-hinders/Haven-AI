@@ -19,7 +19,15 @@
  * 3. **RPC** — `eth_chainId` on the configured (or #5006-defaulted) node,
  *    compared with `config.chain.chainId`. A wrong chain fails; an unreachable
  *    node fails naming the host only, because a provider URL can embed a key.
- * 4. **Coinbase key** — a local signing dry run (`preflightCdpSecret`,
+ * 4. **Upstream** (#5108) — one authenticated `GET` to `UPSTREAM_CHECK_PATH` on
+ *    `UPSTREAM_BASE_URL`, with the header `buildUpstreamHeaders` builds for a
+ *    paid call, and the status classified by `classifyUpstreamStatus` — the live
+ *    path's own rule — so the check and the live path cannot disagree. It is the
+ *    only check that exercises the upstream, so a wrong or revoked
+ *    `UPSTREAM_API_KEY` is named here instead of after a buyer has paid. A `GET`
+ *    is chosen so the check never buys an inference call, and the response body
+ *    is never read, so it can never be printed. `skipped` when the path is unset.
+ * 5. **Coinbase key** — a local signing dry run (`preflightCdpSecret`,
  *    `merchant-payments/src/cdp.ts`, #5060), then `createCdpFacilitator` and one
  *    `getSupported()`, which `@coinbase/x402` signs a CDP JWT for. The dry run
  *    builds the same auth header with no network call, so a secret that cannot
@@ -28,14 +36,14 @@
  *    well-formed but wrong key with 401 on `GET …/supported`, so a success here
  *    is an authenticated success. The check also confirms the facilitator lists
  *    `exact` on the configured network.
- * 5. **Sales key** — `POST {HAVEN_SALES_URL}/merchant/sales` with the key and
+ * 6. **Sales key** — `POST {HAVEN_SALES_URL}/merchant/sales` with the key and
  *    the body `{}`. The route's auth runs as an `onRequest` hook, before
  *    Fastify's schema validation, so an invalid key answers 401 and a valid one
  *    answers 400 `invalid_request` — the key was accepted and nothing was
  *    written. `backend/src/routes/__tests__/merchant-sales.db.test.ts` pins that
  *    ordering, so a future reordering turns red there and not on a merchant's
  *    machine.
- * 6. **Store and outbox** — `openSqliteConsumedPaymentStore` is not read-only
+ * 7. **Store and outbox** — `openSqliteConsumedPaymentStore` is not read-only
  *    (it creates the file and schema and clears reservation hashes), so `check`
  *    does not open the store with it. It checks that `PAYMENTS_DB`'s directory
  *    exists and is writable, and, when the file exists, that it can take and
@@ -46,8 +54,9 @@
  *    file exists — never replayed, never changed.
  *
  * `check` makes no call that can move money or settle: no verify, no settle, no
- * sale record. It runs with the proxy stopped and does not replace `/healthz`,
- * which stays the running proxy's readiness probe.
+ * sale record, and the upstream probe is a `GET` that buys nothing. It runs with
+ * the proxy stopped and does not replace `/healthz`, which stays the running
+ * proxy's readiness probe.
  */
 import { accessSync, constants, existsSync, statSync } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -62,6 +71,7 @@ import {
   type SaleReportOutcome,
 } from '@haven_ai/merchant-payments'
 import { ConfigError, loadConfig, type ProxyConfig } from './config.js'
+import { buildUpstreamHeaders, classifyUpstreamStatus, upstreamUrl } from './forward.js'
 import { loadProductsFile, ProductsFileError } from './products.js'
 import { openSalesOutbox } from './sales-outbox.js'
 import type { SalesSettings } from './sales.js'
@@ -91,13 +101,15 @@ export interface CheckReport {
 }
 
 /** The names, in the order they print. */
-export const CHECK_NAMES = ['settings', 'products', 'rpc', 'coinbase key', 'sales key', 'store', 'outbox'] as const
+export const CHECK_NAMES = ['settings', 'products', 'rpc', 'upstream', 'coinbase key', 'sales key', 'store', 'outbox'] as const
 
 /** The checks that need a valid configuration, and so print `skipped (settings invalid)`. */
-const NEEDS_SETTINGS = ['rpc', 'coinbase key', 'sales key', 'store', 'outbox'] as const
+const NEEDS_SETTINGS = ['rpc', 'upstream', 'coinbase key', 'sales key', 'store', 'outbox'] as const
 
 /** One RPC read's deadline. A node that cannot answer `eth_chainId` in this is unreachable. */
 export const RPC_CHECK_TIMEOUT_MS = 10_000
+/** One upstream probe's deadline. A `GET` that cannot answer in this is unreachable. */
+export const UPSTREAM_CHECK_TIMEOUT_MS = 10_000
 /** One facilitator call's deadline. `getSupported`'s own default is 90 s; `check` is a pre-flight. */
 export const FACILITATOR_CHECK_TIMEOUT_MS = 15_000
 /** One Sales probe's deadline. */
@@ -116,7 +128,7 @@ export interface CheckDeps {
   preflight?: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<void>
   /** Reads `eth_chainId`. Tests inject a fake; the real one is a viem client. */
   readChainId?: (rpcUrl: string) => Promise<number>
-  /** The Sales probe's `fetch`. Tests inject a fake. */
+  /** The `fetch` both network probes use: the Sales probe and the upstream check. Tests inject a fake. */
   fetch?: typeof fetch
   /** Where the lines go. Default `console.log`. */
   print?: (line: string) => void
@@ -284,7 +296,61 @@ async function checkRpc(config: ProxyConfig, read: (rpcUrl: string) => Promise<n
   }
 }
 
-/** Check 4: the local signing dry run, then one authenticated `getSupported()`, and `exact` on the configured network. */
+/** Check 4 (#5108): one authenticated `GET` to the configured upstream path. The body is never read. */
+async function checkUpstream(config: ProxyConfig, doFetch: typeof fetch): Promise<CheckLine> {
+  const path = config.upstream.checkPath
+  if (path === undefined) {
+    return { name: 'upstream', status: 'skipped', reason: 'UPSTREAM_CHECK_PATH is not set' }
+  }
+  const host = hostOf(config.upstream.baseUrl.href) ?? 'UPSTREAM_BASE_URL'
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), UPSTREAM_CHECK_TIMEOUT_MS)
+  try {
+    const response = await doFetch(upstreamUrl(config, path, ''), {
+      method: 'GET',
+      // The same header a paid call carries, built by the same function. With
+      // `UPSTREAM_AUTH=none` it carries none, and the line proves reachability.
+      headers: buildUpstreamHeaders({}, config.upstream),
+      // A 3xx is not followed, as on the live path: it is reported as the status it is.
+      redirect: 'manual',
+      signal: controller.signal,
+    })
+    const status = response.status
+    // The body is never read, so it can never be printed.
+    void response.body?.cancel().catch(() => undefined)
+    const classification = classifyUpstreamStatus(status)
+    if (classification === 'auth_refused') {
+      return {
+        name: 'upstream',
+        status: 'fail',
+        reason:
+          config.upstream.auth === 'none'
+            ? `the upstream at ${host} refused a call without a key (${status})`
+            : `the upstream at ${host} refused the key (${status})`,
+      }
+    }
+    if (classification === 'failed') {
+      return { name: 'upstream', status: 'fail', reason: `the upstream at ${host} answered ${status}` }
+    }
+    if (status < 200 || status >= 300) {
+      // `classifyUpstreamStatus` calls a 3xx or a buyer-side 4xx delivered, because
+      // the live path wraps it for the buyer. For a pre-flight it means the path
+      // is not the cheap endpoint the merchant named.
+      return {
+        name: 'upstream',
+        status: 'fail',
+        reason: `the upstream at ${host} answered ${status} to GET ${path}; check UPSTREAM_CHECK_PATH`,
+      }
+    }
+    return { name: 'upstream', status: 'ok', reason: `GET ${path} at ${host} answered ${status}` }
+  } catch (err) {
+    return { name: 'upstream', status: 'fail', reason: `the upstream at ${host} did not answer (${errorName(err)})` }
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+/** Check 5: the local signing dry run, then one authenticated `getSupported()`, and `exact` on the configured network. */
 async function checkCoinbaseKey(
   config: ProxyConfig,
   build: (credentials: { apiKeyId: string; apiKeySecret: string }) => Promise<CdpFacilitator>,
@@ -365,7 +431,7 @@ async function errorCodeOf(response: Response): Promise<string | undefined> {
 }
 
 /**
- * Check 5: `POST {HAVEN_SALES_URL}/merchant/sales` with the key and the body
+ * Check 6: `POST {HAVEN_SALES_URL}/merchant/sales` with the key and the body
  * `{}`. Auth runs before validation, so 401 is a refused key and 400 with
  * Haven's `error_code` is an accepted key. Nothing is written either way.
  */
@@ -420,7 +486,7 @@ async function checkSalesKey(settings: SalesSettings, doFetch: typeof fetch): Pr
   }
 }
 
-/** Check 6a: the store's directory, and the exclusive lock when the file already exists. */
+/** Check 7a: the store's directory, and the exclusive lock when the file already exists. */
 function checkStore(path: string): CheckLine {
   const problem = directoryProblem(dirname(path))
   if (problem !== undefined) return { name: 'store', status: 'fail', reason: problem }
@@ -436,7 +502,7 @@ function checkStore(path: string): CheckLine {
   }
 }
 
-/** Check 6b: the outbox's directory, and its depth when the file already exists. */
+/** Check 7b: the outbox's directory, and its depth when the file already exists. */
 function checkOutbox(path: string): CheckLine {
   const problem = directoryProblem(dirname(path))
   if (problem !== undefined) return { name: 'outbox', status: 'fail', reason: problem }
@@ -485,6 +551,7 @@ export async function runChecks(
     const doFetch = deps.fetch ?? fetch
 
     lines.push(await checkRpc(config, read))
+    lines.push(await checkUpstream(config, doFetch))
     lines.push(await checkCoinbaseKey(config, build, preflight))
     lines.push(
       config.sales === undefined

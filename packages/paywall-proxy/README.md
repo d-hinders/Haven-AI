@@ -243,6 +243,11 @@ You monitor:
 - **Retry proofs.** The rate of `payment_retry_needs_proof` answers.
 - **Overage.** `overage` log lines, when an upstream answer runs past the
   product's output-token cap.
+- **Empty answers.** `empty_answer` log lines: a delivered chat completion whose
+  `finish_reason` is `length` and whose content is empty, which on a reasoning
+  model means the hidden reasoning spent the whole output-token cap. The line
+  carries `completion_tokens` and `reasoning_tokens` when the upstream reports
+  them, never the content. A streamed answer is not inspected.
 - **Sales reporting.** The outbox depth (`/healthz` and the `sales_outbox_*`
   lines) and `sales_report_refused` lines. The depth counts the records waiting
   for a replay — a record in its first delivery round is in the file but not
@@ -427,8 +432,10 @@ Once a call is paid, the proxy sends it to `UPSTREAM_BASE_URL` like this:
   buyer sent none, so do not put one there.
 - **Method and body.** The method is unchanged. A `GET` or `HEAD` is sent with no
   body. A product with `output_token_cap` has its body's output limit set to the
-  cap ([The products file](#the-products-file)). A redirect from your API is not
-  followed.
+  cap ([The products file](#the-products-file)), but the proxy never raises a
+  value the buyer set lower: a buyer who sends a lower `max_tokens` or
+  `max_completion_tokens` keeps it, and the effective limit is the buyer's. A
+  redirect from your API is not followed.
 - **Headers.** The buyer's headers are forwarded, except the payment headers,
   `Authorization`, `Cookie`, the hop-by-hop and forwarding headers, `Expect`,
   and any header the buyer names in `Connection`. The full list is in the
@@ -491,6 +498,7 @@ reason in words) and exits non-zero when any check fails:
 settings: ok
 products: ok (2 products: lookup, chat)
 rpc: ok (eip155:84532 at sepolia.base.org)
+upstream: ok (GET /v3/compat/models at api.example.com answered 200)
 coinbase key: ok (exact on eip155:84532)
 sales key: ok (the key was accepted)
 store: ok (will be created at /var/lib/paywall-proxy/payments.sqlite)
@@ -504,6 +512,7 @@ What each line means:
 | `settings` | The same validation startup runs. A missing or invalid setting prints its problem, one line each, and the checks that need it print `skipped (settings invalid)`. |
 | `products` | The products file, with the same validation startup runs. On success it prints the product count and ids. |
 | `rpc` | `eth_chainId` on `RPC_URL` (or the Base Sepolia default), compared with `NETWORK`. A wrong chain fails. An unreachable node fails naming the host only, because a provider URL can embed a key. |
+| `upstream` | One authenticated `GET` to `UPSTREAM_CHECK_PATH` on `UPSTREAM_BASE_URL`, with the same header a paid call carries. `ok` is a 2xx. `401`, `402`, `403` and `407` print `refused the key (<status>)`; with `UPSTREAM_AUTH=none` they print `refused a call without a key (<status>)`. `408`, `429` and `5xx` print `answered <status>`. Any other status, such as a `404`, prints `answered <status> to GET <path>; check UPSTREAM_CHECK_PATH`. An unreachable upstream prints `did not answer`, naming the host only. It never prints the key or the response body, and a `GET` buys no inference call. `skipped` when `UPSTREAM_CHECK_PATH` is unset. |
 | `coinbase key` | A local signing dry run with `CDP_API_KEY_ID` and `CDP_API_KEY_SECRET` (no network call), then one authenticated `GET …/supported`, and that the facilitator lists `exact` on your network. A secret that cannot sign prints `CDP_API_KEY_SECRET cannot sign a request (not a usable Ed25519 or EC key)`; a key the facilitator refuses prints `refused the key (401)`; a facilitator that cannot be reached prints `did not answer`. `not verified` means the client could not exercise the key, and says why. |
 | `sales key` | `POST {HAVEN_SALES_URL}/merchant/sales` with `HAVEN_MERCHANT_KEY` and the body `{}`. A `401` prints `the key is missing, wrong or revoked, or its account is no longer a merchant account`; `403` is Sales off for the account; `400` with Haven's `error_code` `invalid_request` or `invalid_record` is an accepted key; a `400` without one of those prints `HAVEN_SALES_URL is not Haven's API origin (400 without Haven's error_code)`; a `429` prints `not verified (rate limited)`. Nothing is written. `skipped` when `HAVEN_MERCHANT_KEY` is unset. |
 | `store` | That `PAYMENTS_DB`'s directory exists and is writable, and, when the file exists, that it can take the exclusive lock. `in use by a running proxy; stop it first` means a proxy is running. A missing file prints `will be created at <path>`, so a mistyped path is visible and no ledger is created there. |
@@ -709,7 +718,12 @@ the dashboard does the same things):
    and `railway add` adds an empty service (or, in the dashboard, connect your
    repository as the service's source). A new project's first environment
    is called `production` by Railway, whatever network you run; the name does
-   not change anything here.
+   not change anything here. `railway init` links the folder it is run in to
+   that project: run every later `railway up` from that same folder, or run
+   `railway link` first. With Railway CLI 5.62.1, `railway up --ci` from a
+   folder no project is linked to creates a new project and service named after
+   the folder and deploys there (Haven's own test, 2026-11-27, got a stray
+   project that way).
 2. **Add the volume** at `/data` (`railway volume add`, mount path `/data`).
 3. **Generate the domain** (`railway domain`). Do this before the variables:
    `PUBLIC_BASE_URL` is that domain, and it does not exist until you generate
@@ -885,6 +899,7 @@ Optional:
 | `UPSTREAM_AUTH_HEADER` | The header the upstream key is sent in. Default `Authorization`. |
 | `UPSTREAM_AUTH_SCHEME` | The scheme before the key. Default `Bearer`; set it empty to send the key bare, for an `x-api-key` style header. |
 | `UPSTREAM_AUTH` | Set to `none` for an upstream that needs no key. Then `UPSTREAM_API_KEY`, `UPSTREAM_AUTH_HEADER` and `UPSTREAM_AUTH_SCHEME` must be unset, and the proxy sends no upstream auth header. Unset: `UPSTREAM_API_KEY` is required. |
+| `UPSTREAM_CHECK_PATH` | A cheap authenticated `GET` path on `UPSTREAM_BASE_URL` that `check` calls to prove the upstream key, for example `/v3/compat/models`. It is joined onto `UPSTREAM_BASE_URL` the way a paid call's path is, so it starts with `/` and carries no query string. Unset: the `upstream` line prints `skipped` and `check` reaches no upstream. |
 | `BASE_PATH` | The path prefix your products' routes are matched under. Empty by default. The discovery document lists each route with it in front. |
 | `PUBLIC_BASE_URL` | The public origin the challenge names. Set it whenever the proxy is reached through an `https` front: without it the challenge names `http://<Host>`, and a Haven agent does not pay a plain `http` origin. |
 | `CLIENT_IP_HEADER` | The header your own front proxy sets to the client's address, for the per-IP limits. |
@@ -1153,9 +1168,14 @@ into a Haven dev account until Opper has its own, and then into Opper's.
   on Opper's one chat-completions route (`POST /v3/compat/chat/completions`),
   each with its own output-token cap. Products on one route are told apart by
   `model`, so one model cannot be sold at two caps on the same route.
-  `azure/gpt-5-mini` is a reasoning model, and its reasoning tokens count
-  against the cap, so a 1,000-token answer can come back short. Check it on the
-  first paid call and raise the cap and price if it does.
+  A reasoning model's hidden reasoning tokens count against `output_token_cap`,
+  so a capped call can come back short or empty: `gemini/gemma-4-31b` returned
+  `content: ""` with `finish_reason: "length"` at a cap of 300, and at 1,000 and
+  2,000 on one prompt. An empty answer can come from the buyer's own limit as
+  well as your cap, since the proxy never raises a `max_tokens` the buyer set
+  lower, so raising the cap alone will not fix that case. Size the cap with
+  headroom and check a paid call. The proxy logs `empty_answer` when a capped
+  answer comes back empty, and a streamed answer is not inspected.
 - Where it runs and what it is set to:
   [`docs/operations/railway-services.md`](../../docs/operations/railway-services.md)
   § *Paywall-proxy (the #4892 demo)*. The secrets are listed in

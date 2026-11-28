@@ -760,7 +760,15 @@ export const GOVERNED_PACKAGE_DOCS = [
     // prerequisite 3 names a no-key echo upstream for a first call. The Railway
     // dashboard wording is from Railway's docs pages on 2026-11-26, not from
     // the dashboard itself.
-    'last-verified': '2026-11-26',
+    // Re-verified 2026-11-28 (#5108, the first paid inference run): the `check`
+    // table gains the `upstream` row and its example output line, *All settings*
+    // gains `UPSTREAM_CHECK_PATH`, *You monitor* gains `empty_answer`, the
+    // reasoning-model caveat is general (hidden reasoning counts toward the cap,
+    // and a streamed answer is not inspected), and the Railway recipe's step 1
+    // says `railway init` links the folder and every later `railway up` must run
+    // from it. The `upstream` row's texts are read from `check.ts`'s
+    // `checkUpstream`; the event's fields from `handler.ts`'s `logEmptyAnswer`.
+    'last-verified': '2026-11-28',
   },
   {
     doc: 'packages/backend/src/modules/accounting/README.md',

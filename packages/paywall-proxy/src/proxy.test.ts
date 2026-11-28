@@ -478,6 +478,105 @@ describe('forwarding', () => {
   })
 })
 
+describe('#5108: a delivered answer the cap emptied', () => {
+  /** A chat-completions body with one choice and the usage a reasoning model reports. */
+  const answer = (choice: Record<string, unknown>, usage: Record<string, unknown> = {}): string =>
+    JSON.stringify({ id: 'cmpl-1', choices: [choice], usage })
+
+  it('logs empty_answer when the cap was spent on reasoning and the content is empty', async () => {
+    h = await startHarness({
+      upstream: {
+        body: answer(
+          { finish_reason: 'length', message: { content: '' } },
+          { completion_tokens: 297, completion_tokens_details: { reasoning_tokens: 297 } },
+        ),
+      },
+    })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    const line = h.logs.find((l) => l.event === 'empty_answer')
+    expect(line).toMatchObject({ product_id: CHAT_PRODUCT.id, completion_tokens: 297, reasoning_tokens: 297 })
+    expect(typeof line!.key).toBe('string')
+    // The answer is still delivered, unchanged: the event only makes the case visible.
+    expect(await res.json()).toMatchObject({ choices: [{ finish_reason: 'length', message: { content: '' } }] })
+  })
+
+  it('logs empty_answer when the content is absent and the usage carries no reasoning count', async () => {
+    h = await startHarness({ upstream: { body: answer({ finish_reason: 'length', message: {} }, { completion_tokens: 300 }) } })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    const line = h.logs.find((l) => l.event === 'empty_answer')
+    expect(line).toMatchObject({ product_id: CHAT_PRODUCT.id, completion_tokens: 300 })
+    expect(line!.reasoning_tokens).toBeUndefined()
+  })
+
+  it('logs nothing new when the capped answer has content', async () => {
+    h = await startHarness({
+      upstream: { body: answer({ finish_reason: 'length', message: { content: 'hello' } }, { completion_tokens: 1000 }) },
+    })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('logs nothing new when the answer stopped on its own', async () => {
+    h = await startHarness({ upstream: { body: answer({ finish_reason: 'stop', message: { content: '' } }) } })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('logs nothing new for a product with no cap: the proxy did not truncate that call', async () => {
+    h = await startHarness({
+      products: [{ id: 'chat-sol-1k', route: `POST ${CHAT_PATH}`, model: 'openai/gpt-6-sol', price: '10000', description: 'One chat call.' }],
+      upstream: { body: answer({ finish_reason: 'length', message: { content: '' } }) },
+    })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('counts content: null with tool calls as an answer, and content: null without them as empty', async () => {
+    h = await startHarness({
+      upstream: { body: answer({ finish_reason: 'length', message: { content: null, tool_calls: [{ id: 'call-1' }] } }) },
+    })
+    await paidChat(newBuyer())
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('counts content: null with no tool calls as empty', async () => {
+    h = await startHarness({ upstream: { body: answer({ finish_reason: 'length', message: { content: null } }) } })
+    await paidChat(newBuyer())
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(true)
+  })
+
+  it('delivers an unparseable body and logs nothing new: the logging cannot throw', async () => {
+    h = await startHarness({ upstream: { body: 'not json' } })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(await res.text()).toBe('not json')
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('logs nothing new for a streamed answer: an SSE body is not JSON', async () => {
+    const sse = 'data: {"choices":[{"finish_reason":"length","delta":{"content":""}}]}\n\ndata: [DONE]\n\n'
+    h = await startHarness({ upstream: { headers: { 'content-type': 'text/event-stream' }, body: sse } })
+    const body = JSON.stringify({ model: 'openai/gpt-6-sol', messages: [{ role: 'user', content: 'hi' }], stream: true })
+    const { res } = await paidChat(newBuyer(), {}, body)
+    expect(res.status).toBe(200)
+    expect(h.logs.some((l) => l.event === 'empty_answer')).toBe(false)
+  })
+
+  it('logs overage when the upstream runs past the cap', async () => {
+    h = await startHarness({
+      upstream: { body: answer({ finish_reason: 'stop', message: { content: 'hello' } }, { completion_tokens: 1200 }) },
+    })
+    const { res } = await paidChat(newBuyer())
+    expect(res.status).toBe(200)
+    expect(h.logs.find((l) => l.event === 'overage')).toMatchObject({ product_id: CHAT_PRODUCT.id, overage_tokens: 200 })
+  })
+})
+
 describe('upstream failure after settlement', () => {
   it.each([
     ['a 5xx', { status: 503 }, 'upstream_status'],

@@ -1118,6 +1118,7 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
     await store.markDelivered(record.key, { upstreamStatus: result.status, deliveredAt: now().toISOString() })
     log('payment_delivered', { key: record.key, tx_hash: record.txHash, product_id: product.id, upstream_status: result.status })
     logOverage(record, product, result)
+    logEmptyAnswer(record, product, result)
 
     const paymentHeader = paymentResponseHeader(record)
     // §11: the receipt goes on the response headers of a delivered call — a
@@ -1174,6 +1175,48 @@ export function createProxyHandler(deps: ProxyDeps): (req: IncomingMessage, res:
       }
     } catch {
       // not JSON: nothing to report
+    }
+  }
+
+  /**
+   * #5108: a delivered chat completion whose answer is empty because the cap was
+   * reached. On a reasoning model the hidden reasoning tokens count toward
+   * `max_tokens`, so a capped call can spend the whole cap on reasoning and come
+   * back with `content: ""` and `finish_reason: "length"`. `logOverage` cannot
+   * see it — the completion is under the cap — so this is the only line that
+   * makes the case visible.
+   *
+   * The first choice is the one inspected: it is the answer a buyer reads first,
+   * and a body with no choices logs nothing. `content: null` or absent counts as
+   * empty unless the choice carries a non-empty `tool_calls` array, which is an
+   * answer of its own. A product with no cap logs nothing: the proxy did not
+   * truncate that call. A streamed (SSE) answer is not JSON, so it logs nothing
+   * either. The content is never logged, and this cannot throw: an unparseable
+   * body still delivers.
+   */
+  function logEmptyAnswer(record: ConsumedPaymentRecord, product: Product, result: { status: number; body: Buffer; headers: [string, string][] }): void {
+    if (product.outputTokenCap === undefined || result.status < 200 || result.status >= 300) return
+    try {
+      const body = JSON.parse(result.body.toString('utf8')) as {
+        choices?: { finish_reason?: unknown; message?: { content?: unknown; tool_calls?: unknown } }[]
+        usage?: { completion_tokens?: unknown; completion_tokens_details?: { reasoning_tokens?: unknown } }
+      }
+      const choice = body.choices?.[0]
+      if (choice?.finish_reason !== 'length') return
+      const content = choice.message?.content
+      if (typeof content === 'string' && content.length > 0) return
+      const toolCalls = choice.message?.tool_calls
+      if (Array.isArray(toolCalls) && toolCalls.length > 0) return
+      const completion = body.usage?.completion_tokens
+      const reasoning = body.usage?.completion_tokens_details?.reasoning_tokens
+      log('empty_answer', {
+        key: record.key,
+        product_id: product.id,
+        ...(typeof completion === 'number' ? { completion_tokens: completion } : {}),
+        ...(typeof reasoning === 'number' ? { reasoning_tokens: reasoning } : {}),
+      })
+    } catch {
+      // not JSON (an SSE stream, or a body that is not a chat completion): nothing to report
     }
   }
 

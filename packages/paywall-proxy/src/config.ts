@@ -51,6 +51,13 @@ export interface ProxyConfig {
      * upstream auth header at all, for an upstream that needs no key.
      */
     auth: 'key' | 'none'
+    /**
+     * #5108: the cheap authenticated `GET` path `check` calls to prove the
+     * upstream key, joined onto `baseUrl` the way a paid call's path is
+     * (`upstreamUrl`). Absent: `check` prints `upstream: skipped` and never
+     * reaches the upstream.
+     */
+    checkPath?: string
   }
   /** The path prefix the products' routes are matched under ('' or '/x', no trailing slash). */
   basePath: string
@@ -300,6 +307,21 @@ export function loadConfig(env: Env): ProxyConfig {
     if (apiKey && /[\r\n]/.test(apiKey)) problems.push('UPSTREAM_API_KEY must not contain a line break')
   }
 
+  // #5108: the path `check` calls to prove the upstream key. It is joined onto
+  // `UPSTREAM_BASE_URL` the way a paid call's path is (`upstreamUrl`), so it is
+  // a path and not a URL: a leading slash, no query string, no fragment.
+  const checkPathRaw = text('UPSTREAM_CHECK_PATH')
+  let upstreamCheckPath: string | undefined
+  if (checkPathRaw !== undefined) {
+    if (!checkPathRaw.startsWith('/')) {
+      problems.push('UPSTREAM_CHECK_PATH must start with "/" (it is joined onto UPSTREAM_BASE_URL)')
+    } else if (/[\u0000-\u0020\u007f?#]/.test(checkPathRaw)) {
+      problems.push('UPSTREAM_CHECK_PATH must be a path, with no spaces, query string or fragment')
+    } else {
+      upstreamCheckPath = checkPathRaw
+    }
+  }
+
   const clientIpHeader = text('CLIENT_IP_HEADER')?.toLowerCase()
   if (clientIpHeader !== undefined && !/^[!#$%&'*+.^_`|~0-9a-z-]+$/.test(clientIpHeader)) {
     problems.push('CLIENT_IP_HEADER must be a valid HTTP header name')
@@ -462,7 +484,14 @@ export function loadConfig(env: Env): ProxyConfig {
     ...(operatorContact !== undefined ? { operatorContact } : {}),
     ...(iconUrl !== undefined ? { iconUrl } : {}),
     productsFile,
-    upstream: { baseUrl, apiKey, authHeader, authScheme, auth: upstreamAuth },
+    upstream: {
+      baseUrl,
+      apiKey,
+      authHeader,
+      authScheme,
+      auth: upstreamAuth,
+      ...(upstreamCheckPath !== undefined ? { checkPath: upstreamCheckPath } : {}),
+    },
     basePath,
     ...(publicBaseUrl ? { publicBaseUrl } : {}),
     ...(clientIpHeader ? { clientIpHeader } : {}),

@@ -3,9 +3,9 @@
  *
  * Each test injects ONE fault and asserts that its own line says `fail`, that
  * the exit code is non-zero, and that the other checks still ran and printed.
- * The network collaborators are injected — the chain-id read, the facilitator
- * and the Sales probe's `fetch` — so nothing here reaches a chain, Coinbase or
- * Haven.
+ * The network collaborators are injected — the chain-id read, the facilitator,
+ * and the `fetch` the upstream probe and the Sales probe share — so nothing here
+ * reaches a chain, Coinbase, Haven or an upstream.
  *
  * Two properties are asserted across every case: no line carries a secret
  * (`UPSTREAM_API_KEY`, `CDP_API_KEY_SECRET`, `HAVEN_MERCHANT_KEY`, or the
@@ -127,6 +127,40 @@ function deps(overrides: CheckDeps = {}): CheckDeps {
   }
 }
 
+/** #5108: the cheap authenticated `GET` path the upstream check calls. */
+const CHECK_PATH = '/v3/compat/models'
+/** A body the upstream check must never print. */
+const UPSTREAM_BODY_SECRET = 'UPSTREAM-BODY-SECRET-0123456789'
+
+/**
+ * #5108: a `fetch` that answers the upstream probe with `upstream` and the Sales
+ * probe with 400 `invalid_request`, so one stub serves both network checks.
+ */
+function probeFetch(upstream: { status: number; body?: unknown }): { fetch: typeof fetch; seen: SeenProbe[] } {
+  const seen: SeenProbe[] = []
+  const impl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input)
+    const headers = new Headers(init?.headers)
+    seen.push({
+      url,
+      method: init?.method ?? 'GET',
+      body: typeof init?.body === 'string' ? init.body : undefined,
+      authorization: headers.get('authorization') ?? undefined,
+    })
+    if (url.endsWith(CHECK_PATH)) {
+      return new Response(JSON.stringify(upstream.body ?? {}), {
+        status: upstream.status,
+        headers: { 'content-type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ error: 'invalid_request', error_code: 'invalid_request' }), {
+      status: 400,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as unknown as typeof fetch
+  return { fetch: impl, seen }
+}
+
 async function run(env: Record<string, string | undefined>, overrides: CheckDeps = {}): Promise<{
   lines: readonly CheckLine[]
   printed: string[]
@@ -156,8 +190,8 @@ afterEach(() => {
 
 describe('the pre-flight check (#5008)', () => {
   it('prints one ok line per check for a complete, valid Base Sepolia configuration, and exits 0', async () => {
-    const { env } = workspace()
-    const { lines, printed, exitCode } = await run(env)
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, printed, exitCode } = await run(env, { fetch: probeFetch({ status: 200 }).fetch })
 
     expect(lines.map((l) => l.name)).toEqual([...CHECK_NAMES])
     for (const name of CHECK_NAMES) expect(line(lines, name).status, name).toBe('ok')
@@ -166,10 +200,11 @@ describe('the pre-flight check (#5008)', () => {
     expect(printed[0]).toBe('settings: ok')
     expect(printed[1]).toBe('products: ok (2 products: lookup, chat)')
     expect(printed[2]).toBe(`rpc: ok (eip155:84532 at ${RPC_HOST})`)
-    expect(printed[3]).toBe('coinbase key: ok (exact on eip155:84532)')
-    expect(printed[4]).toBe('sales key: ok (the key was accepted)')
-    expect(printed[5]).toBe(`store: ok (will be created at ${env.PAYMENTS_DB})`)
-    expect(printed[6]).toBe(`outbox: ok (will be created at ${join(env.PAYMENTS_DB!.replace(/payments\.sqlite$/, ''), 'sales-outbox.jsonl')})`)
+    expect(printed[3]).toBe(`upstream: ok (GET ${CHECK_PATH} at api.example.com answered 200)`)
+    expect(printed[4]).toBe('coinbase key: ok (exact on eip155:84532)')
+    expect(printed[5]).toBe('sales key: ok (the key was accepted)')
+    expect(printed[6]).toBe(`store: ok (will be created at ${env.PAYMENTS_DB})`)
+    expect(printed[7]).toBe(`outbox: ok (will be created at ${join(env.PAYMENTS_DB!.replace(/payments\.sqlite$/, ''), 'sales-outbox.jsonl')})`)
   })
 
   it('creates no ledger: a missing PAYMENTS_DB stays missing', async () => {
@@ -214,7 +249,7 @@ describe('the pre-flight check (#5008)', () => {
     })
   })
 
-  it('a missing setting prints its problem and skips checks 3-6, while the products check still runs', async () => {
+  it('a missing setting prints its problem and skips checks 3-7, while the products check still runs', async () => {
     const { env } = workspace({ NETWORK: undefined })
     const { lines, exitCode } = await run(env)
 
@@ -222,13 +257,13 @@ describe('the pre-flight check (#5008)', () => {
     expect(settings.status).toBe('fail')
     expect(settings.details).toContain('NETWORK is required')
     expect(line(lines, 'products').status).toBe('ok')
-    for (const name of ['rpc', 'coinbase key', 'sales key', 'store', 'outbox']) {
+    for (const name of ['rpc', 'upstream', 'coinbase key', 'sales key', 'store', 'outbox']) {
       expect(line(lines, name), name).toMatchObject({ status: 'skipped', reason: 'settings invalid' })
     }
     expect(exitCode).toBe(1)
   })
 
-  it('Base mainnet fails the settings line with the #5061 refusal and skips checks 3-6', async () => {
+  it('Base mainnet fails the settings line with the #5061 refusal and skips checks 3-7', async () => {
     const { env } = workspace({ NETWORK: 'eip155:8453' })
     const { lines, exitCode } = await run(env)
 
@@ -238,7 +273,7 @@ describe('the pre-flight check (#5008)', () => {
       'NETWORK eip155:8453 (Base mainnet) is not open: the merchant kit runs on Base Sepolia only until the regulatory review in #4888 allows mainnet',
     ])
     expect(line(lines, 'products').status).toBe('ok')
-    for (const name of ['rpc', 'coinbase key', 'sales key', 'store', 'outbox']) {
+    for (const name of ['rpc', 'upstream', 'coinbase key', 'sales key', 'store', 'outbox']) {
       expect(line(lines, name), name).toMatchObject({ status: 'skipped', reason: 'settings invalid' })
     }
     expect(exitCode).toBe(1)
@@ -284,6 +319,124 @@ describe('the pre-flight check (#5008)', () => {
     })
     expect(printed.join('\n')).not.toContain(RPC_PATH_SECRET)
     expect(exitCode).toBe(1)
+  })
+
+  // #5108: the upstream line. It is the only check that exercises the upstream,
+  // so a wrong or revoked key is named here instead of after a buyer has paid.
+  it('skips the upstream line when UPSTREAM_CHECK_PATH is unset, and reaches no upstream', async () => {
+    const { env } = workspace()
+    const probe = probeFetch({ status: 200 })
+    const { lines, exitCode } = await run(env, { fetch: probe.fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({ status: 'skipped', reason: 'UPSTREAM_CHECK_PATH is not set' })
+    expect(probe.seen.map((request) => request.url)).toEqual([`${HAVEN_URL}/merchant/sales`])
+    expect(exitCode).toBe(0)
+  })
+
+  it('sends one authenticated GET to the configured path joined onto UPSTREAM_BASE_URL, and prints ok', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const probe = probeFetch({ status: 200 })
+    const { lines, exitCode } = await run(env, { fetch: probe.fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'ok',
+      reason: `GET ${CHECK_PATH} at api.example.com answered 200`,
+    })
+    const upstream = probe.seen.find((request) => request.url.endsWith(CHECK_PATH))!
+    expect(upstream).toMatchObject({
+      url: `https://api.example.com${CHECK_PATH}`,
+      method: 'GET',
+      body: undefined,
+      authorization: `Bearer ${UPSTREAM_KEY}`,
+    })
+    expect(exitCode).toBe(0)
+  })
+
+  it('a refused upstream key (401) fails naming the key, never the response body', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, printed, exitCode } = await run(env, {
+      fetch: probeFetch({ status: 401, body: { error: UPSTREAM_BODY_SECRET } }).fetch,
+    })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: 'the upstream at api.example.com refused the key (401)',
+    })
+    expect(printed.join('\n')).not.toContain(UPSTREAM_BODY_SECRET)
+    expect(exitCode).toBe(1)
+  })
+
+  it('a 402 fails too: the upstream refused the call for payment', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, exitCode } = await run(env, { fetch: probeFetch({ status: 402 }).fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: 'the upstream at api.example.com refused the key (402)',
+    })
+    expect(exitCode).toBe(1)
+  })
+
+  it('a 5xx fails with the status', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, exitCode } = await run(env, { fetch: probeFetch({ status: 503 }).fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: 'the upstream at api.example.com answered 503',
+    })
+    expect(exitCode).toBe(1)
+  })
+
+  it('a 404 fails naming the path, because the path is not the cheap endpoint', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, exitCode } = await run(env, { fetch: probeFetch({ status: 404 }).fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: `the upstream at api.example.com answered 404 to GET ${CHECK_PATH}; check UPSTREAM_CHECK_PATH`,
+    })
+    expect(exitCode).toBe(1)
+  })
+
+  it('an unreachable upstream fails naming the host only, never the URL', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { lines, printed, exitCode } = await run(env, {
+      fetch: (async () => {
+        throw new TypeError('fetch failed')
+      }) as unknown as typeof fetch,
+    })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: 'the upstream at api.example.com did not answer (TypeError)',
+    })
+    expect(printed.join('\n')).not.toContain('fetch failed')
+    expect(exitCode).toBe(1)
+  })
+
+  it('with UPSTREAM_AUTH=none no key is sent, and an auth_refused status reads as a refused call without a key', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH, UPSTREAM_AUTH: 'none', UPSTREAM_API_KEY: undefined })
+    const probe = probeFetch({ status: 401 })
+    const { lines, exitCode } = await run(env, { fetch: probe.fetch })
+
+    expect(line(lines, 'upstream')).toMatchObject({
+      status: 'fail',
+      reason: 'the upstream at api.example.com refused a call without a key (401)',
+    })
+    const upstream = probe.seen.find((request) => request.url.endsWith(CHECK_PATH))!
+    expect(upstream.authorization).toBeUndefined()
+    expect(exitCode).toBe(1)
+  })
+
+  it('never prints the upstream key or the response body', async () => {
+    const { env } = workspace({ UPSTREAM_CHECK_PATH: CHECK_PATH })
+    const { printed } = await run(env, {
+      fetch: probeFetch({ status: 200, body: { models: [UPSTREAM_BODY_SECRET] } }).fetch,
+    })
+    const text = printed.join('\n')
+    expect(text).not.toContain(UPSTREAM_KEY)
+    expect(text).not.toContain(UPSTREAM_BODY_SECRET)
   })
 
   it('a malformed Coinbase secret fails locally, with no network call', async () => {
